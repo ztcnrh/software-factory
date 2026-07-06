@@ -1,0 +1,34 @@
+{
+  "$comment": "Sample factory settings. The installer copies this into a target repo's .claude/. It wires two hooks and pre-allows the factory CLI so driving the line doesn't prompt on every step. Tune to taste.",
+  "permissions": {
+    "allow": [
+      "Bash(factory:*)",
+      "Bash(uv run factory:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/factory_board.py\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/record_intervention.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

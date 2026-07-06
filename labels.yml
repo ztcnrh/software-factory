@@ -1,0 +1,21 @@
+# labels.yml — canonical GitHub labels for the factory conveyor.
+#
+# `factory install` (and the GitHub Actions layer) create these in a target
+# repo. The `factory:<state>` label on an issue marks which station that work
+# item currently sits at — so the conveyor's state is visible right in GitHub,
+# and label changes are what trigger the cloud-autonomy workflows.
+version: 1
+labels:
+  - {name: "factory:triage",      color: "ededed", description: "At the triage station"}
+  - {name: "factory:spec",        color: "c5def5", description: "At the spec station"}
+  - {name: "factory:spec-review", color: "fbca04", description: "Human gate: spec review"}
+  - {name: "factory:implement",   color: "1d76db", description: "At the implementation station"}
+  - {name: "factory:code-review", color: "0e8a16", description: "At the code-review station"}
+  - {name: "factory:verify",      color: "5319e7", description: "At the verification station"}
+  - {name: "factory:ship-review", color: "fbca04", description: "Human gate: ready to ship?"}
+  - {name: "factory:ci-cd",       color: "bfdadc", description: "In CI/CD"}
+  - {name: "factory:monitor",     color: "d4c5f9", description: "Shipped; monitoring"}
+  - {name: "factory:needs-human", color: "d93f0b", description: "Human gate: clarification needed"}
+  - {name: "factory:blocked",     color: "b60205", description: "Blocked; needs help"}
+  - {name: "factory:parked",      color: "cccccc", description: "Parked for now"}
+  - {name: "factory:done",        color: "0e8a16", description: "Completed and shipped"}

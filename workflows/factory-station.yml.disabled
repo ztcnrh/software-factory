@@ -1,0 +1,83 @@
+# factory-station — CLOUD AUTONOMY (opt-in). Rename to `factory-station.yml` to enable.
+#
+# This is the "factory runs while you sleep" layer. GitHub becomes the conveyor:
+# when an issue receives a `factory:<state>` label, the matching station runs
+# headlessly with Claude Code, advances the work item, and re-labels the issue —
+# which triggers the next run. Human-gate labels (factory:spec-review,
+# factory:ship-review) intentionally do NOT auto-run; they wait for you.
+#
+# This is the least battle-tested layer of the factory — treat your first few
+# runs as a supervised shakedown. See docs/CLOUD-AUTONOMY.md before enabling.
+#
+# Prerequisites:
+#   1. Repo secret  ANTHROPIC_API_KEY  (or CLAUDE_CODE_OAUTH_TOKEN).
+#   2. Labels created:  factory labels --github   (or `gh label create ...`).
+#   3. The factory installed in the repo (install/install.py --with-cloud).
+
+name: factory-station
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write       # commit .factory state + open branches
+  issues: write         # re-label, comment
+  pull-requests: write  # open PRs from the implement station
+
+jobs:
+  run-station:
+    # Run only for station labels — never for human gates or terminal states.
+    if: >
+      contains(fromJSON('["factory:triage","factory:spec","factory:implement","factory:code-review","factory:verify","factory:monitor"]'),
+               github.event.label.name)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python + uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install the factory CLI and Claude Code
+        run: |
+          uv tool install .
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Derive station name from the label
+        id: station
+        env:
+          LABEL: ${{ github.event.label.name }}
+        run: echo "name=${LABEL#factory:}" >> "$GITHUB_OUTPUT"
+
+      - name: Run the station headlessly
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+          STATION: ${{ steps.station.outputs.name }}
+        run: |
+          claude -p "You are the factory ${STATION} station running unattended. \
+            The work item is GitHub issue #${ISSUE} (its local state lives in .factory/). \
+            Apply the 'factory-${STATION}' skill, do the real work, then finish by calling \
+            'factory advance' with the correct verdict, and re-label issue #${ISSUE} to the \
+            new factory:<state> with 'gh issue edit'. If you reach a human gate, comment the \
+            review packet on the issue and stop — do not decide for the human." \
+            --allowedTools "Bash,Read,Grep,Glob,Write,Edit" \
+            --permission-mode acceptEdits
+
+      - name: Persist factory state back to the repo
+        if: always()
+        env:
+          STATION: ${{ steps.station.outputs.name }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          git config user.name "factory-bot"
+          git config user.email "factory-bot@users.noreply.github.com"
+          git add .factory specs 2>/dev/null || true
+          git commit -m "factory: ${STATION} ran on #${ISSUE}" || echo "nothing to commit"
+          git push || echo "push skipped"

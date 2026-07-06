@@ -1,0 +1,52 @@
+# factory-retro — the LEARNING LOOP on a schedule (opt-in). Rename to enable.
+#
+# Once a week (and on demand), the retro station mines accumulated interventions
+# and opens a PR proposing permanent improvements to the factory: sharper station
+# skills, new gate auto-approval policies, better templates. You review and merge
+# — each accepted PR permanently lowers how often the factory needs you.
+#
+# Prerequisites: same as factory-station.yml (see docs/CLOUD-AUTONOMY.md).
+
+name: factory-retro
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"   # Mondays, 09:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  retro:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python + uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install the factory CLI and Claude Code
+        run: |
+          uv tool install .
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run the retro (learning) station
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          claude -p "Run the factory retro. Use the 'factory-retro' skill: read the \
+            'factory retro' briefing and 'factory metrics', cluster the interventions, and \
+            propose the smallest permanent fixes (skill edits, dormant gate policies in \
+            policies.yml, template changes). Write them under .factory/retro/<date>/ and open \
+            a PR titled 'retro: <date>'. Every proposal must cite the interventions it answers \
+            and state its blast radius. Propose only — do not activate policies yourself." \
+            --allowedTools "Bash,Read,Grep,Glob,Write,Edit" \
+            --permission-mode acceptEdits

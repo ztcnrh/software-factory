@@ -1,0 +1,28 @@
+# policies.yml — gate policies. The factory consults these at every human_gate.
+#
+# Default posture is conservative: require a human. The Retro station (the
+# learning loop) proposes new auto-approve rules here based on your intervention
+# history. You approve a rule ONCE by filling in `approved_by`; thereafter every
+# matching work item passes that gate untouched. This file is the lever that
+# raises the "shipped without human intervention" metric over time — each rule
+# you approve permanently removes a class of work from your plate.
+version: 1
+default: require_human
+
+# Each rule: if a work item reaching `gate` matches every condition in `when`,
+# apply `decision` automatically instead of pausing for a human — but ONLY once
+# `approved_by` is set (a retro-proposed rule sits dormant until you sign it).
+rules: []
+
+# --- Example of a rule the Retro station might propose (left commented) -------
+# rules:
+#   - id: auto-approve-docs-spec
+#     gate: spec_review
+#     when:                       # ALL conditions must hold for the work item
+#       labels_any: [docs, documentation]
+#       max_risk: low             # triage-assigned risk must be <= this
+#     decision: approved
+#     rationale: "12/12 docs-only specs were approved unchanged in the last 30 days."
+#     proposed_by: retro
+#     created: 2026-06-27
+#     approved_by: null           # <- set to your name to ACTIVATE this rule

@@ -1,0 +1,94 @@
+# line.yml — the factory line definition.
+#
+# This is the SINGLE SOURCE OF TRUTH for the conveyor: the stations, the
+# routing between them, and where humans gate. The Python engine (src/factory)
+# loads this file; the GitHub Actions layer reads the same file. Reshape your
+# factory by editing here — add a station, change a route, move a gate.
+#
+# It is a faithful encoding of the factory loop diagram:
+#   triage -> (spec | implement | needs_human | parked)
+#   spec -> spec_review(human) -> implement
+#   implement -> code_review -> verify -> ship_review(human) -> ci_cd -> ship
+#   ship -> monitor -> (keep monitoring | detect issue -> spawn new work item)
+
+version: 1
+
+# The headline objective the whole factory optimizes toward. Every other
+# component (metrics, policies, the retro station) serves this number.
+north_star: >
+  Maximize the share of changes shipped with zero human intervention, at an
+  acceptable cost per change — and raise that share over time by learning from
+  every human touch.
+
+# Every state a work item can occupy. `kind` is one of:
+#   station     -> an agent does the work, then emits a verdict that routes it
+#   human_gate  -> the factory pauses and waits for a human decision
+#   terminal    -> an end state
+# `skill`/`agent` name the Claude Code skill + subagent that run a station.
+# A station with no skill/agent is "external" (CI/CD, deploy) — driven by a
+# configured shell command locally, or by GitHub Actions in cloud mode.
+states:
+  triage:       {kind: station,    skill: factory-triage,      agent: factory-triage}
+  spec:         {kind: station,    skill: factory-spec,        agent: factory-spec}
+  spec_review:  {kind: human_gate, gate: spec_review,
+                 prompt: "Review the spec. Approve to implement, or send back for revision."}
+  implement:    {kind: station,    skill: factory-implement,   agent: factory-implement}
+  code_review:  {kind: station,    skill: factory-code-review, agent: factory-code-review}
+  verify:       {kind: station,    skill: factory-verify,      agent: factory-verify}
+  ship_review:  {kind: human_gate, gate: ship_review,
+                 prompt: "Review the code and verification output. Ready to ship?"}
+  ci_cd:        {kind: station,    external: true}
+  ship:         {kind: station,    external: true}
+  monitor:      {kind: station,    skill: factory-monitor,     agent: factory-monitor}
+  needs_human:  {kind: human_gate, gate: needs_human,
+                 prompt: "Triage needs your clarification to proceed."}
+  blocked:      {kind: human_gate, gate: blocked,
+                 prompt: "A station is blocked and needs your help."}
+  parked:       {kind: terminal,   revivable: true}
+  done:         {kind: terminal}
+
+start: triage
+
+# Routing: for each state, verdict -> next state.
+# Station verdicts come from the StationReport the agent emits; human-gate
+# verdicts are the human's decision. Keep this aligned with the diagram.
+routing:
+  triage:
+    needs_spec: spec
+    automatable: implement
+    needs_human_clarification: needs_human
+    park: parked
+  spec:
+    ready_for_review: spec_review
+    blocked: blocked
+  spec_review:
+    approved: implement
+    needs_revision: spec
+  implement:
+    implemented: code_review
+    blocked: blocked
+  code_review:
+    pass: verify
+    changes_requested: implement
+  verify:
+    verified: ship_review
+    failed: ship_review            # verification output always goes to the human gate
+  ship_review:
+    approved: ci_cd
+    not_ready: code_review         # the diagram's "Not ready" loop
+  ci_cd:
+    passed: ship
+    failed: code_review
+  ship:
+    shipped: monitor
+  monitor:
+    healthy: monitor               # keep monitoring (no human, no new work)
+    issue_detected: done           # current item done; station spawns a NEW item at triage
+  needs_human:
+    provided: triage
+    park: parked
+  blocked:
+    unblocked: triage
+    park: parked
+  parked:
+    revive: triage

@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+
+# OS
+.DS_Store
+
+# NOTE: .factory/ (work items, interventions, metrics) is intentionally NOT
+# ignored. It is the factory's durable memory and the fuel for the learning
+# loop — keep it in version control so the system can learn across time.

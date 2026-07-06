@@ -1,0 +1,104 @@
+# User Manual — operating your software factory
+
+This is the human's guide. It covers what you set up once, what you do day to day, how to act at the three gates, and how to make the factory learn. Read the [README](README.md) first for the big picture.
+
+Your job here is not to write features. It's to **operate the line and keep raising the share of work that ships without you.** Every time you step in, you're either steering a one-off *or* generating the signal that makes that step unnecessary next time — and the second one is the point.
+
+---
+
+## 1. One-time setup
+
+### Required (local, no accounts)
+1. **Install the CLI.** `uv tool install /Users/tianchizhang/Desktop/software-factory` puts the `factory` command on your PATH. (uv already owns Python on your machine, so this just works.)
+2. **Adopt the factory into a repo.** From the factory directory: `python3 install/install.py /path/to/your/repo`. This copies the skills, subagents, commands, hooks, line/policy/label config, and templates into the repo, and creates the `.factory/` state directory. Then `cd` there and run `factory init`.
+3. **Open that repo in Claude Code.** The `SessionStart` hook will greet you with the board; `/factory` and `/factory-status` are available as commands.
+
+That's the whole local setup. You can run the entire loop from here, by hand-driving with `/factory`.
+
+### Optional homework (only when you want more autonomy)
+These unlock the "runs while you sleep" behavior and richer integrations. None are needed to start. See the linked docs.
+
+- [ ] **Anthropic API key as a GitHub secret** — to run stations unattended via GitHub Actions. Add `ANTHROPIC_API_KEY` (or `CLAUDE_CODE_OAUTH_TOKEN`) under the repo's *Settings → Secrets and variables → Actions*. See [CLOUD-AUTONOMY.md](docs/CLOUD-AUTONOMY.md).
+- [ ] **Enable the workflows** — install with `--with-cloud`, then rename `.github/workflows/factory-*.yml.disabled` → `.yml`. Treat the first runs as a supervised shakedown.
+- [ ] **Create the conveyor labels in GitHub** — `factory labels --github` (needs the `gh` CLI, which you have).
+- [ ] **A sandbox repo** — for your first cloud run, point it at a throwaway repo, not something precious.
+- [ ] **(Later) Monitoring + notifications** — connect the Monitor station to whatever you use (Sentry/Datadog/logs) and route gate pings to Slack. Both are noted as extension points in [EXTENDING.md](docs/EXTENDING.md).
+
+---
+
+## 2. Day-to-day: driving the line
+
+The mental model: **the `factory` CLI decides what's next; Claude does the work; you only show up at gates.**
+
+```bash
+factory new "let users export their data as CSV"   # or open a GitHub issue
+/factory                # drives the item down the line until it needs you
+/factory-status         # the board, the metrics, and anything waiting on you
+```
+
+`/factory` keeps moving an item — triage, spec, implement, review, verify — running each station and advancing automatically, and **stops at the first human gate** (or when it's done). You can also drive a specific item (`/factory WI-0003`) or kick the most actionable one (`/factory next`).
+
+Under the hood each step is just the CLI:
+- `factory next <id>` — what to do next (auto-clears any gates an approved policy covers).
+- `factory advance <id> --verdict <v> ...` — a station reports its result; the item routes onward.
+- `factory gate <id> --decision <d> ...` — your decision at a gate (below).
+- `factory status [<id>]` / `factory metrics` — inspect.
+
+You rarely type `advance` yourself — `/factory` does. You *do* type `gate`, or just tell Claude your decision in chat.
+
+---
+
+## 3. The gate playbook (your three decision points)
+
+When the line stops, you get a **review packet**: what the item is, what the station produced (links to the spec / PR / verification evidence), its confidence, and the decision options. Aim to decide in seconds — that's what the packet is for.
+
+### Spec review (`spec_review`)
+The Spec station wrote `specs/<id>/PRODUCT.md`. Approve if it removes the ambiguity and names the non-goals; send it back if something's missing.
+```bash
+factory gate <id> --decision approved
+factory gate <id> --decision needs_revision --changed \
+    --notes "why, generalizably" --category missing-edge-case
+```
+
+### Ship review (`ship_review`)
+The Verify station attached evidence (tests, behavior, screenshots). Approve to ship; bounce to code-review if it's not ready.
+```bash
+factory gate <id> --decision approved        # → CI/CD → ship
+factory gate <id> --decision not_ready --changed --notes "..." --category ...
+```
+
+### Clarification (`needs_human`)
+Triage couldn't proceed without a product/priority call only you can make. Answer, and it re-enters triage.
+
+### The one habit that matters
+**When you steer, say *why* — generalizably.** `--changed --notes "..." --category ...` is what turns a one-off correction into a permanent fix. "Public write endpoints always need input validation" teaches the factory; "fix this" doesn't. Thirty seconds of *why* now buys you fewer gates later. (Steering in chat while an item waits at a gate is also captured automatically by a hook — but an explicit `gate --notes` is richer.)
+
+---
+
+## 4. Making the factory learn
+
+Periodically (or on a schedule, in cloud mode), run the learning station:
+
+```bash
+/factory retro          # or: factory retro   (then apply the factory-retro skill)
+```
+
+It reads your accumulated interventions and the metrics, finds the patterns, and **proposes** changes — sharper station skills, better templates, and dormant **gate policies** — written to `.factory/retro/<date>/` and opened as a PR. You **dispose**: review the PR, and activate any proposed policy by setting `approved_by:` on it in `policies.yml`. Each thing you accept permanently removes a class of work from your plate. (See [LEARNING-LOOP.md](docs/LEARNING-LOOP.md) for the worked example, where one intervention led to a gate that now clears itself.)
+
+Watch `factory metrics`. The number to grow is **auto-ship rate**; the list of "where humans step in" tells you and the Retro station where the next win is.
+
+---
+
+## 5. Files you'll touch vs. files the factory owns
+
+- **You edit:** `line.yml` (reshape the line), `policies.yml` (activate learned policies), the station skills under `.claude/skills/` (when you want to teach a station directly).
+- **The factory owns (commit it — it's the memory):** `.factory/work-items/`, `.factory/interventions/`, `.factory/metrics/`, `.factory/retro/`. Keep these in version control; they're what the system learns from across time.
+
+---
+
+## 6. When something's off
+
+- **An item is stuck** — `factory status <id>` shows its full history and current state. A `blocked` state means a station asked for you.
+- **A gate keeps bouncing the same way** — that's a retro signal, not a nuisance. Run `/factory retro`.
+- **The cloud workflow misbehaves** — disable it (rename back to `.disabled`) and drive locally; the layers are independent. See [CLOUD-AUTONOMY.md](docs/CLOUD-AUTONOMY.md).
+- **You want to change the line itself** — edit `line.yml`; the engine validates it on load, and the routing is unit-tested, so a bad edit fails loudly.
