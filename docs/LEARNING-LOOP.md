@@ -4,7 +4,7 @@ This is the part that makes it a *factory* and not just a pipeline. A pipeline r
 
 ## The mechanism in four moves
 
-1. **Capture.** Every time you steer at a gate — send a spec back, mark "not ready", approve-with-changes — the dispatcher writes a structured **intervention record** to `.factory/interventions/`: what the station produced, what you wanted instead, the category, and *why*. Steering you type in chat while an item waits is captured too (by a hook). This is the raw material; nothing else works without it.
+1. **Capture.** Every time you steer at a gate — send a spec back, mark "not ready", approve-with-changes — the dispatcher writes a structured **intervention record** to `.factory/interventions/`: what the station produced, what you wanted instead, the category, and *why*. Steering you type in chat while an item waits is captured too (by a hook). This is the raw material; nothing else works without it. (The record's exact shape lives in `src/factory/interventions.py`, which writes it — read any file under `.factory/interventions/` for a real example.)
 
 2. **Measure.** The **metrics ledger** (`.factory/metrics/`) tracks the North Star — the share of changes that shipped with **zero** human touches — plus *where* humans step in, ranked worst-gate-first, and a cost-per-change proxy. `factory metrics` shows it. The "where humans step in" ranking is the factory's to-do list for itself.
 

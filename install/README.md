@@ -16,7 +16,7 @@ python3 install/install.py /path/to/your/repo --with-cloud   # also add the (dis
 - `.claude/commands/` — `/factory` and `/factory-status`.
 - `.claude/hooks/` + merged `.claude/settings.json` — the board + steering hooks.
 - `line.yml`, `policies.yml`, `labels.yml` — the line, gate policies, labels.
-- `templates/` — spec / intervention / review-packet templates.
+- `templates/` — the live artifact shapes (spec + review-packet); see its README.
 - `.factory/` — empty runtime state dirs (the factory's memory).
 - `--with-cloud`: `.github/workflows/*.disabled` — the opt-in cloud layer.
 

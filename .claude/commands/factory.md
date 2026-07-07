@@ -36,13 +36,8 @@ Repeat until you hit a human gate or a terminal state:
    - **done / parked / blocked** → report briefly and stop.
 
 ## 3 — At a human gate, present a tight review packet
-- One paragraph: what the item is and what the station produced (link artifacts / PR).
-- The station's confidence and any flagged risks.
-- For `spec_review`: the spec's decisions + open questions. For `ship_review`: the
-  verification evidence. For **high-risk** items, run the `council` skill first and
-  fold in its synthesis.
-- The exact command to record the call, e.g.
-  `factory gate <id> --decision approved` — and remind: if they steer, add
-  `--changed --notes "<why>" --category <kind>` so the **learning loop** captures it.
+- Render it per `templates/review-packet.md` — that file is the single source for
+  the packet's shape, including the per-gate evidence and the decision commands.
+- For **high-risk** items, run the `council` skill first and fold in its synthesis.
 
 Keep the human's surface minimal — a decision, not a transcript. You handle the rest.

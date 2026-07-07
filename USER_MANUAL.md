@@ -38,6 +38,8 @@ factory new "let users export their data as CSV"   # or open a GitHub issue
 
 `/factory` keeps moving an item — triage, spec, implement, review, verify — running each station and advancing automatically, and **stops at the first human gate** (or when it's done). You can also drive a specific item (`/factory WI-0003`) or kick the most actionable one (`/factory next`).
 
+When writing a new item (`factory new --body`, or a GitHub issue), you don't need to be precise — that's triage's job — but three things make triage sharper: **what** it is (one paragraph), **why** it matters, and any **notes** you already have (links, constraints, context).
+
 Under the hood each step is just the CLI:
 - `factory next <id>` — what to do next (auto-clears any gates an approved policy covers).
 - `factory advance <id> --verdict <v> ...` — a station reports its result; the item routes onward.

@@ -1,0 +1,15 @@
+# templates/ — live artifact shapes
+
+Everything in this directory is **load-bearing**: some component of the factory points at it and fills it in. Each template has exactly one consumer, and nothing anywhere restates a template's shape a second time.
+
+| Template | Consumer (the only one) |
+| --- | --- |
+| `PRODUCT.md`, `TECH.md` | the **spec station** (`.claude/skills/factory-spec`) fills them in when writing a spec |
+| `review-packet.md` | the **`/factory` driver** (`.claude/commands/factory.md` §3) renders it at every human gate |
+
+Two things deliberately **not** here:
+
+- Formats rendered by engine *code* live in that code (e.g. the intervention record's shape is `src/factory/interventions.py`), so the engine stays self-contained when installed as a CLI tool.
+- Human-facing guidance with no consumer lives in `docs/` or `USER_MANUAL.md`, not here.
+
+Editing a template changes real factory output — which also makes these files fair game for the **retro station** to improve.

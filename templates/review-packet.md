@@ -1,12 +1,16 @@
 # Review packet — <WI-id> @ <gate>
 
-> The shape the `/factory` driver presents when it stops at a human gate. The goal
-> is a **decision in ten seconds**, not a transcript to wade through.
+> The shape the `/factory` driver (or a cloud station commenting on an issue) renders
+> when the line stops at a human gate. The goal is a **decision in ten seconds**, not
+> a transcript to wade through.
 
-**Item:** <title>
-**Station output:** <what was produced> — <links: spec files / PR / screenshot>
+**Item:** <title> — one paragraph: what it is and what the station produced.
+**Artifacts:** <links: spec files / PR / diff / screenshot>
 **Confidence:** <0..1>   ·   **Risk:** <low | medium | high>
-**Evidence:** <verification results / spec decisions / council synthesis>
+**Evidence:**
+- `spec_review` → the spec's key decisions + open questions.
+- `ship_review` → the verification results (tests run, behavior exercised).
+- High-risk items → fold in the `council` skill's synthesis.
 
 ## Your decision
 - ✅ **Approve** → `factory gate <WI-id> --decision <approved>`
