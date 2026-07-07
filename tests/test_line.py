@@ -30,6 +30,15 @@ def test_loop_backs_send_work_backward(factory_root: Path):
     assert line.route("ship_review", "not_ready") == "code_review"
 
 
+def test_every_human_gate_can_park(factory_root: Path):
+    """A human at any gate must be able to shelve an item, not just steer or
+    approve — otherwise the only way to halt the line is to walk away and leave
+    it lingering silently. `park` is the recorded, revivable 'stop the engine'."""
+    line = Line.load(factory_root / "line.yml")
+    for gate in ("spec_review", "ship_review", "needs_human", "blocked"):
+        assert line.route(gate, "park") == "parked"
+
+
 def test_unknown_verdict_raises(factory_root: Path):
     """An unroutable verdict must fail loudly rather than silently stall an item
     in limbo with no next state."""

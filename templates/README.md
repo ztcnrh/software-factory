@@ -5,11 +5,13 @@ Everything in this directory is **load-bearing**: some component of the factory 
 | Template | Consumer (the only one) |
 | --- | --- |
 | `PRODUCT.md`, `TECH.md` | the **spec station** (`.claude/skills/factory-spec`) fills them in when writing a spec |
-| `review-packet.md` | the **`/factory` driver** (`.claude/commands/factory.md` §3) renders it at every human gate |
+| `REVIEW-PACKET.md` | the **`/factory` driver** (`.claude/commands/factory.md` §3) renders it at every human gate |
 
 Two things deliberately **not** here:
 
 - Formats rendered by engine *code* live in that code (e.g. the intervention record's shape is `src/factory/interventions.py`), so the engine stays self-contained when installed as a CLI tool.
-- Human-facing guidance with no consumer lives in `docs/` or `USER_MANUAL.md`, not here.
+- Human-facing guidance with no consumer lives in `docs/` or `USER-MANUAL.md`, not here.
 
 Editing a template changes real factory output — which also makes these files fair game for the **retro station** to improve.
+
+Naming: templates and read-first human docs are `ALL-CAPS-WITH-HYPHENS.md`; machine-consumed config stays lowercase (`line.yml`, `policies.yml`).

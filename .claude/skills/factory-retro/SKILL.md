@@ -31,7 +31,10 @@ Cluster the interventions by root cause, not surface symptom. For each cluster a
 | Station keeps missing the same kind of thing | **Edit that station's SKILL.md** — add the check to its quality bar / read-first. |
 | A gate approves the same category unchanged, every time | **Propose a gate policy** in `policies.yml` (dormant, `approved_by: null`) so that category auto-clears once you sign it. This is what raises the auto-ship rate. |
 | Specs keep omitting the same section | **Edit the template** (`templates/PRODUCT.md` / `TECH.md`). |
+| Humans keep asking for the same missing info to decide at a gate | **Edit `templates/REVIEW-PACKET.md`** — add the field the packet should always surface. |
 | Work is mis-routed | **Adjust `line.yml`** routing or triage heuristics (rare; be conservative). |
+
+**Boundary — what you may not touch.** Your levers are the station skills, `policies.yml`, the `templates/`, and `line.yml` — the factory's *configuration*. You **do not edit the engine source under `src/factory/`** (the dispatcher, the line loader, the model). The engine is deliberately dumb and human-owned; if a genuine engine limitation is blocking a fix, name it in your report as a recommendation for the human, don't patch it yourself.
 
 ## Output
 Write to `.factory/retro/<YYYY-MM-DD>/`:

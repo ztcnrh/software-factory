@@ -9,7 +9,7 @@ Your job here is not to write features. It's to **operate the line and keep rais
 ## 1. One-time setup
 
 ### Required (local, no accounts)
-1. **Install the CLI.** `uv tool install /Users/tianchizhang/Desktop/software-factory` puts the `factory` command on your PATH. (uv already owns Python on your machine, so this just works.)
+1. **Install the CLI.** `uv tool install /path/to/software-factory` puts the `factory` command on your PATH. (uv already owns Python on your machine, so this just works.)
 2. **Adopt the factory into a repo.** From the factory directory: `python3 install/install.py /path/to/your/repo`. This copies the skills, subagents, commands, hooks, line/policy/label config, and templates into the repo, and creates the `.factory/` state directory. Then `cd` there and run `factory init`.
 3. **Open that repo in Claude Code.** The `SessionStart` hook will greet you with the board; `/factory` and `/factory-status` are available as commands.
 
@@ -69,6 +69,9 @@ factory gate <id> --decision approved        # → CI/CD → ship
 factory gate <id> --decision not_ready --changed --notes "..." --category ...
 ```
 
+### Shelving at either gate (`park`)
+Both gates also let you stop the line: `--decision park --changed --notes "why" --category ...` moves the item to `parked` (terminal but **revivable** — `revive` re-enters triage later). Use it when the item shouldn't proceed *now* — an external/org blocker, a premature vision, more tech debt than it's worth. Because `park` is a steering decision, your `--notes` reason is captured as an intervention, so shelving also feeds the learning loop.
+
 ### Clarification (`needs_human`)
 Triage couldn't proceed without a product/priority call only you can make. Answer, and it re-enters triage.
 
@@ -100,7 +103,7 @@ Watch `factory metrics`. The number to grow is **auto-ship rate**; the list of "
 
 ## 6. When something's off
 
-- **An item is stuck** — `factory status <id>` shows its full history and current state. A `blocked` state means a station asked for you.
+- **An item is stuck** — `factory status <id>` shows its full history and current state. A `blocked` state means a station hit something only you can resolve (a missing dependency, an access or environment problem, an ambiguity that needs a real decision) and **pulled the escape hatch**: any station can send an item straight to `blocked` at any time, even though the line diagram doesn't draw that arrow from every station. From `blocked` you either clear the obstacle (`--decision unblocked`, back to triage) or shelve it (`--decision park`). This is also the honest home for "verify couldn't run" — not "the code is wrong," but "I lacked the tools/access to check."
 - **A gate keeps bouncing the same way** — that's a retro signal, not a nuisance. Run `/factory retro`.
 - **The cloud workflow misbehaves** — disable it (rename back to `.disabled`) and drive locally; the layers are independent. See [CLOUD-AUTONOMY.md](docs/CLOUD-AUTONOMY.md).
 - **You want to change the line itself** — edit `line.yml`; the engine validates it on load, and the routing is unit-tested, so a bad edit fails loudly.

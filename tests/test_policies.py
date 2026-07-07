@@ -38,7 +38,7 @@ def test_approved_rule_respects_labels_gate_and_risk_ceiling():
         "gate": "spec_review",
         "decision": "approved",
         "when": {"labels_any": ["docs"], "max_risk": "low"},
-        "approved_by": "tianchi",
+        "approved_by": "johndoe",
     }
     pol = Policies({"rules": [rule]})
     assert pol.auto_decision("spec_review", _item(labels=["docs"], risk="low")) == rule
@@ -61,7 +61,7 @@ def test_approved_policy_clears_gate_with_no_human_touch(factory_root: Path):
                         "gate": "spec_review",
                         "decision": "approved",
                         "when": {"labels_any": ["docs"], "max_risk": "low"},
-                        "approved_by": "tianchi",
+                        "approved_by": "johndoe",
                     }
                 ],
             }

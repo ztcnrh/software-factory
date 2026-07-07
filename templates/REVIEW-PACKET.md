@@ -16,6 +16,8 @@
 - ✅ **Approve** → `factory gate <WI-id> --decision <approved>`
 - ↩️ **Send back** → `factory gate <WI-id> --decision <needs_revision | not_ready> \`
   `--changed --notes "<what & why>" --category <kind>`
+- ⏸ **Shelve** → `factory gate <WI-id> --decision park --changed --notes "<why now-not>" --category <kind>`
+  (→ `parked`, revivable later)
 
 If you send it back or approve-with-tweaks, the `--notes` and `--category` are
 exactly what the **learning loop** uses to make this gate disappear for this class

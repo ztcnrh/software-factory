@@ -28,7 +28,7 @@ class Event:
     from_state: str | None = None
     to_state: str | None = None
     verdict: str | None = None
-    actor: str | None = None  # "triage" | "human:tianchi" | "policy:<rule-id>" ...
+    actor: str | None = None  # "triage" | "human:johndoe" | "policy:<rule-id>" ...
     note: str | None = None
     cost: float = 0.0
 

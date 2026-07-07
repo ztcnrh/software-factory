@@ -36,7 +36,7 @@ Repeat until you hit a human gate or a terminal state:
    - **done / parked / blocked** → report briefly and stop.
 
 ## 3 — At a human gate, present a tight review packet
-- Render it per `templates/review-packet.md` — that file is the single source for
+- Render it per `templates/REVIEW-PACKET.md` — that file is the single source for
   the packet's shape, including the per-gate evidence and the decision commands.
 - For **high-risk** items, run the `council` skill first and fold in its synthesis.
 

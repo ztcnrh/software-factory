@@ -42,6 +42,10 @@ states:
   monitor:      {kind: station,    skill: factory-monitor,     agent: factory-monitor}
   needs_human:  {kind: human_gate, gate: needs_human,
                  prompt: "Triage needs your clarification to proceed."}
+  # `blocked` is reachable two ways: the explicit `blocked` verdict routed below
+  # (spec, implement), AND an "escape hatch" — ANY station can force an item here
+  # by setting `human_required` on its report, bypassing the routing table. So the
+  # routes below are not the only way in; every station can block. See dispatch.advance().
   blocked:      {kind: human_gate, gate: blocked,
                  prompt: "A station is blocked and needs your help."}
   parked:       {kind: terminal,   revivable: true}
@@ -64,6 +68,7 @@ routing:
   spec_review:
     approved: implement
     needs_revision: spec
+    park: parked                   # human shelves it (recorded, revivable) — the gate's "halt"
   implement:
     implemented: code_review
     blocked: blocked
@@ -76,6 +81,7 @@ routing:
   ship_review:
     approved: ci_cd
     not_ready: code_review         # the diagram's "Not ready" loop
+    park: parked                   # human shelves it (recorded, revivable) — the gate's "halt"
   ci_cd:
     passed: ship
     failed: code_review

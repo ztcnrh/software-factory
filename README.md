@@ -36,7 +36,7 @@ Six **stations** (Triage, Spec, Implement, Code-review, Verify, Monitor) do the 
 
 ```bash
 # 1. Put the CLI on your PATH
-uv tool install /Users/tianchizhang/Desktop/software-factory
+uv tool install /path/to/software-factory
 
 # 2. Adopt the factory into any repo
 python3 install/install.py /path/to/your/repo
@@ -53,11 +53,13 @@ You don't need any cloud accounts to start — it's fully local. Wire up [cloud 
 
 ## Where to go next
 
-- **[USER_MANUAL.md](USER_MANUAL.md)** — start here. What *you* do: setup, driving the line day to day, the gate playbook, and the homework checklist (accounts/secrets).
+- **[USER-MANUAL.md](USER-MANUAL.md)** — start here. What *you* do: setup, driving the line day to day, the gate playbook, and the homework checklist (accounts/secrets).
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — how it all fits: the stations, the dispatcher/state machine, the conveyor, the triggers.
+- **[docs/CODE-TOUR.md](docs/CODE-TOUR.md)** — want to peek under the hood? The code-reading path: which files first, and the handful of functions that make everything else click.
 - **[docs/LEARNING-LOOP.md](docs/LEARNING-LOOP.md)** — the crown jewel: interventions → retro → self-improvement, with the demo as a worked example.
 - **[docs/CLOUD-AUTONOMY.md](docs/CLOUD-AUTONOMY.md)** — enabling the unattended GitHub Actions layer (opt-in).
 - **[docs/EXTENDING.md](docs/EXTENDING.md)** — adding stations, language/tracker adapters, and a candid take on what's still hard.
+- **[docs/OPTIMIZATION-AREAS.md](docs/OPTIMIZATION-AREAS.md)** — a living log of deliberate v1 tradeoffs and the ideas for improving them later.
 - **[docs/diagram.md](docs/diagram.md)** — the loop as Mermaid source.
 
 ## Status
