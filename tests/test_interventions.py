@@ -1,0 +1,76 @@
+"""Intervention record formatting."""
+
+from factory.interventions import Interventions
+from factory.model import GateDecision, WorkItem
+
+
+def _record(tmp_path, produced: str) -> str:
+    item = WorkItem(id="WI-0001", title="test item", state="spec_review")
+    decision = GateDecision(
+        gate="spec_review", decision="needs_revision", changed=True, notes="why"
+    )
+    path = Interventions(tmp_path).record(item, decision, "spec_review", produced=produced)
+    return path.read_text()
+
+
+def test_produced_markdown_is_fenced(tmp_path):
+    """Embedded station output must not break the record's own heading structure —
+    a produced artifact with its own H1 and code blocks stays inside a wrapper fence
+    (regression: raw interpolation spliced two documents into one outline)."""
+    produced = "# Product Spec — WI-0001\n\nSome spec.\n\n```python\nx = 1\n```\n"
+    text = _record(tmp_path, produced)
+    fenced = text[text.index("````markdown") : text.index("\n````\n")]
+    assert "# Product Spec — WI-0001" in fenced
+    assert "```python" in fenced
+    # The record's own sections survive intact after the embedded content.
+    assert "## What the human wanted instead" in text.split("````", 2)[2]
+
+
+def test_fence_outranks_embedded_backtick_runs(tmp_path):
+    """The wrapper fence must always be longer than any backtick run in the
+    content, or the embedded artifact could close it early."""
+    produced = "````\nfour ticks inside\n````"
+    text = _record(tmp_path, produced)
+    assert "`````markdown" in text
+
+
+def test_empty_produced_stays_a_plain_placeholder(tmp_path):
+    """No artifact given means the placeholder speaks in the record's own voice —
+    fencing it would present prose as embedded content."""
+    text = _record(tmp_path, "")
+    assert "(see work item artifacts)" in text
+    assert "markdown" not in text.split("---")[0].split("## What the station produced")[1]
+
+
+def test_malformed_signal_lines_become_markers(tmp_path):
+    """The hook appends to _signals.jsonl blindly (fail-open), so a corrupt line
+    must neither break parsing nor vanish silently — it leaves an in-place marker
+    so the retro knows a steer was lost, and the briefing renders that blip."""
+    from factory.retro import briefing
+
+    sig_dir = tmp_path / ".factory" / "interventions"
+    sig_dir.mkdir(parents=True)
+    (sig_dir / "_signals.jsonl").write_text(
+        '{"ts": "t1", "waiting_items": ["WI-0001"], "steering": "add validation"}\n'
+        "not json at all\n"
+        '{"ts": "t2", "waiting_items": ["WI-0002"], "steering": "wrong scope"}\n'
+    )
+    signals = Interventions(tmp_path).signals()
+    assert [s.get("ts") for s in signals] == ["t1", None, "t2"]
+    assert signals[1] == {"malformed": True}
+    assert "a steer was lost here" in briefing(tmp_path)
+
+
+def test_briefing_includes_chat_signals(tmp_path):
+    """Regression: _signals.jsonl used to be written by the hook but never read —
+    chat steering must reach the retro station via the briefing."""
+    from factory.retro import briefing
+
+    sig_dir = tmp_path / ".factory" / "interventions"
+    sig_dir.mkdir(parents=True)
+    (sig_dir / "_signals.jsonl").write_text(
+        '{"ts": "t1", "waiting_items": ["WI-0001"], "steering": "spec misses rate limiting"}\n'
+    )
+    text = briefing(tmp_path)
+    assert "## Chat steering signals" in text
+    assert "spec misses rate limiting" in text

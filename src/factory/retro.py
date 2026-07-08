@@ -34,4 +34,21 @@ def briefing(root: str | Path) -> str:
         lines.append("_No interventions recorded yet — nothing to learn from._")
     for f in files:
         lines += [f"### {f.name}", "", f.read_text(), ""]
+
+    signals = interventions.signals()
+    if signals:
+        lines += [
+            "",
+            "## Chat steering signals",
+            "",
+            "Captured mid-session by the UserPromptSubmit hook while an item sat at a gate.",
+            "Rawer than the records above — weigh them as corroborating context.",
+            "",
+        ]
+        for s in signals:
+            if s.get("malformed"):
+                lines.append("- ⚠ (an unreadable signal line was skipped — a steer was lost here)")
+                continue
+            items = ", ".join(s.get("waiting_items", [])) or "?"
+            lines.append(f"- {s.get('ts', '?')} [{items}] {s.get('steering', '')}")
     return "\n".join(lines)

@@ -9,6 +9,8 @@ article's line: *every interactive agent use is a failure to learn from.*
 
 from __future__ import annotations
 
+import json
+import re
 import time
 from pathlib import Path
 
@@ -46,6 +48,15 @@ state_before: {state_before}
 """
 
 
+def _fence(text: str) -> str:
+    """Wrap embedded artifact content in a code fence so its own markdown
+    (H1 headings, code blocks) can't break the record's structure. The fence
+    is sized to outrank any backtick run inside the content."""
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    ticks = "`" * max(3, longest + 1)
+    return f"{ticks}markdown\n{text}\n{ticks}"
+
+
 class Interventions:
     def __init__(self, root: str | Path):
         self.dir = Path(root) / ".factory" / "interventions"
@@ -64,7 +75,7 @@ class Interventions:
                 decision=decision.decision,
                 by=decision.by,
                 category=decision.category or "uncategorized",
-                produced=produced or "(see work item artifacts)",
+                produced=_fence(produced) if produced else "(see work item artifacts)",
                 expected=decision.expected or "(not specified)",
                 notes=decision.notes or "(none)",
                 changed=str(decision.changed).lower(),
@@ -78,3 +89,22 @@ class Interventions:
         if not self.dir.exists():
             return []
         return sorted(self.dir.glob("*.md"))
+
+    def signals(self) -> list[dict]:
+        """Chat steering captured by the UserPromptSubmit hook (_signals.jsonl).
+        Best-effort by design: the hook appends blindly, so an unparseable line
+        becomes a ``{"malformed": True}`` marker in place (order preserved) rather
+        than vanishing — the reader should know a signal existed even if its
+        content is lost."""
+        path = self.dir / "_signals.jsonl"
+        if not path.exists():
+            return []
+        out = []
+        for line in path.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                out.append(json.loads(line))
+            except json.JSONDecodeError:
+                out.append({"malformed": True})
+        return out
