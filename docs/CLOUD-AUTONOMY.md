@@ -31,7 +31,7 @@ This layer is a solid, well-commented **template**, not a turnkey product. Befor
 
 - **Issue ↔ work-item mapping.** The workflow hands the agent the issue number and trusts it to find/create the matching work item in `.factory/` and re-label correctly. That works because the agent is capable, but it's the seam most likely to need tightening for your repo's conventions — consider a small `issues: opened` workflow that calls `factory new` and applies `factory:triage` deterministically.
 - **Concurrency.** Two stations committing `.factory/` state at once can race. For low volume it's fine; at higher throughput add a concurrency group or a queue.
-- **Cost and loops.** Headless runs cost tokens and a mis-configured route could loop. Start with the Monitor station off, watch the metrics/cost ledger, and set GitHub Actions spending limits.
+- **Cost and loops.** Headless runs cost tokens and a mis-configured route could loop. Start conservatively — watch the metrics/cost ledger and set GitHub Actions spending limits before going unattended. (The `monitor` station, which would run continuously, is deferred in v1, so there's no perpetual watcher to budget for yet.)
 - **Permissions.** The workflow runs with `acceptEdits` and broad tools by design (it's unattended). Scope the `GITHUB_TOKEN` permissions to the repo and keep it on a sandbox until you trust it.
 
 The local loop is production-quality for personal use today. The cloud loop is where you and I will iterate next — see [EXTENDING.md](EXTENDING.md).

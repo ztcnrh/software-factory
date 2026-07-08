@@ -63,9 +63,9 @@ factory gate <id> --decision needs_revision --changed \
 ```
 
 ### Ship review (`ship_review`)
-The Verify station attached evidence (tests, behavior, screenshots). Approve to ship; bounce to code-review if it's not ready.
+The Verify station attached evidence (tests, behavior, screenshots). **Approving == merging the PR**, which triggers your project's post-merge CI/CD; the external `deploy` step watches it and a green deploy = shipped → done. Bounce to code-review if it's not ready.
 ```bash
-factory gate <id> --decision approved        # → CI/CD → ship
+factory gate <id> --decision approved        # merge PR → deploy → done
 factory gate <id> --decision not_ready --changed --notes "..." --category ...
 ```
 

@@ -107,7 +107,7 @@ class Dispatcher:
                 type="run_external",
                 item_id=item.id,
                 state=state,
-                message=f"External station {state!r} (run CI/CD or deploy, then advance).",
+                message=f"External station {state!r} (run the CI/CD deploy step, then advance).",
             )
         return Action(
             type="run_station",
@@ -168,7 +168,7 @@ class Dispatcher:
                 parent=item.id,
             )
             item.log(kind="spawn", actor=report.station, note=f"spawned {child.id}: {child.title}")
-        if state == "ship" and nxt == "monitor":  # a change just shipped
+        if report.verdict == self.line.ships_on(state):  # a change just shipped
             self.metrics.emit(
                 kind="shipped", item=item.id, human_touches=item.human_touches, cost=item.cost
             )

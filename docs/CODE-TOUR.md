@@ -15,7 +15,7 @@ Read `line.yml` first. It's the single source of truth for the conveyor: `states
 Three dataclasses; everything else just moves them around.
 
 - **`WorkItem`** — the thing on the conveyor. The fields that matter: `state` (where it is), `history` (every transition, appended via `log()` — this is why persisted items are readable as a story), `human_touches` (the North Star counter), and `risk` + `labels` (what gate policies match on).
-- **`StationReport`** — what a station hands back. `verdict` is the routing key; `human_required` is the escape hatch (below); `spawn` is how the monitor station creates the next work item.
+- **`StationReport`** — what a station hands back. `verdict` is the routing key; `human_required` is the escape hatch (below); `spawn` is how a station files a follow-up work item (the mechanism a deferred monitor / future issues-watcher uses; child enters at triage).
 - **`GateDecision`** — a human's call at a gate. `changed` / `notes` / `category` are the learning signal.
 
 ### 2. `src/factory/line.py` (~5 min) — the map reader
@@ -60,7 +60,7 @@ These are the leaf modules the motor calls into. None of them affect the line's 
 Most of this needs one sentence each, because the pattern repeats.
 
 - **`.claude/skills/factory-*/SKILL.md`** — one skill per station, 1:1 with the states in `line.yml`. A skill is the station's instruction manual, and every one ends the same way: an output contract telling the agent which `factory advance --verdict …` call to make. Read `factory-triage` and `factory-spec` fully to get the pattern; skim the rest. (`council` and `cross-critique` are helpers for high-stakes moments, not stations.)
-- **`.claude/agents/factory-*.md`** — the vehicles that run the skills: thin subagent wrappers whose real job is pinning a cost-appropriate model per station (haiku for monitor, opus for retro, sonnet elsewhere) and giving each station an isolated context window.
+- **`.claude/agents/factory-*.md`** — the vehicles that run the skills: thin subagent wrappers whose real job is pinning a cost-appropriate model per station (opus for retro, haiku for the deferred monitor, sonnet elsewhere) and giving each station an isolated context window.
 - **`.claude/commands/factory.md`** — the `/factory` driver: resolve an item, then loop `factory next` → run the station → `factory advance` until a human gate or terminal state. It's the consumer of the `NEXT:` contract from block 1.
 - **`.claude/hooks/`** — two small stdlib scripts: `factory_board.py` injects the board at session start; `record_intervention.py` captures steering you type in chat *while an item sits at a gate* — the second, quieter source of intervention records.
 - **`templates/`** — the live artifact shapes (spec templates, review packet). Its own `README.md` states the rule: one consumer per template, nothing restates a template's shape elsewhere.

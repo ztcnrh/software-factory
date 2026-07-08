@@ -39,7 +39,7 @@ One intervention. One generalization. A gate that now clears itself for a whole 
 
 ## The economics (the "at what cost" half)
 
-The North Star has two halves: *more* shipped without a human, *and* at an acceptable cost. The ledger tracks a cost proxy per change so you can ask Lloyd's question — "if I spend a dollar on automation, does it return more than a dollar?" Treat factory output as a variable cost you're trying to drive down per unit, not a fixed R&D line. The Retro station's job is to spend your scarce attention where it buys the most future autonomy: the worst gate, the most-repeated steer. Cheap stations (Monitor on haiku) stay cheap; the expensive station (Retro on opus) runs rarely and earns its cost by removing recurring human time.
+The North Star has two halves: *more* shipped without a human, *and* at an acceptable cost. The ledger tracks a cost proxy per change so you can ask Lloyd's question — "if I spend a dollar on automation, does it return more than a dollar?" Treat factory output as a variable cost you're trying to drive down per unit, not a fixed R&D line. The Retro station's job is to spend your scarce attention where it buys the most future autonomy: the worst gate, the most-repeated steer. Cheap stations stay cheap; the expensive station (Retro on opus) runs rarely and earns its cost by removing recurring human time.
 
 ## What you do
 

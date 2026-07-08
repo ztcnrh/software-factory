@@ -20,14 +20,15 @@ A small, dependency-light Python package (the `factory` CLI). The pieces:
 - **`cli.py`** is the thin command surface the `/factory` command and the GitHub Actions call into.
 - **`adapters/github.py`** is an *optional* mirror: it keeps a GitHub issue's `factory:<state>` label in sync so the conveyor is visible in GitHub and the cloud workflows can trigger. Nothing depends on it.
 
-The state machine is a faithful encoding of the factory diagram. The routing table in `line.yml` maps `(state, verdict) → next state`; `tests/test_line.py` pins every critical hop so a careless edit can't silently re-wire the line, and `tests/test_dispatch.py` drives full passes, loop-backs, the monitor-spawns-a-new-item edge, and the parking case.
+The state machine is a faithful encoding of the factory diagram. The routing table in `line.yml` maps `(state, verdict) → next state`; `tests/test_line.py` pins every critical hop so a careless edit can't silently re-wire the line, and `tests/test_dispatch.py` drives full passes, loop-backs, the spawn-a-follow-up mechanism, and the parking case.
 
 ### States and routing (the diagram, in data)
 
-Stations: `triage → spec → implement → code_review → verify → ci_cd → ship → monitor`. Human gates: `spec_review`, `ship_review`, `needs_human`, `blocked`. Terminals: `done`, `parked`. The interesting routes:
+Stations: `triage → spec → implement → code_review → verify → deploy`. Human gates: `spec_review`, `ship_review`, `needs_human`, `blocked`. Terminals: `done`, `parked`. The interesting routes:
 - triage fans out four ways (spec / implement / needs_human / parked), exactly the diamond in the diagram.
-- `spec_review --needs_revision--> spec` and `ship_review --not_ready--> code_review` are the backward loops — the motion the learning loop tries to eliminate.
-- `monitor --issue_detected--> done` while *spawning* a brand-new work item at triage: the "factory loop continues" edge.
+- `spec_review --needs_revision--> spec` and `ship_review --not_ready--> code_review` are the backward loops — the motion the learning loop tries to eliminate. Every human gate can also `park → parked` (a recorded, revivable halt).
+- `ship_review --approved--> deploy` — approval *is* merging the PR, which triggers the project's post-merge CI/CD. `deploy` is a single **external** station (no agent) that watches that workflow: `deploy --succeeded--> done` is the ship point, and `deploy --failed--> code_review` re-enters the code loop. The `shipped` metric is emitted here, keyed declaratively off the `deploy` state's `ships_on: succeeded` marker (see `line.ships_on`) rather than a hardcoded state name.
+- The `monitor` station (continuous watch + auto-spawn a follow-up item) is **deferred** in v1 — a green deploy is the success signal, so the item is *done* when it ships. New post-ship work enters as fresh items (via a planned issues-watcher). The `spawn` mechanism that would feed it still exists on every station report. See [OPTIMIZATION-AREAS.md](OPTIMIZATION-AREAS.md).
 
 ## Layer 2 — the stations (`.claude/skills`, `.claude/agents`)
 
@@ -40,8 +41,9 @@ Each station is a **skill** (the "how" — a focused `SKILL.md`) paired with a *
 | **implement** | implemented · blocked | sonnet | branch + tests; opens a PR; never merges |
 | **code_review** | pass · changes_requested | sonnet | escalates high-risk to the `council` skill |
 | **verify** | verified · failed | sonnet | exercises *behavior* (incl. browser), captures evidence |
-| **monitor** | healthy · issue_detected | haiku | cheap; spawns the next work item on a problem |
 | **retro** | (proposes; opens a PR) | opus | the learning station — see LEARNING-LOOP.md |
+
+`deploy` is an **external** station (no agent) — it represents the post-merge CI/CD workflow, so the factory observes its outcome rather than running it. `monitor` (haiku; watches a shipped change and spawns a follow-up) is **deferred** in v1 — its skill/agent ship in the repo but it isn't a state on the line. See [OPTIMIZATION-AREAS.md](OPTIMIZATION-AREAS.md).
 
 Two more skills, adapted from `warpdotdev/common-skills`, sharpen the high-stakes moments: **council** (a model-diverse panel investigates in parallel, you synthesize) and **cross-critique** (competing proposals critique each other). The Spec and Code-review stations reach for these on risky or contested calls.
 

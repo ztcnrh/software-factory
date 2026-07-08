@@ -11,9 +11,10 @@ def _advance(d: Dispatcher, item: WorkItem, verdict: str, **kw) -> str:
     return d.advance(item, StationReport(station=item.state, verdict=verdict, **kw))
 
 
-def test_full_happy_path_reaches_monitor_and_logs_one_ship(factory_root: Path):
-    """A clean run triage→…→monitor should leave the item monitoring, log exactly
-    one 'shipped' event, and attribute the two human gate stops it passed."""
+def test_full_happy_path_reaches_done_and_logs_one_ship(factory_root: Path):
+    """A clean run triage→…→deploy→done should log exactly one 'shipped' event
+    (anchored on the deploy state's `ships_on` verdict, not a hardcoded name) and
+    attribute the two human gate stops it passed."""
     d = Dispatcher(factory_root)
     item = d.new_item("Add /health endpoint", risk="low")
     _advance(d, item, "needs_spec")
@@ -27,9 +28,9 @@ def test_full_happy_path_reaches_monitor_and_logs_one_ship(factory_root: Path):
     _advance(d, item, "verified")
     assert item.state == "ship_review"
     d.gate(item, GateDecision(gate="ship_review", decision="approved"))
-    _advance(d, item, "passed")  # ci_cd
-    _advance(d, item, "shipped")  # ship -> monitor
-    assert item.state == "monitor"
+    assert item.state == "deploy"
+    _advance(d, item, "succeeded")  # deploy -> done (the ship point)
+    assert item.state == "done"
 
     shipped = [e for e in d.metrics.events() if e["kind"] == "shipped"]
     assert len(shipped) == 1
@@ -56,22 +57,24 @@ def test_needs_revision_records_intervention_and_loops_back(factory_root: Path):
     assert len(d.interventions.list()) == 1
 
 
-def test_monitor_issue_spawns_child_at_triage(factory_root: Path):
-    """A monitoring-detected issue ends the current item and enters a NEW item at
-    triage — the 'factory loop continues' edge of the diagram."""
+def test_station_report_spawns_child_at_triage(factory_root: Path):
+    """A station report can spawn follow-up work: the child enters fresh at triage
+    with a parent link back to its origin. This is the generic 'loop continues'
+    mechanism a future monitor or issues-watcher uses; no v1 mainline state
+    triggers it, so we exercise it directly from a station."""
     d = Dispatcher(factory_root)
-    item = d.new_item("Shipped feature", risk="low")
-    item.state = "monitor"
+    item = d.new_item("Parent feature", risk="low")
+    item.state = "verify"
     d.store.save(item)
     d.advance(
         item,
         StationReport(
-            station="monitor",
-            verdict="issue_detected",
-            spawn=[{"title": "Regression: 500s on /health", "body": "spiking since deploy"}],
+            station="verify",
+            verdict="verified",
+            spawn=[{"title": "Follow-up: add request metrics", "body": "spotted during verify"}],
         ),
     )
-    assert item.state == "done"
+    assert item.state == "ship_review"
     ids = d.store.list_ids()
     assert len(ids) == 2
     child = next(d.store.load(i) for i in ids if i != item.id)

@@ -57,6 +57,12 @@ class Line:
     def is_external(self, state: str) -> bool:
         return bool(self.states[state].get("external"))
 
+    def ships_on(self, state: str) -> str | None:
+        """The verdict from ``state`` that means "the change shipped" — the point
+        the North Star ``shipped`` metric is recorded. Declarative (set in
+        line.yml) so the engine isn't hardcoded to specific tail-state names."""
+        return self.states.get(state, {}).get("ships_on")
+
     def skill_for(self, state: str) -> str | None:
         return self.states[state].get("skill")
 

@@ -51,7 +51,7 @@ class WorkItem:
     attempts: dict[str, int] = field(default_factory=dict)  # per-state run counts
     human_touches: int = 0
     cost: float = 0.0  # accumulated cost proxy (tokens or $)
-    parent: str | None = None  # the item that spawned this one (monitor loop)
+    parent: str | None = None  # the item that spawned this one (e.g. a follow-up bug)
     created: str = field(default_factory=_now)
     updated: str = field(default_factory=_now)
     history: list[Event] = field(default_factory=list)
@@ -78,8 +78,8 @@ class StationReport:
     """What a station emits when done. ``verdict`` drives routing via line.yml.
 
     A station can also escalate (``human_required``), update the item's risk,
-    attach artifacts, or spawn new work items (the monitor station does this when
-    it detects a problem in production)."""
+    attach artifacts, or spawn new work items (a follow-up item, e.g. from a
+    deferred monitor or an issues-watcher, enters fresh at triage)."""
 
     station: str
     verdict: str
@@ -92,7 +92,7 @@ class StationReport:
     notes: str = ""
     risk: str | None = None
     pr: str | None = None
-    spawn: list[dict[str, Any]] = field(default_factory=list)  # new items (monitor)
+    spawn: list[dict[str, Any]] = field(default_factory=list)  # new items → triage
 
 
 @dataclass

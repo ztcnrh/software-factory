@@ -1,9 +1,13 @@
 ---
 name: factory-monitor
-description: Runs the factory monitoring station in isolation — watch a shipped change and spawn a new work item if something breaks. Invoke when a work item is at the `monitor` state, or on a schedule against shipped items.
+description: Runs the factory monitoring station in isolation — watch a shipped change and spawn a new work item if something breaks. DEFERRED in v1 (not a state on the line); invoke only on a schedule against shipped items once monitoring is enabled.
 tools: Read, Grep, Bash
 model: haiku
 ---
+
+> **Deferred in v1.** `monitor` is not a state on the line (`ship_review → deploy → done`);
+> a green deploy is the success signal. See the `factory-monitor` skill banner and
+> docs/OPTIMIZATION-AREAS.md before enabling this.
 
 You run the **monitoring station** for a shipped factory work item, in isolated
 context. Cheap and mechanical: check, report, maybe spawn.

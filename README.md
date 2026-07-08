@@ -1,6 +1,6 @@
 # Software Factory
 
-A personal, self-improving **software factory** — an agentic delivery line that triages, specs, implements, reviews, verifies, ships, and monitors software changes, and **learns from every human touch** so it needs you less over time.
+A personal, self-improving **software factory** — an agentic delivery line that triages, specs, implements, reviews, verifies, and ships software changes, and **learns from every human touch** so it needs you less over time.
 
 It's the working prototype of the "factory engineering" idea: you stop hand-building each feature and instead operate (and continuously improve) a machine that builds features for you. The job shifts from writing code to raising one number — *the share of changes that ship without a human in the loop (TODO: create this as a metric somehow), at an acceptable cost* — and driving it up over time.
 
@@ -13,11 +13,11 @@ new task → Triage → ┬─ needs spec → Spec → [✋ you review] → Impl
                     ├─ automatable ───────────────────────→ Implement
                     ├─ needs clarification → [✋ you] → Triage
                     └─ park
-Implement → Code review → Verify → [✋ you: ready to ship?] → CI/CD → Ship
-Ship → Monitor → (healthy ↺  |  issue → open new task ↺ the loop continues)
+Implement → Code review → Verify → [✋ you: ready to ship?] → Deploy → Done
+                                     (approve = merge PR → post-merge CI/CD; green = shipped)
 ```
 
-Six **stations** (Triage, Spec, Implement, Code-review, Verify, Monitor) do the work. Three **human gates** are where you steer. A seventh station — **Retro** — watches where you stepped in and rewrites the factory so you don't have to next time.
+Five **stations** (Triage, Spec, Implement, Code-review, Verify) do the work; a sixth — **Retro** — watches where you stepped in and rewrites the factory so you don't have to next time. Three **human gates** are where you steer. Approving the ship gate merges the PR, which triggers your project's post-merge CI/CD; the external **Deploy** step watches it, and a green deploy (health-wait baked in) is the ship signal. Continuous **monitoring** and auto-spawning follow-up work is deferred — new post-ship work enters as fresh items (see [docs/OPTIMIZATION-AREAS.md](docs/OPTIMIZATION-AREAS.md)).
 
 ## How it maps to Claude Code
 
@@ -64,6 +64,6 @@ You don't need any cloud accounts to start — it's fully local. Wire up [cloud 
 
 ## Status
 
-v1, built and proven end-to-end on the demo repo (a full feature shipped through all six stations, one human intervention captured, and the Retro station then auto-cleared that class of work). The engine has unit tests (`uv run pytest`); the cloud layer is the least-exercised part and ships disabled. It is meant to be used, stress-tested on real projects, and improved — by you, and increasingly by itself.
+v1, built and proven end-to-end on the demo repo (a full feature shipped through the whole line, one human intervention captured, and the Retro station then auto-cleared that class of work — note the demo predates the tail reshape to a single `deploy` station). The engine has unit tests (`uv run pytest`); the cloud layer is the least-exercised part and ships disabled. It is meant to be used, stress-tested on real projects, and improved — by you, and increasingly by itself.
 
 *Inspired by Zach Lloyd's "factory engineering" thesis and the patterns in [warpdotdev/common-skills](https://github.com/warpdotdev/common-skills) (council, cross-critique, spec-driven development).*

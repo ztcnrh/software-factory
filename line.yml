@@ -8,8 +8,14 @@
 # It is a faithful encoding of the factory loop diagram:
 #   triage -> (spec | implement | needs_human | parked)
 #   spec -> spec_review(human) -> implement
-#   implement -> code_review -> verify -> ship_review(human) -> ci_cd -> ship
-#   ship -> monitor -> (keep monitoring | detect issue -> spawn new work item)
+#   implement -> code_review -> verify -> ship_review(human) -> deploy -> done
+#
+# `ship_review` approval == merging the PR; that merge triggers the project's
+# post-merge CI/CD (build + deploy, with a health-wait baked in). `deploy` is the
+# single external station that watches that workflow: green == shipped -> done.
+# Continuous monitoring + auto-spawn is deferred (see docs/OPTIMIZATION-AREAS.md);
+# the intended v1 intake is an issues-watcher that files new GitHub issues into
+# triage, not a monitor loop.
 
 version: 1
 
@@ -37,9 +43,11 @@ states:
   verify:       {kind: station,    skill: factory-verify,      agent: factory-verify}
   ship_review:  {kind: human_gate, gate: ship_review,
                  prompt: "Review the code and verification output. Ready to ship?"}
-  ci_cd:        {kind: station,    external: true}
-  ship:         {kind: station,    external: true}
-  monitor:      {kind: station,    skill: factory-monitor,     agent: factory-monitor}
+  # `deploy` is external (no agent): the post-merge CI/CD workflow. `ships_on`
+  # names the verdict that means "the change went live" — the declarative anchor
+  # for the North Star `shipped` metric, so the engine isn't hardcoded to a
+  # tail-state name (see dispatch.advance / line.ships_on).
+  deploy:       {kind: station,    external: true, ships_on: succeeded}
   needs_human:  {kind: human_gate, gate: needs_human,
                  prompt: "Triage needs your clarification to proceed."}
   # `blocked` is reachable two ways: the explicit `blocked` verdict routed below
@@ -79,17 +87,12 @@ routing:
     verified: ship_review
     failed: ship_review            # verification output always goes to the human gate
   ship_review:
-    approved: ci_cd
+    approved: deploy               # approve == merge the PR, which kicks off CI/CD
     not_ready: code_review         # the diagram's "Not ready" loop
     park: parked                   # human shelves it (recorded, revivable) — the gate's "halt"
-  ci_cd:
-    passed: ship
-    failed: code_review
-  ship:
-    shipped: monitor
-  monitor:
-    healthy: monitor               # keep monitoring (no human, no new work)
-    issue_detected: done           # current item done; station spawns a NEW item at triage
+  deploy:
+    succeeded: done                # post-merge CI/CD went green (build + deploy + health-wait)
+    failed: code_review            # deploy failed — back into the code loop
   needs_human:
     provided: triage
     park: parked

@@ -30,8 +30,9 @@ Repeat until you hit a human gate or a terminal state:
      directly, or spawn its subagent (`factory-<station>`) for context isolation
      on a big item. Do the *real* work, then make the `factory advance <id>
      --verdict ...` call the station's skill specifies.
-   - **run_external** → run the project's CI/deploy step (tests, build, deploy),
-     then `factory advance <id> --verdict passed|failed` (ci_cd) or `shipped` (ship).
+   - **run_external** → the post-merge CI/CD deploy (build + deploy + health-wait);
+     e.g. watch the merge's GitHub Actions run, then `factory advance <id>
+     --verdict succeeded|failed`. A green deploy is the ship point → `done`.
    - **human_gate** → **STOP.** Build the review packet (§3). Never decide for the human.
    - **done / parked / blocked** → report briefly and stop.
 

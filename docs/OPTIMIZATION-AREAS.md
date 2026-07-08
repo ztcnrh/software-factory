@@ -36,4 +36,24 @@ Each entry: what it is today · why it's fine for now · the idea for later.
 
 ---
 
+## 4. Continuous monitoring + auto-spawn is deferred
+
+**Today.** The line's tail is `ship_review → deploy → done`. A green post-merge deploy (the project's CI/CD, which for ECS/`fsd` services blocks on steady-state + health) is treated as the ship-and-success signal, so an item is *done* when it ships. There is no perpetual `monitor` station on the line — the `factory-monitor` skill/agent ship in the repo but aren't wired in. Post-ship regressions are handled as *new* work items, not by reopening the shipped one.
+
+**Why it's fine for now.** Zach-style perpetual monitoring needs a real signal layer (Grafana/Loki/Prometheus/CloudWatch reasoning) that these apps don't own at the factory level, and wiring an agent to reason over it is a large lift. Deploy-green is a legitimate 80/20 success signal for this app class, and "later bugs are new cycles" is an honest model.
+
+**The idea for later.** (a) Re-add a `monitor` state + routing to `line.yml` and run `factory-monitor` on a cron against shipped items once a signal source is connected. (b) **Preserve the learning thread cheaply even without it:** adopt the convention that a follow-up/bug item references its origin `WI-id` (or PR) so `factory new` sets `parent`. Then a regression that traces back to a shipped change is linkable, and retro can eventually connect *"this shipped item later caused a bug"* → sharpen `verify` / `code_review` — recovering the single highest-value signal that dropping `monitor` otherwise loses.
+
+---
+
+## 5. No issues-watcher yet — the factory has no automatic intake
+
+**Today.** The only things that start the line are a human running `factory new` (or the driver on an existing item). There's no sensor turning inbound requests into work items automatically. `CLOUD-AUTONOMY.md` already sketches the cloud half (an `issues: opened` workflow that calls `factory new` + applies `factory:triage`).
+
+**Why it's fine for now.** Hand-created items are enough to exercise and trust the line; intake automation is additive and can wait until the line itself is proven.
+
+**The idea for later.** A small **issues-watcher** sensor: poll `gh issue list --label intake --state open` on a cron (local launchd/`/loop` to start, the `issues: opened` workflow for cloud), and for each new issue run `factory new "<title>" --body "<body>"` then mark it ingested. It touches *nothing* on the line — it just feeds `start: triage` — so it's low-risk. This makes **GitHub issues the intake surface** (Jira stays for PM), and pairs naturally with the parent-link convention in §4.
+
+---
+
 <!-- Add new entries only when you can state the cost AND a direction. Keep it lean. -->

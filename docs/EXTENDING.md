@@ -8,7 +8,7 @@ Two parts: how to extend it, then an honest assessment of where this design is s
 The line is data. To add a station (say, a `security_review` between code-review and verify): add a state to `line.yml`, wire its routes, write `.claude/skills/factory-security-review/SKILL.md` and a matching subagent, and you're done — the engine, the `/factory` driver, and the cloud workflow all pick it up from `line.yml`. The routing is validated on load and unit-tested, so a malformed line fails loudly. To *reshape* flow (e.g., make verify auto-loop on failure instead of going to the human gate), just change the routing table.
 
 ### Tune cost vs. quality
-Each subagent names its model. Push mechanical stations down (Monitor is on haiku), keep judgment stations on sonnet, and reserve opus for Retro. If a station underperforms, the cheapest fix is usually a sharper `SKILL.md`, not a bigger model — and the Retro station will often propose exactly that edit.
+Each subagent names its model. Push mechanical stations down (the deferred Monitor is on haiku), keep judgment stations on sonnet, and reserve opus for Retro. If a station underperforms, the cheapest fix is usually a sharper `SKILL.md`, not a bigger model — and the Retro station will often propose exactly that edit.
 
 ### Language coverage
 The stations are language-agnostic by design: they read the repo's stack (`pyproject.toml` / `package.json` / `go.mod`) and follow its conventions. Python and TypeScript/JavaScript are the smoothest (rich tooling, fast tests). Go and Svelte work. The factory leans on three things existing in the target repo: a **test command**, a **formatter/linter**, and a **way to run the thing** — wherever those are weak, the Verify station gets weaker (see below).
@@ -28,7 +28,7 @@ Today the work-item substrate is local JSON with an optional GitHub-issue mirror
 
 **The cloud layer is a template, not a product.** Covered in [CLOUD-AUTONOMY.md](CLOUD-AUTONOMY.md): the issue↔work-item seam, concurrency, and cost-control need a shakedown on a sandbox. The local loop is solid today; the unattended loop is where the next real engineering is.
 
-**Cost honesty.** "At what cost" is half the North Star for a reason. A loop with several model-driven stations per change isn't free, and a misrouted item can burn tokens looping. Watch `factory metrics`' cost proxy, keep Monitor cheap and rare, and set spending limits before going unattended. The win has to clear its cost, per change.
+**Cost honesty.** "At what cost" is half the North Star for a reason. A loop with several model-driven stations per change isn't free, and a misrouted item can burn tokens looping. Watch `factory metrics`' cost proxy, keep any continuous stations (e.g. the deferred Monitor, when you enable it) cheap and rare, and set spending limits before going unattended. The win has to clear its cost, per change.
 
 **What it is *not*.** It won't invent product judgment, make priority calls, or own architecture decisions you haven't delegated — those surface as `needs_human`/gate decisions by design. It's a machine for executing and verifying well-scoped changes with shrinking supervision, and a method for *shrinking* that supervision over time. The taste, the priorities, and the "is this the right thing to build" stay with you — which is exactly the human's job in this loop.
 

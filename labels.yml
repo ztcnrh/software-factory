@@ -13,8 +13,7 @@ labels:
   - {name: "factory:code-review", color: "0e8a16", description: "At the code-review station"}
   - {name: "factory:verify",      color: "5319e7", description: "At the verification station"}
   - {name: "factory:ship-review", color: "fbca04", description: "Human gate: ready to ship?"}
-  - {name: "factory:ci-cd",       color: "bfdadc", description: "In CI/CD"}
-  - {name: "factory:monitor",     color: "d4c5f9", description: "Shipped; monitoring"}
+  - {name: "factory:deploy",      color: "bfdadc", description: "Post-merge CI/CD deploy"}
   - {name: "factory:needs-human", color: "d93f0b", description: "Human gate: clarification needed"}
   - {name: "factory:blocked",     color: "b60205", description: "Blocked; needs help"}
   - {name: "factory:parked",      color: "cccccc", description: "Parked for now"}

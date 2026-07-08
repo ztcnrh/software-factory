@@ -16,9 +16,8 @@ def test_happy_path_routes_match_diagram(factory_root: Path):
     assert line.route("implement", "implemented") == "code_review"
     assert line.route("code_review", "pass") == "verify"
     assert line.route("verify", "verified") == "ship_review"
-    assert line.route("ship_review", "approved") == "ci_cd"
-    assert line.route("ci_cd", "passed") == "ship"
-    assert line.route("ship", "shipped") == "monitor"
+    assert line.route("ship_review", "approved") == "deploy"
+    assert line.route("deploy", "succeeded") == "done"
 
 
 def test_loop_backs_send_work_backward(factory_root: Path):
@@ -39,6 +38,16 @@ def test_every_human_gate_can_park(factory_root: Path):
         assert line.route(gate, "park") == "parked"
 
 
+def test_deploy_is_the_ship_point_and_fails_back_to_review(factory_root: Path):
+    """The collapsed external tail: a green deploy ships (and is the declarative
+    metric anchor via `ships_on`); a failed deploy re-enters the code loop instead
+    of dead-ending. Guards against the tail silently losing its ship semantics."""
+    line = Line.load(factory_root / "line.yml")
+    assert line.route("deploy", "failed") == "code_review"
+    assert line.ships_on("deploy") == "succeeded"
+    assert line.ships_on("verify") is None  # only the deploy state carries the marker
+
+
 def test_unknown_verdict_raises(factory_root: Path):
     """An unroutable verdict must fail loudly rather than silently stall an item
     in limbo with no next state."""
@@ -54,5 +63,5 @@ def test_state_classification(factory_root: Path):
     assert line.is_gate("spec_review")
     assert line.is_station("implement")
     assert line.is_terminal("done")
-    assert line.is_external("ci_cd")
+    assert line.is_external("deploy")
     assert not line.is_external("implement")
