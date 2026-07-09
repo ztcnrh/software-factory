@@ -90,7 +90,7 @@ Periodically (or on a schedule, in cloud mode), run the learning station:
 
 It reads your accumulated interventions and the metrics, finds the patterns, and **proposes** changes — sharper station skills, better templates, and dormant **gate policies** — written to `.factory/retro/<date>/` and opened as a PR. You **dispose**: review the PR, and activate any proposed policy by setting `approved_by:` on it in `policies.yml`. Each thing you accept permanently removes a class of work from your plate. (See [LEARNING-LOOP.md](docs/LEARNING-LOOP.md) for the worked example, where one intervention led to a gate that now clears itself.)
 
-Watch `factory metrics`. The number to grow is **auto-ship rate**; the list of "where humans step in" tells you and the Retro station where the next win is.
+Watch `factory metrics`. The number to grow is the **one-shot ship rate** — the share of changes that ship with no human rework (send-back, correction, or unblock). It is *not* about removing yourself from the loop: you still own the ship decision and can attend every gate; the goal is that the line gets good enough that your review is a rubber-stamp. Expect it low early on and climbing as the factory learns. The list of "where humans had to step in" tells you and the Retro station where the next win is.
 
 ---
 

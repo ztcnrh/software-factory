@@ -29,7 +29,7 @@ _STEERING_VERDICTS = {"needs_revision", "not_ready", "park"}
 class Action:
     """What the driver (the /factory command) should do next for an item."""
 
-    type: str  # run_station | run_external | human_gate | auto_gate | done | parked | blocked
+    type: str  # run_station | run_external | human_gate | auto_gate | done | parked
     item_id: str
     state: str
     skill: str | None = None
@@ -139,6 +139,7 @@ class Dispatcher:
                 cost=report.cost,
             )
             item.state = "blocked"
+            item.steers += 1  # a block means autonomy broke here — counts as a human step-in
             self.store.save(item)
             self.metrics.emit(
                 kind="station",
@@ -170,7 +171,11 @@ class Dispatcher:
             item.log(kind="spawn", actor=report.station, note=f"spawned {child.id}: {child.title}")
         if report.verdict == self.line.ships_on(state):  # a change just shipped
             self.metrics.emit(
-                kind="shipped", item=item.id, human_touches=item.human_touches, cost=item.cost
+                kind="shipped",
+                item=item.id,
+                human_touches=item.human_touches,
+                steers=item.steers,
+                cost=item.cost,
             )
         self.store.save(item)
         self.metrics.emit(
@@ -202,6 +207,7 @@ class Dispatcher:
         item.state = nxt
         is_intervention = decision.changed or decision.decision in _STEERING_VERDICTS
         if is_intervention:
+            item.steers += 1  # a send-back / correction / park is human rework
             path = self.interventions.record(item, decision, state, produced)
             item.log(kind="note", actor="factory", note=f"intervention recorded: {path.name}")
         self.store.save(item)
@@ -210,6 +216,7 @@ class Dispatcher:
             item=item.id,
             gate=gate_name,
             decision=decision.decision,
+            by=decision.by,
             required_human=True,
             changed=is_intervention,
         )

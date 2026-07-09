@@ -22,9 +22,11 @@ version: 1
 # The headline objective the whole factory optimizes toward. Every other
 # component (metrics, policies, the retro station) serves this number.
 north_star: >
-  Maximize the share of changes shipped with zero human intervention, at an
-  acceptable cost per change — and raise that share over time by learning from
-  every human touch.
+  Maximize the one-shot ship rate: the share of changes that ship without any
+  human rework — no send-back, no correction, no unblock — at an acceptable cost
+  per change. The human stays in the loop and owns the ship decision; the goal is
+  not to remove human review but to make the line good enough that review becomes
+  a rubber-stamp. Raise this share over time by learning from every human step-in.
 
 # Every state a work item can occupy. `kind` is one of:
 #   station     -> an agent does the work, then emits a verdict that routes it

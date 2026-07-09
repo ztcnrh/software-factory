@@ -29,7 +29,7 @@ One decider and three movers:
 - **`next_action()`** — *pure*: state in, `Action` out, mutates nothing. The order of its checks matters: terminal → gate (policy first, then human) → external → station.
 - **`advance()`** — a station finished; record its report and route on the verdict. Note the **escape hatch** near the top: if the report set `human_required`, the item goes straight to `blocked`, *bypassing the routing table entirely*. Any station can pull this cord at any time — it's the one movement the routing diagram doesn't show.
 - **`gate()`** — a human decided. The `is_intervention` line is the learning loop's front door: `changed` or a steering verdict (`needs_revision` / `not_ready` / `park`) → an intervention record gets written.
-- **`apply_auto_gate()`** — a signed policy clears a gate with no human. It emits `required_human=False`, which is literally where the auto-ship metric comes from.
+- **`apply_auto_gate()`** — a signed policy clears a gate with no human (emits `required_human=False`, and no steer). That's *one* way a change lands one-shot, but not the main one: the headline metric counts ships with zero human *rework*, so the primary driver is stations good enough that the human approves unchanged.
 
 So there are **four ways an item moves**: a station verdict (`advance` → `route`), a human decision (`gate` → `route`), a policy auto-clear (`apply_auto_gate`), and the escape hatch (`human_required` → `blocked`, no routing).
 
@@ -49,9 +49,9 @@ The rest (board rendering, label creation) is skimmable plumbing.
 These are the leaf modules the motor calls into. None of them affect the line's *motion*; each owns one artifact on disk.
 
 - **`store.py`** — work items persist as JSON under `.factory/work-items/`, one file per item, `WI-NNNN` ids. Local JSON is the source of truth; everything else (GitHub issues, metrics) derives from or mirrors it.
-- **`policies.py` + `policies.yml`** — the autonomy lever, worth its own sitting. A policy is a small rule: *at gate G, if the item matches (`labels_any` / `labels_all` / `max_risk`), apply this decision automatically.* The load-bearing detail is in `auto_decision()`: a rule is **dead until a human sets `approved_by`** — the factory can propose shortcuts but never take them unsigned. This one mechanism is how "more ships without a human" happens safely.
+- **`policies.py` + `policies.yml`** — the autonomy lever, worth its own sitting. A policy is a small rule: *at gate G, if the item matches (`labels_any` / `labels_all` / `max_risk`), apply this decision automatically.* The load-bearing detail is in `auto_decision()`: a rule is **dead until a human sets `approved_by`** — the factory can propose shortcuts but never take them unsigned. This one mechanism is how a proven-safe slice safely earns a hands-off clear — cleared without you, but never unsigned.
 - **`interventions.py`** — writes one markdown record per human steer (what the station produced, what the human wanted, *why*, plus a machine-readable block) to `.factory/interventions/`. This module's `_TEMPLATE` is the record's source of truth. These records are the fuel for everything in [LEARNING-LOOP.md](LEARNING-LOOP.md).
-- **`metrics.py`** — an append-only event ledger (`.factory/metrics/events.jsonl`) rolled up by `summary()` into the North Star: auto-ship rate, where humans step in (ranked worst-gate-first), cost per shipped change.
+- **`metrics.py`** — an append-only event ledger (`.factory/metrics/events.jsonl`) rolled up by `summary()` into the North Star: the one-shot ship rate (shipped with no human rework), where humans had to step in (ranked worst-stage-first, blocks included), cost per shipped change.
 - **`retro.py`** — assembles interventions + metrics into a briefing for the retro *station* (the skill does the thinking; this module just gathers).
 - **`adapters/github.py`** — optional mirror: syncs a `factory:<state>` label and comments onto a GitHub issue so the conveyor is visible there. Nothing depends on it; skip until you care about cloud mode.
 

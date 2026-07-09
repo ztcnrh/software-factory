@@ -1,8 +1,8 @@
 # Software Factory
 
-A personal, self-improving **software factory** — an agentic delivery line that triages, specs, implements, reviews, verifies, and ships software changes, and **learns from every human touch** so it needs you less over time.
+A personal, self-improving **software factory** — an agentic delivery line that triages, specs, implements, reviews, verifies, and ships software changes, and **learns from every human steer** so it needs you less over time.
 
-It's the working prototype of the "factory engineering" idea: you stop hand-building each feature and instead operate (and continuously improve) a machine that builds features for you. The job shifts from writing code to raising one number — *the share of changes that ship without a human in the loop (TODO: create this as a metric somehow), at an acceptable cost* — and driving it up over time.
+It's the working prototype of the "factory engineering" idea: you stop hand-building each feature and instead operate (and continuously improve) a machine that builds features for you. The job shifts from writing code to raising one number — the **one-shot ship rate**, *the share of changes that ship with no human rework (no send-back, correction, or unblock), at an acceptable cost*. You stay in the loop and own the ship decision; the aim isn't to remove your review but to make the line good enough that review becomes a rubber-stamp — and to drive that share up over time.
 
 This repo is the **factory** (the reusable machinery). It operates *on* your project repos. A worked example lives next door in `[../software-factory-demo](../software-factory-demo)`.
 
@@ -29,7 +29,7 @@ Five **stations** (Triage, Spec, Implement, Code-review, Verify) do the work; a 
 | The triggers         | the `**/factory`** command drives the loop locally; opt-in **GitHub Actions** (`workflows/`) run it unattended                             |
 | The human gates      | the driver stops, shows a **review packet**, and records your decision **and your reasoning**                                              |
 | The learning loop    | every steer writes an **intervention record**; the **Retro** station turns those into PRs against the factory's own skills + gate policies |
-| The goal             | a **metrics ledger** tracking the North Star: % shipped with zero human touch, and at what cost                                            |
+| The goal             | a **metrics ledger** tracking the North Star: the one-shot ship rate (% shipped with no human rework), and at what cost                       |
 
 
 ## Quickstart

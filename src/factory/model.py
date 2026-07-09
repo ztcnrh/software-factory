@@ -49,7 +49,8 @@ class WorkItem:
     source: str = "local"  # local | github
     source_ref: str | None = None  # e.g. github issue number
     attempts: dict[str, int] = field(default_factory=dict)  # per-state run counts
-    human_touches: int = 0
+    human_touches: int = 0  # times a human was present at a gate (attention proxy)
+    steers: int = 0  # times a human had to rework the line: gate send-back/correction, or unblock
     cost: float = 0.0  # accumulated cost proxy (tokens or $)
     parent: str | None = None  # the item that spawned this one (e.g. a follow-up bug)
     created: str = field(default_factory=_now)
@@ -102,7 +103,7 @@ class GateDecision:
 
     gate: str
     decision: str  # the verdict chosen, e.g. "approved" | "needs_revision"
-    by: str = "human"
+    by: str = "unknown"  # who decided — the CLI resolves this to a real identity
     changed: bool = False  # did the human change/steer anything?
     notes: str = ""
     expected: str = ""  # what the human wanted the station to have produced

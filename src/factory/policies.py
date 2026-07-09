@@ -17,6 +17,11 @@ import yaml
 from .model import WorkItem
 
 _RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "unknown": 3}
+_WHEN_KEYS = {"labels_any", "labels_all", "max_risk"}  # the ONLY valid condition keys
+
+
+class PolicyError(Exception):
+    """Raised on a malformed gate policy — caught at load time (e.g. ``factory init``)."""
 
 
 class Policies:
@@ -24,6 +29,7 @@ class Policies:
         self.path = path
         self.default = data.get("default", "require_human")
         self.rules: list[dict] = data.get("rules") or []
+        self._validate()
 
     @classmethod
     def load(cls, path: str | Path) -> Policies:
@@ -45,8 +51,46 @@ class Policies:
                 return rule
         return None
 
+    def _validate(self) -> None:
+        """Reject malformed rules at load, before any of them can fire.
+
+        The failure mode we most care about points the *unsafe* way: a typo in a
+        ``when`` key (``lables_any``) is silently ignored by ``_matches``, which
+        would widen an approved rule to match *every* item at its gate — the human
+        signed a narrow rule and got a match-all. So an unrecognized key is a hard
+        error here rather than a silent broadening. Runs on every rule, dormant or
+        not, so a bad rule is caught before it's ever signed."""
+        for i, rule in enumerate(self.rules):
+            rid = rule.get("id", f"#{i}")
+            if not rule.get("gate"):
+                raise PolicyError(f"policy {rid!r}: missing required 'gate'")
+            if not rule.get("decision"):
+                raise PolicyError(f"policy {rid!r}: missing required 'decision'")
+            when = rule.get("when")
+            if when == "all":  # deliberate, explicit match-everything
+                continue
+            if not isinstance(when, dict) or not when:
+                raise PolicyError(
+                    f"policy {rid!r}: 'when' must list at least one condition "
+                    f"({', '.join(sorted(_WHEN_KEYS))}). To match every item at the "
+                    f"gate on purpose, set 'when: all' (or drop the gate in line.yml)."
+                )
+            unknown = set(when) - _WHEN_KEYS
+            if unknown:
+                raise PolicyError(
+                    f"policy {rid!r}: unknown condition key(s) {sorted(unknown)}; "
+                    f"valid keys are {sorted(_WHEN_KEYS)}"
+                )
+            if "max_risk" in when and when["max_risk"] not in _RISK_ORDER:
+                raise PolicyError(
+                    f"policy {rid!r}: max_risk {when['max_risk']!r} is not one of "
+                    f"{sorted(_RISK_ORDER)}"
+                )
+
     @staticmethod
-    def _matches(when: dict, item: WorkItem) -> bool:
+    def _matches(when: dict | str, item: WorkItem) -> bool:
+        if when == "all":  # validated match-everything sentinel
+            return True
         if "labels_any" in when and not set(when["labels_any"]) & set(item.labels):
             return False
         if "labels_all" in when and not set(when["labels_all"]) <= set(item.labels):

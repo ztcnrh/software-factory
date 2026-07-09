@@ -17,7 +17,10 @@ agent can parse the directive unambiguously.
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -26,6 +29,8 @@ from .line import Line
 from .model import GateDecision, StationReport
 from .retro import briefing
 
+# Keyed by Action.type. The `blocked` gate is not an action type — it surfaces as
+# a `human_gate` — so its ⛔ glyph is applied by gate name in _print_action, not here.
 _ICONS = {
     "run_station": "▶",
     "run_external": "⚙",
@@ -33,7 +38,6 @@ _ICONS = {
     "auto_gate": "⚡",
     "done": "✓",
     "parked": "⏸",
-    "blocked": "⛔",
 }
 
 _STAGE_ORDER = [
@@ -60,6 +64,34 @@ def _disp(args: argparse.Namespace) -> Dispatcher:
     return Dispatcher(_root(args))
 
 
+def _resolve_actor(args: argparse.Namespace) -> str:
+    """Who is deciding at this gate — a real, trackable signature, not a generic
+    'human'. Explicit --by wins; then $FACTORY_USER, the repo's git identity, the
+    OS login. 'unknown' only if every source comes up empty. This is what keeps
+    every gate decision attributable, so who approved what is analyzable later."""
+    if getattr(args, "by", None):
+        return args.by.strip()
+    env = os.environ.get("FACTORY_USER", "").strip()
+    if env:
+        return env
+    try:
+        r = subprocess.run(
+            ["git", "config", "user.name"],
+            cwd=_root(args),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        return getpass.getuser()
+    except Exception:  # noqa: BLE001 — getuser can raise if no login name resolves
+        return "unknown"
+
+
 def _resolve_next(d: Dispatcher, item_id: str) -> Action:
     """Walk forward through any policy-cleared gates, return the next real action."""
     item = d.store.load(item_id)
@@ -72,7 +104,10 @@ def _resolve_next(d: Dispatcher, item_id: str) -> Action:
 
 
 def _print_action(action: Action, line: Line) -> None:
-    print(f"\n{_ICONS.get(action.type, '•')} {action.item_id} @ {action.state}")
+    # Distinct glyph for the blocked gate: it means a station hit the human_required
+    # escape hatch (something went wrong), not a routine checkpoint like ship_review.
+    icon = "⛔" if action.gate == "blocked" else _ICONS.get(action.type, "•")
+    print(f"\n{icon} {action.item_id} @ {action.state}")
     if action.message:
         print(f"  {action.message}")
     if action.type == "run_station":
@@ -96,7 +131,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         print(f"⚠ missing config in {root}: {', '.join(missing)}")
         print("  Adopt the factory here with install/install.py first.")
         return 1
-    Dispatcher(root)  # validates line.yml
+    Dispatcher(root)  # validates line.yml + policies.yml
     print(f"✓ factory initialized at {root}")
     print('  Create your first work item:  factory new "<title>"')
     return 0
@@ -163,7 +198,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
     decision = GateDecision(
         gate=gate,
         decision=args.decision,
-        by=args.by or "human",
+        by=_resolve_actor(args),
         changed=args.changed,
         notes=args.notes or "",
         expected=args.expected or "",
@@ -192,7 +227,8 @@ def _render_board(d: Dispatcher) -> None:
         tag = "✋" if kind == "human_gate" else ("✓" if kind == "terminal" else "▸")
         print(f"\n  {tag} {st} ({len(group)})")
         for it in group:
-            print(f"      {it.id}  {it.title}   [risk:{it.risk} human:{it.human_touches}]")
+            meta = f"risk:{it.risk} steers:{it.steers} touches:{it.human_touches}"
+            print(f"      {it.id}  {it.title}   [{meta}]")
     print()
 
 
@@ -200,7 +236,7 @@ def _render_item(d: Dispatcher, item_id: str) -> None:
     item = d.store.load(item_id)
     print(f"\n● {item.id}: {item.title}")
     print(
-        f"  state: {item.state}   risk: {item.risk}   "
+        f"  state: {item.state}   risk: {item.risk}   steers: {item.steers}   "
         f"human touches: {item.human_touches}   cost: {item.cost}"
     )
     if item.labels:
@@ -227,16 +263,20 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 def cmd_metrics(args: argparse.Namespace) -> int:
     s = _disp(args).metrics.summary()
-    print("\n📈 Factory metrics — North Star: share shipped with zero human intervention\n")
-    print(f"  auto-ship rate:    {s['auto_ship_rate']:.0%}  ({s['auto_shipped']}/{s['shipped']})")
-    print(f"  human gate stops:  {s['human_gate_stops']}")
-    print(f"  human changes:     {s['human_changes']}")
-    print(f"  total cost:        {s['total_cost']}")
-    print(f"  cost per shipped:  {s['cost_per_shipped']}")
-    if s["interventions_by_gate"]:
-        print("\n  where humans step in (aim the learning here):")
-        for g, n in s["interventions_by_gate"].items():
-            print(f"    {g}: {n}")
+    print("\n📈 Factory metrics — North Star: one-shot ship rate\n")
+    print(
+        f"  one-shot ship rate: {s['one_shot_ship_rate']:.0%}  "
+        f"({s['one_shot_shipped']}/{s['shipped']} shipped with no rework)"
+    )
+    print(f"  human gate stops:   {s['human_gate_stops']}  (human present (expected))")
+    print(f"  human steers:       {s['human_steers']}  (send-backs, corrections, unblocks)")
+    print(f"  fully hands-off:    {s['hands_off_shipped']}/{s['shipped']}  (no human present)")
+    print(f"  total cost:         {s['total_cost']}")
+    print(f"  cost per shipped:   {s['cost_per_shipped']}")
+    if s["steers_by_stage"]:
+        print("\n  where humans had to step in (aim the learning here):")
+        for stage, n in s["steers_by_stage"].items():
+            print(f"    {stage}: {n}")
     print()
     return 0
 
@@ -330,7 +370,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("gate", help="record a human decision at a gate")
     s.add_argument("id")
     s.add_argument("--decision", required=True)
-    s.add_argument("--by")
+    s.add_argument(
+        "--by",
+        help="who is deciding; defaults to $FACTORY_USER or your git identity",
+    )
     s.add_argument("--changed", action="store_true", help="the human steered/edited something")
     s.add_argument("--notes")
     s.add_argument("--expected", help="what the human wanted the station to produce")

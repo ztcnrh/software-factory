@@ -19,6 +19,10 @@
 - ⏸ **Shelve** → `factory gate <WI-id> --decision park --changed --notes "<why now-not>" --category <kind>`
   (→ `parked`, revivable later)
 
+Every decision is **signed**: `factory gate` records it under your git identity
+automatically (override with `--by <name>`; a cloud station passes the reviewer's
+`github.actor`), so who approved what is tracked with no extra typing.
+
 If you send it back or approve-with-tweaks, the `--notes` and `--category` are
 exactly what the **learning loop** uses to make this gate disappear for this class
 of work over time. Thirty seconds of "why" now buys you fewer gates later.

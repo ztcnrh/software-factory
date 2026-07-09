@@ -20,7 +20,7 @@ Each entry: what it is today · why it's fine for now · the idea for later.
 
 **Today.** Interventions — the retro station's fuel — are written *only when a human steers at a gate* (`dispatch.gate()` → steering verdicts). The `code_review ↔ implement` loop is fully automated, so no matter how many times it ping-pongs, it produces **zero** intervention records. The only trace is `WorkItem.attempts[state]` (per-state run counts) and raw metrics events, which the retro briefing doesn't currently foreground.
 
-**Why it's fine for now.** The North Star is human touches, and optimizing the human frontier is the highest-leverage target first. Agent-loop thrash costs tokens, not human time.
+**Why it's fine for now.** The North Star is human *rework* (steers), and optimizing the human frontier is the highest-leverage target first. Agent-loop thrash costs tokens, not human time.
 
 **The idea for later.** Surface `attempts` as a retro signal: flag items whose `attempts[<state>] ≥ N` (e.g. an implement/code_review loop that bounced 4+ times) as a distinct input to `factory retro`, so the learning station can see *"this class of work churns internally"* and sharpen the spec or the code-review bar even when no human ever stepped in. Cheap: the data already exists on the work item; it just needs to be read and clustered.
 

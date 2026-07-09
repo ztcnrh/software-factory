@@ -1,8 +1,11 @@
 """The North Star ledger: an append-only event log plus aggregate views.
 
-Headline metric: the share of shipped changes that required zero human
-intervention. Plus where humans step in most (so the retro station knows where
-to aim) and a cost-per-change proxy (Lloyd's "at what cost").
+Headline metric: the **one-shot ship rate** — the share of shipped changes that
+needed no human rework anywhere on the line (no send-back, no correction, no
+unblock). The human still owns the ship decision and stays in the loop; this
+measures how often the line was good enough that review was a rubber-stamp, not
+how often the human was absent. Plus where humans had to step in (so the retro
+station knows where to aim) and a cost-per-change proxy.
 """
 
 from __future__ import annotations
@@ -37,21 +40,33 @@ class Metrics:
         shipped = [e for e in events if e.get("kind") == "shipped"]
         gates = [e for e in events if e.get("kind") == "gate"]
         human_gates = [g for g in gates if g.get("required_human")]
-        changed_gates = [g for g in gates if g.get("changed")]
-        auto_shipped = [s for s in shipped if s.get("human_touches", 0) == 0]
-        by_gate: dict[str, int] = {}
-        for g in human_gates:
+        steered_gates = [g for g in gates if g.get("changed")]  # human reworked at a gate
+        blocks = [e for e in events if e.get("kind") == "station" and e.get("verdict") == "blocked"]
+        # A one-shot ship needed no human rework anywhere on its journey (steers == 0).
+        # This is the North Star. `hands_off` (no human present at all) is a secondary,
+        # expected-to-be-low signal — the human is meant to stay in the loop.
+        one_shot = [s for s in shipped if s.get("steers", 0) == 0]
+        hands_off = [s for s in shipped if s.get("human_touches", 0) == 0]
+        # Where humans had to step in, ranked worst-first — the retro's to-do list. Gate
+        # rework is keyed by gate; a station that pulled the escape hatch (blocked) is keyed by that
+        # station (that's where autonomy actually broke), tagged so the two don't blur.
+        by_stage: dict[str, int] = {}
+        for g in steered_gates:
             key = g.get("gate", "?")
-            by_gate[key] = by_gate.get(key, 0) + 1
+            by_stage[key] = by_stage.get(key, 0) + 1
+        for b in blocks:
+            key = f"{b.get('station', '?')} (blocked)"
+            by_stage[key] = by_stage.get(key, 0) + 1
         total = len(shipped)
         cost = sum(e.get("cost", 0.0) for e in events)
         return {
             "shipped": total,
-            "auto_shipped": len(auto_shipped),
-            "auto_ship_rate": (len(auto_shipped) / total) if total else 0.0,
+            "one_shot_shipped": len(one_shot),
+            "one_shot_ship_rate": (len(one_shot) / total) if total else 0.0,
+            "hands_off_shipped": len(hands_off),  # secondary: shipped with no human present
             "human_gate_stops": len(human_gates),
-            "human_changes": len(changed_gates),
-            "interventions_by_gate": dict(sorted(by_gate.items(), key=lambda kv: -kv[1])),
+            "human_steers": len(steered_gates) + len(blocks),
+            "steers_by_stage": dict(sorted(by_stage.items(), key=lambda kv: -kv[1])),
             "total_cost": round(cost, 4),
             "cost_per_shipped": round(cost / total, 4) if total else 0.0,
         }

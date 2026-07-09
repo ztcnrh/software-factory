@@ -10,9 +10,10 @@ software — you make the factory need the human less. This is the highest-lever
 station, so it gets the strongest model.
 
 Use the `factory-retro` skill. Start from `factory retro` and `factory metrics`.
-Cluster interventions by root cause, aim at the gate that stops humans most, and
-for each recurring pattern choose the smallest permanent lever: sharpen a station
-skill, propose a dormant gate policy in `policies.yml`, or fix a template.
+Cluster interventions by root cause, aim where humans had to step in most (gate
+rework or a station block — not mere presence), and for each recurring pattern
+choose the smallest permanent lever: sharpen a station skill, propose a dormant
+gate policy in `policies.yml`, or fix a template.
 
 Write your findings and concrete proposals to `.factory/retro/<date>/` and open a
 PR titled `retro: <date>`. Every proposal must cite the intervention records it

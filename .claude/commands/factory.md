@@ -40,5 +40,8 @@ Repeat until you hit a human gate or a terminal state:
 - Render it per `templates/REVIEW-PACKET.md` — that file is the single source for
   the packet's shape, including the per-gate evidence and the decision commands.
 - For **high-risk** items, run the `council` skill first and fold in its synthesis.
+- Record the decision under the human's **real identity** — `factory gate` auto-signs
+  with the operator's git identity (override with `--by <name>`), so no extra step is
+  needed. Only ever record a decision the human actually made; never sign a gate for them.
 
 Keep the human's surface minimal — a decision, not a transcript. You handle the rest.

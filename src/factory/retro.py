@@ -22,13 +22,13 @@ def briefing(root: str | Path) -> str:
     lines = ["# Retro briefing", ""]
     lines.append(f"- Interventions on record: **{len(files)}**")
     lines.append(
-        f"- Auto-ship rate: **{summary['auto_ship_rate']:.0%}** "
-        f"({summary['auto_shipped']}/{summary['shipped']} shipped with no human touch)"
+        f"- One-shot ship rate: **{summary['one_shot_ship_rate']:.0%}** "
+        f"({summary['one_shot_shipped']}/{summary['shipped']} shipped with no human rework)"
     )
-    if summary["interventions_by_gate"]:
-        lines.append("- Human stops by gate (aim the learning here, worst first):")
-        for gate, n in summary["interventions_by_gate"].items():
-            lines.append(f"    - `{gate}`: {n}")
+    if summary["steers_by_stage"]:
+        lines.append("- Where humans had to step in (aim the learning here, worst first):")
+        for stage, n in summary["steers_by_stage"].items():
+            lines.append(f"    - `{stage}`: {n}")
     lines += ["", "## Raw intervention records", ""]
     if not files:
         lines.append("_No interventions recorded yet — nothing to learn from._")

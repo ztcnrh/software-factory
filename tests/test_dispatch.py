@@ -34,7 +34,42 @@ def test_full_happy_path_reaches_done_and_logs_one_ship(factory_root: Path):
 
     shipped = [e for e in d.metrics.events() if e["kind"] == "shipped"]
     assert len(shipped) == 1
-    assert shipped[0]["human_touches"] == 2
+    assert shipped[0]["human_touches"] == 2  # human attended both gates
+    assert shipped[0]["steers"] == 0  # ...but both approvals were clean — a one-shot ship
+    assert d.metrics.summary()["one_shot_ship_rate"] == 1.0
+
+
+def test_gate_rework_and_block_both_count_as_steers_but_clean_approval_does_not(
+    factory_root: Path,
+):
+    """A steer = human rework. A gate send-back and a station block (escape hatch)
+    each increment the item's steer count; a clean approval must not. This is what
+    keeps the one-shot metric measuring rework, not mere human presence."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("Feature", risk="low")
+    _advance(d, item, "needs_spec")
+    _advance(d, item, "ready_for_review")
+    d.gate(item, GateDecision(gate="spec_review", decision="needs_revision", notes="fix it"))
+    assert item.steers == 1  # a send-back is rework
+    _advance(d, item, "ready_for_review")
+    d.gate(item, GateDecision(gate="spec_review", decision="approved"))
+    assert item.steers == 1  # a clean approval adds nothing
+    _advance(d, item, "implemented", human_required=True, human_reason="needs a prod secret")
+    assert item.state == "blocked"
+    assert item.steers == 2  # a block means autonomy broke — counts too
+
+
+def test_gate_records_the_decider_identity(factory_root: Path):
+    """Every gate decision carries a signature (by) into both the item history and
+    the metrics ledger, so who approved what is attributable for later analysis."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("x", risk="low")
+    _advance(d, item, "needs_spec")
+    _advance(d, item, "ready_for_review")
+    d.gate(item, GateDecision(gate="spec_review", decision="approved", by="alice"))
+    gate_events = [e for e in d.metrics.events() if e["kind"] == "gate"]
+    assert gate_events[-1]["by"] == "alice"
+    assert [e for e in item.history if e.kind == "gate"][-1].actor == "human:alice"
 
 
 def test_needs_revision_records_intervention_and_loops_back(factory_root: Path):

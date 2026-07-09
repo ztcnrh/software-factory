@@ -1,6 +1,6 @@
 ---
 name: factory-retro
-description: The factory's learning station. Read the accumulated human interventions, find the patterns, and propose permanent changes to the factory itself — sharper station skills, new gate auto-approval policies, better templates — so the same class of problem stops needing a human. Use when running a factory retro, after several interventions have accumulated, or when asked to make the factory learn / improve itself.
+description: The factory's learning station. Read the accumulated human interventions, find the patterns, and propose permanent changes to the factory itself — sharper station skills, new gate auto-approval policies, better templates — so the same class of problem stops needing human rework. Use when running a factory retro, after several interventions have accumulated, or when asked to make the factory learn / improve itself.
 ---
 
 # Retro station — how the factory improves itself
@@ -8,14 +8,16 @@ description: The factory's learning station. Read the accumulated human interven
 You are the **learning station**. Every other station produces software; you
 produce a *better factory*. Your input is the record of every time a human had to
 step in. Your output is a set of changes that make those steps unnecessary next
-time. This is the operational form of the article's thesis: **every human touch
-is a failure to learn from — so learn from it.**
+time. This is the operational form of the article's thesis: **every human *steer*
+— a send-back, a correction, an unblock — is a signal to learn from, so learn from
+it.** (A human merely present at a gate who approves unchanged is not a failure —
+that's the line working. You're hunting rework, not presence.)
 
 ## Read first
 - Run `factory retro` (or `factory retro --emit .factory/retro/briefing.md`). It
   gives you the metrics and every intervention record.
-- `factory metrics` — which gate stops humans most. Aim there first; that's where
-  the leverage is.
+- `factory metrics` — where humans had to step in most (gate rework or a station
+  block). Aim there first; that's where the leverage is.
 - The current station skills under `.claude/skills/` and `policies.yml`.
 
 ## Find the pattern
@@ -29,7 +31,7 @@ Cluster the interventions by root cause, not surface symptom. For each cluster a
 | Pattern | Lever |
 |---|---|
 | Station keeps missing the same kind of thing | **Edit that station's SKILL.md** — add the check to its quality bar / read-first. |
-| A gate approves the same category unchanged, every time | **Propose a gate policy** in `policies.yml` (dormant, `approved_by: null`) so that category auto-clears once you sign it. This is what raises the auto-ship rate. |
+| A gate approves the same category unchanged, every time | **Propose a gate policy** in `policies.yml` (dormant, `approved_by: null`) so that category auto-clears once you sign it. Follow the rule shape documented at the top of `policies.yml` — the only valid `when` keys are `labels_any`, `labels_all`, `max_risk`, and an unknown key is a hard load error (so match the schema exactly; don't invent conditions). This is what raises the one-shot ship rate. |
 | Specs keep omitting the same section | **Edit the template** (`templates/PRODUCT.md` / `TECH.md`). |
 | Humans keep asking for the same missing info to decide at a gate | **Edit `templates/REVIEW-PACKET.md`** — add the field the packet should always surface. |
 | Work is mis-routed | **Adjust `line.yml`** routing or triage heuristics (rare; be conservative). |
@@ -53,5 +55,5 @@ disposes** — but each accepted proposal permanently removes work from their pl
 - Prefer the narrowest change that works. Don't rewrite a station because of one
   bad day; don't propose an auto-approval policy unless the category has been
   approved-unchanged repeatedly and is genuinely low-risk.
-- Be honest about regressions: a policy that auto-ships too broadly is worse than
-  a human gate. State the blast radius of each proposed policy.
+- Be honest about regressions: a policy that clears a gate too broadly is worse
+  than a human gate. State the blast radius of each proposed policy.
