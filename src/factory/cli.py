@@ -482,7 +482,7 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            '  factory advance WI-0007 --verdict approved --summary "spec written" \\\n'
+            '  factory advance WI-0007 --verdict ready_for_review --summary "spec written" \\\n'
             "      --artifact specs/WI-0007/PRODUCT.md --confidence 0.85\n"
             "  factory advance WI-0007 --verdict automatable --risk low\n"
             '  factory advance WI-0007 --human-required --human-reason "touches auth tables"\n'
