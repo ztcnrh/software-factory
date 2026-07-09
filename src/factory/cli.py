@@ -331,26 +331,53 @@ def cmd_labels(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="factory", description="Personal software factory dispatcher.")
-    p.add_argument("--root", default=".", help="factory root (holds line.yml and .factory/)")
+    p = argparse.ArgumentParser(prog="factory", description="Software factory dispatcher.")
+    p.add_argument("--root", default=".", help="Factory root (holds line.yml and .factory/)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("init", help="create .factory/ runtime dirs and validate config")
+    s = sub.add_parser("init", help="Create .factory/ runtime dirs and validate config")
     s.set_defaults(func=cmd_init)
 
-    s = sub.add_parser("new", help="create a work item")
-    s.add_argument("title")
-    s.add_argument("--body", default="")
-    s.add_argument("--body-file")
-    s.add_argument("--label", action="append")
-    s.add_argument("--risk", default="unknown", choices=["low", "medium", "high", "unknown"])
+    s = sub.add_parser(
+        "new",
+        help="Create a work item (enters the line at triage)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            '  factory new "Add rate limiting to the quotes API"\n'
+            '  factory new "Fix flaky auth test" --body "Fails ~1 in 5 runs on CI." \\\n'
+            "      --label bug --label ci --risk low\n"
+            '  factory new "Migrate DB to Postgres 17" --body-file request.md --risk high'
+        ),
+    )
+    s.add_argument("title", help="One-line summary; becomes the item's title on the board")
+    body_src = s.add_mutually_exclusive_group()
+    body_src.add_argument(
+        "--body", default="", help="Longer description (context, acceptance criteria)"
+    )
+    body_src.add_argument(
+        "--body-file", metavar="FILE", help="Read the description from FILE instead of --body"
+    )
+    s.add_argument(
+        "--label",
+        action="append",
+        metavar="LABEL",
+        help="Attach one label; repeat the flag for more (--label bug --label ci). "
+        "Not comma-separated.",
+    )
+    s.add_argument(
+        "--risk",
+        default="unknown",
+        choices=["low", "medium", "high", "unknown"],
+        help="Initial estimated risk level; triage may revise it (default: %(default)s)",
+    )
     s.set_defaults(func=cmd_new)
 
-    s = sub.add_parser("next", help="show the next action for a work item")
+    s = sub.add_parser("next", help="Show the next action for a work item")
     s.add_argument("id")
     s.set_defaults(func=cmd_next)
 
-    s = sub.add_parser("advance", help="record a station report and route the item")
+    s = sub.add_parser("advance", help="Record a station report and route the item")
     s.add_argument("id")
     s.add_argument("--verdict")
     s.add_argument("--summary")
@@ -367,35 +394,35 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--report", help="JSON file with a full StationReport")
     s.set_defaults(func=cmd_advance)
 
-    s = sub.add_parser("gate", help="record a human decision at a gate")
+    s = sub.add_parser("gate", help="Record a human decision at a gate")
     s.add_argument("id")
     s.add_argument("--decision", required=True)
     s.add_argument(
         "--by",
-        help="who is deciding; defaults to $FACTORY_USER or your git identity",
+        help="Who is deciding; defaults to $FACTORY_USER or your git identity",
     )
-    s.add_argument("--changed", action="store_true", help="the human steered/edited something")
+    s.add_argument("--changed", action="store_true", help="The human steered/edited something")
     s.add_argument("--notes")
-    s.add_argument("--expected", help="what the human wanted the station to produce")
-    s.add_argument("--category", help="intervention category, e.g. missing-edge-case")
+    s.add_argument("--expected", help="What the human wanted the station to produce")
+    s.add_argument("--category", help="Intervention category, e.g. missing-edge-case")
     s.add_argument("--produced")
     s.add_argument("--produced-file")
     s.set_defaults(func=cmd_gate)
 
-    s = sub.add_parser("status", help="show the board, or one item's history")
+    s = sub.add_parser("status", help="Show the board, or one item's history")
     s.add_argument("id", nargs="?")
     s.set_defaults(func=cmd_status)
 
-    s = sub.add_parser("metrics", help="show the North Star ledger")
+    s = sub.add_parser("metrics", help="Show the North Star ledger")
     s.set_defaults(func=cmd_metrics)
 
-    s = sub.add_parser("retro", help="assemble a briefing for the learning station")
-    s.add_argument("--emit", help="write the briefing to this file instead of stdout")
+    s = sub.add_parser("retro", help="Assemble a briefing for the learning station")
+    s.add_argument("--emit", help="Write the briefing to this file instead of stdout")
     s.set_defaults(func=cmd_retro)
 
-    s = sub.add_parser("labels", help="list the factory labels, or create them in a repo (gh)")
-    s.add_argument("--github", action="store_true", help="create the labels via the gh CLI")
-    s.add_argument("--repo", help="target repo (owner/name) for --github")
+    s = sub.add_parser("labels", help="List the factory labels, or create them in a repo (gh)")
+    s.add_argument("--github", action="store_true", help="Create the labels via the gh CLI")
+    s.add_argument("--repo", help="Target repo (owner/name) for --github")
     s.set_defaults(func=cmd_labels)
     return p
 
