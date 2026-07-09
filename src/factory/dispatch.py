@@ -22,7 +22,9 @@ from .model import GateDecision, StationReport, WorkItem
 from .policies import Policies
 from .store import Store
 
-_STEERING_VERDICTS = {"needs_revision", "not_ready", "park"}
+# Gate decisions that mean the human steered (rework), not just approved.
+# Public: the CLI also consults this to nudge for a --notes learning signal.
+STEERING_VERDICTS = {"needs_revision", "not_ready", "park"}
 
 
 @dataclass
@@ -205,7 +207,7 @@ class Dispatcher:
             note=decision.notes,
         )
         item.state = nxt
-        is_intervention = decision.changed or decision.decision in _STEERING_VERDICTS
+        is_intervention = decision.changed or decision.decision in STEERING_VERDICTS
         if is_intervention:
             item.steers += 1  # a send-back / correction / park is human rework
             path = self.interventions.record(item, decision, state, produced)

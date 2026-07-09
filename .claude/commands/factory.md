@@ -26,10 +26,18 @@ is the brain; you are the hands.
 Repeat until you hit a human gate or a terminal state:
 1. `factory next <id>` → read the `NEXT:` JSON directive.
 2. Dispatch on `type`:
-   - **run_station** → run that station. Apply its skill (`factory-<station>`)
-     directly, or spawn its subagent (`factory-<station>`) for context isolation
-     on a big item. Do the *real* work, then make the `factory advance <id>
-     --verdict ...` call the station's skill specifies.
+   - **run_station** → run that station, then make the `factory advance <id>
+     --verdict ...` call its skill specifies. *Where* it runs matters:
+     - **Checking stations (`code_review`, `verify`) always run in their fresh
+       subagent (`factory-<station>`) — no exceptions.** A checker sharing the
+       session that produced the work grades its memory of the intent, not the
+       artifact; isolation is what makes these independent checks instead of
+       self-grading.
+     - Producing stations (`triage`, `spec`, `implement`) may apply their skill
+       (`factory-<station>`) directly in this session for low-risk or
+       automatable items; spawn the subagent for anything bigger. Either way, a
+       station works only from persisted artifacts (the work item, `specs/`,
+       the diff) — never from this chat's memory.
    - **run_external** → the post-merge CI/CD deploy (build + deploy + health-wait);
      e.g. watch the merge's GitHub Actions run, then `factory advance <id>
      --verdict succeeded|failed`. A green deploy is the ship point → `done`.

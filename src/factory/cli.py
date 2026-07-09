@@ -24,7 +24,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .dispatch import Action, Dispatcher
+from .dispatch import STEERING_VERDICTS, Action, Dispatcher
 from .line import Line
 from .model import GateDecision, StationReport
 from .retro import briefing
@@ -54,6 +54,11 @@ _STAGE_ORDER = [
     "parked",
     "done",
 ]
+
+
+# --- shared plumbing --------------------------------------------------------
+# Root/dispatcher resolution, actor identity, the auto-gate walker, and the
+# NEXT: printer that every mutating command ends with.
 
 
 def _root(args: argparse.Namespace) -> Path:
@@ -122,6 +127,9 @@ def _print_action(action: Action, line: Line) -> None:
     print(f"NEXT: {json.dumps(action.to_dict())}")
 
 
+# --- init -------------------------------------------------------------------
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     root = _root(args)
     for sub in ("work-items", "interventions", "metrics"):
@@ -137,6 +145,9 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- new: intake ------------------------------------------------------------
+
+
 def cmd_new(args: argparse.Namespace) -> int:
     d = _disp(args)
     body = args.body or ""
@@ -148,27 +159,89 @@ def cmd_new(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- next -------------------------------------------------------------------
+
+
 def cmd_next(args: argparse.Namespace) -> int:
     d = _disp(args)
     _print_action(_resolve_next(d, args.id), d.line)
     return 0
 
 
+# --- advance: a station finished --------------------------------------------
+
+
+def _confidence(value: str) -> float:
+    """argparse type for --confidence: a float that must land in [0, 1]."""
+    f = float(value)
+    if not 0.0 <= f <= 1.0:
+        raise argparse.ArgumentTypeError(f"must be between 0.0 and 1.0, got {value}")
+    return f
+
+
+def _inline_report_flags(args: argparse.Namespace) -> list[str]:
+    """The inline advance flags the caller actually passed. Used to reject the
+    --report + inline-flags combination instead of silently dropping the flags."""
+    given = {
+        "--verdict": args.verdict,
+        "--summary": args.summary,
+        "--artifact": args.artifact,
+        "--confidence": args.confidence,
+        "--cost": args.cost,
+        "--risk": args.risk,
+        "--pr": args.pr,
+        "--note": args.note,
+        "--human-required": args.human_required or None,
+        "--human-reason": args.human_reason,
+        "--spawn-title": args.spawn_title,
+        "--spawn-body": args.spawn_body,
+    }
+    return [flag for flag, value in given.items() if value is not None]
+
+
 def cmd_advance(args: argparse.Namespace) -> int:
     d = _disp(args)
     item = d.store.load(args.id)
     if args.report:
-        report = StationReport(**json.loads(Path(args.report).read_text()))
+        clashing = _inline_report_flags(args)
+        if clashing:
+            print(
+                f"✗ --report replaces the inline flags; drop {', '.join(clashing)}",
+                file=sys.stderr,
+            )
+            return 1
+        data = json.loads(Path(args.report).read_text())
+        station = data.setdefault("station", item.state)
+        if station != item.state:
+            print(
+                f"✗ report claims station {station!r} but {item.id} is at {item.state!r}"
+                " — stale report file?",
+                file=sys.stderr,
+            )
+            return 1
+        report = StationReport(**data)
     else:
-        if not args.verdict:
-            print("✗ --verdict is required (or pass --report FILE)", file=sys.stderr)
+        # Reject silently-dropped flag combinations before touching any state.
+        if not args.verdict and not args.human_required:
+            print(
+                "✗ --verdict is required (or --human-required to escalate, or --report FILE)",
+                file=sys.stderr,
+            )
+            return 1
+        if args.human_reason and not args.human_required:
+            print("✗ --human-reason only means something with --human-required", file=sys.stderr)
+            return 1
+        if args.spawn_body and not args.spawn_title:
+            print("✗ --spawn-body needs --spawn-title to spawn anything", file=sys.stderr)
             return 1
         spawn = []
         if args.spawn_title:
             spawn.append({"title": args.spawn_title, "body": args.spawn_body or ""})
         report = StationReport(
             station=item.state,
-            verdict=args.verdict,
+            # The escape hatch bypasses routing, so no verdict is needed there;
+            # dispatch logs the move as "blocked" regardless of what we put here.
+            verdict=args.verdict or "blocked",
             summary=args.summary or "",
             artifacts=args.artifact or [],
             confidence=args.confidence or 0.0,
@@ -186,10 +259,22 @@ def cmd_advance(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- gate: a human decided ---------------------------------------------------
+
+
 def cmd_gate(args: argparse.Namespace) -> int:
     d = _disp(args)
     item = d.store.load(args.id)
     gate = d.line.gate_name(item.state) or item.state
+    steered = args.changed or args.decision in STEERING_VERDICTS
+    if steered and not (args.notes or "").strip():
+        # Never block a human at a gate, but don't let the learning signal vanish
+        # silently either: an intervention record without a why teaches the retro nothing.
+        print(
+            "⚠ steering with no --notes — the intervention record will carry no 'why', "
+            "so the retro can't learn from it. Consider --notes / --expected / --category.",
+            file=sys.stderr,
+        )
     produced = ""
     if args.produced_file:
         produced = Path(args.produced_file).read_text()
@@ -208,6 +293,9 @@ def cmd_gate(args: argparse.Namespace) -> int:
     print(f"✓ {item.id}: gate {gate} → {new_state}  (decision: {args.decision})")
     _print_action(_resolve_next(d, item.id), d.line)
     return 0
+
+
+# --- status / metrics / retro / labels: read-outs and setup ------------------
 
 
 def _render_board(d: Dispatcher) -> None:
@@ -330,14 +418,23 @@ def cmd_labels(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- the grammar --------------------------------------------------------------
+# Help text here is the CLI's source-of-truth documentation: it's the one surface
+# both the human and the driving agent can query at runtime (factory <cmd> -h),
+# and it can't drift from the actual grammar the way markdown can. The .claude/
+# recipes stay thin pointers; the flags document themselves.
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="factory", description="Software factory dispatcher.")
     p.add_argument("--root", default=".", help="Factory root (holds line.yml and .factory/)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    # -- init --
     s = sub.add_parser("init", help="Create .factory/ runtime dirs and validate config")
     s.set_defaults(func=cmd_init)
 
+    # -- new --
     s = sub.add_parser(
         "new",
         help="Create a work item (enters the line at triage)",
@@ -373,44 +470,124 @@ def build_parser() -> argparse.ArgumentParser:
     )
     s.set_defaults(func=cmd_new)
 
+    # -- next --
     s = sub.add_parser("next", help="Show the next action for a work item")
-    s.add_argument("id")
+    s.add_argument("id", help="Work item id (WI-####)")
     s.set_defaults(func=cmd_next)
 
-    s = sub.add_parser("advance", help="Record a station report and route the item")
-    s.add_argument("id")
-    s.add_argument("--verdict")
-    s.add_argument("--summary")
-    s.add_argument("--artifact", action="append")
-    s.add_argument("--confidence", type=float)
-    s.add_argument("--cost", type=float)
-    s.add_argument("--risk")
-    s.add_argument("--pr")
-    s.add_argument("--note")
-    s.add_argument("--human-required", action="store_true")
-    s.add_argument("--human-reason")
-    s.add_argument("--spawn-title")
-    s.add_argument("--spawn-body")
-    s.add_argument("--report", help="JSON file with a full StationReport")
+    # -- advance --
+    s = sub.add_parser(
+        "advance",
+        help="Record a station's report and route the item on its verdict",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            '  factory advance WI-0007 --verdict approved --summary "spec written" \\\n'
+            "      --artifact specs/WI-0007/PRODUCT.md --confidence 0.85\n"
+            "  factory advance WI-0007 --verdict automatable --risk low\n"
+            '  factory advance WI-0007 --human-required --human-reason "touches auth tables"\n'
+            "  factory advance WI-0007 --report /tmp/report.json\n"
+            "\n"
+            "Valid verdicts depend on the item's current state — `factory next <id>` prints them."
+        ),
+    )
+    s.add_argument("id", help="Work item id (WI-####)")
+    s.add_argument(
+        "--verdict",
+        help="Routing verdict, as specified by the station skill's output contract; "
+        "`factory next <id>` lists the valid set for the current state",
+    )
+    s.add_argument("--summary", help="One line on what the station did (lands in item history)")
+    s.add_argument(
+        "--artifact",
+        action="append",
+        metavar="PATH",
+        help="A file the station produced; repeat the flag for more. Not comma-separated.",
+    )
+    s.add_argument(
+        "--confidence",
+        type=_confidence,
+        metavar="0..1",
+        help="Station's self-assessed confidence in its verdict, 0.0-1.0",
+    )
+    s.add_argument("--cost", type=float, help="Cost of this station run (adds to the item total)")
+    s.add_argument(
+        "--risk",
+        choices=["low", "medium", "high", "unknown"],
+        help="Revised risk, if the station learned something (policies match on this)",
+    )
+    s.add_argument("--pr", help="PR URL or number for the change")
+    s.add_argument("--note", help="Free-form station notes, kept on the report")
+    s.add_argument(
+        "--human-required",
+        action="store_true",
+        help="Pull the escape hatch: send the item straight to `blocked` for a human, "
+        "bypassing routing (--verdict is then optional)",
+    )
+    s.add_argument("--human-reason", help="Why a human is needed (requires --human-required)")
+    s.add_argument("--spawn-title", help="File a follow-up work item; it enters the line at triage")
+    s.add_argument("--spawn-body", help="Body for the spawned item (requires --spawn-title)")
+    s.add_argument(
+        "--report",
+        metavar="FILE",
+        help="JSON file with a full StationReport; replaces ALL inline flags above",
+    )
     s.set_defaults(func=cmd_advance)
 
-    s = sub.add_parser("gate", help="Record a human decision at a gate")
-    s.add_argument("id")
-    s.add_argument("--decision", required=True)
+    # -- gate --
+    s = sub.add_parser(
+        "gate",
+        help="Record a human decision at a gate (a steer also writes an intervention record)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  factory gate WI-0007 --decision approved\n"
+            "  factory gate WI-0007 --decision needs_revision --category missing-edge-case \\\n"
+            '      --notes "public write endpoints must always specify input validation" \\\n'
+            '      --expected "a validation + rejection-behavior section in the spec"\n'
+            '  factory gate WI-0007 --decision approved --changed --notes "tightened rollout"\n'
+            "\n"
+            "Valid decisions depend on the gate — `factory next <id>` prints them.\n"
+            "A steering decision (needs_revision / not_ready / park) or --changed writes an\n"
+            "intervention record: give it a generalizable --notes — that's what the retro\n"
+            "station learns from."
+        ),
+    )
+    s.add_argument("id", help="Work item id (WI-####)")
+    s.add_argument(
+        "--decision",
+        required=True,
+        help="The gate verdict; `factory next <id>` lists the valid set for this gate",
+    )
     s.add_argument(
         "--by",
         help="Who is deciding; defaults to $FACTORY_USER or your git identity",
     )
-    s.add_argument("--changed", action="store_true", help="The human steered/edited something")
-    s.add_argument("--notes")
+    s.add_argument(
+        "--changed",
+        action="store_true",
+        help="The human edited/steered the work itself (records an intervention even on approval)",
+    )
+    s.add_argument(
+        "--notes",
+        help="The generalizable WHY behind the decision — the learning loop's highest-value input",
+    )
     s.add_argument("--expected", help="What the human wanted the station to produce")
-    s.add_argument("--category", help="Intervention category, e.g. missing-edge-case")
-    s.add_argument("--produced")
-    s.add_argument("--produced-file")
+    s.add_argument("--category", help="Intervention category, e.g. missing-edge-case, wrong-scope")
+    produced_src = s.add_mutually_exclusive_group()
+    produced_src.add_argument(
+        "--produced", help="What the station produced (inline text), embedded in the record"
+    )
+    produced_src.add_argument(
+        "--produced-file",
+        metavar="FILE",
+        help="Read the produced artifact from FILE instead of --produced",
+    )
     s.set_defaults(func=cmd_gate)
 
+    # -- status / metrics / retro / labels --
     s = sub.add_parser("status", help="Show the board, or one item's history")
-    s.add_argument("id", nargs="?")
+    s.add_argument("id", nargs="?", help="Work item id; omit for the whole board")
     s.set_defaults(func=cmd_status)
 
     s = sub.add_parser("metrics", help="Show the North Star ledger")
