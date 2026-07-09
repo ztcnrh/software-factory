@@ -108,6 +108,14 @@ def test_empty_or_missing_when_is_rejected():
         Policies({"rules": [{"id": "r", "gate": "spec_review", "decision": "approved"}]})
 
 
+def test_missing_id_is_rejected():
+    """A rule needs a stable id — it's the handle that appears in the auto_gate log
+    actor and the metrics ledger, so an anonymous rule wouldn't be traceable."""
+    anon = {"gate": "spec_review", "decision": "approved", "when": {"max_risk": "low"}}
+    with pytest.raises(PolicyError, match="missing required 'id'"):
+        Policies({"rules": [anon]})
+
+
 def test_missing_gate_or_decision_is_rejected():
     """`gate` and `decision` are required — without them a matching rule would
     otherwise crash at apply time (KeyError / unroutable verdict) instead of at load."""

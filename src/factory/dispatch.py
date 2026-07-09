@@ -92,7 +92,7 @@ class Dispatcher:
                     item_id=item.id,
                     state=state,
                     gate=gate,
-                    message=f"Policy {rule.get('id')!r} auto-clears the {gate} gate.",
+                    message=f"Policy {rule['id']!r} auto-clears the {gate} gate.",
                 )
             return Action(
                 type="human_gate",
@@ -209,7 +209,11 @@ class Dispatcher:
         if is_intervention:
             item.steers += 1  # a send-back / correction / park is human rework
             path = self.interventions.record(item, decision, state, produced)
-            item.log(kind="note", actor="factory", note=f"intervention recorded: {path.name}")
+            item.log(
+                kind="note",
+                actor="factory",
+                note=f"intervention recorded at {path.relative_to(self.root)}",
+            )
         self.store.save(item)
         self.metrics.emit(
             kind="gate",
@@ -224,15 +228,17 @@ class Dispatcher:
 
     def apply_auto_gate(self, item: WorkItem, gate: str, rule: dict) -> str:
         """Clear a gate via an approved policy — no human, no intervention."""
+        state = item.state
         decision = rule["decision"]
-        nxt = self.line.route(item.state, decision)
+        nxt = self.line.route(state, decision)
+        rationale = rule.get("rationale", "")
         item.log(
             kind="auto_gate",
-            from_state=item.state,
+            from_state=state,
             to_state=nxt,
             verdict=decision,
-            actor=f"policy:{rule.get('id', 'rule')}",
-            note=rule.get("rationale", ""),
+            actor=f"policy:{rule['id']}",
+            note=f"rationale: {rationale}" if rationale else "cleared by approved policy",
         )
         item.state = nxt
         self.store.save(item)
@@ -243,7 +249,7 @@ class Dispatcher:
             decision=decision,
             required_human=False,
             changed=False,
-            rule=rule.get("id"),
+            rule=rule["id"],
         )
         return nxt
 

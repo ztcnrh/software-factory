@@ -14,7 +14,9 @@ default: require_human
 # `approved_by` is set (a retro-proposed rule sits dormant until you sign it).
 #
 # Rule shape (validated at load — `factory init` rejects a malformed file):
-#   id           short identifier, used in logs/metrics
+#   id           short, unique, descriptive identifier — appears in the auto_gate   [required]
+#                log actor and the metrics ledger; keep it terse and non-duplicative
+#                (e.g. auto-approve-docs-spec)
 #   gate         the human gate this attaches to, e.g. spec_review / ship_review  [required]
 #   decision     verdict to apply, e.g. `approved` — must be a real verdict for
 #                that gate in line.yml                                            [required]

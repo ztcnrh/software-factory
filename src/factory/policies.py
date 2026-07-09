@@ -61,7 +61,9 @@ class Policies:
         error here rather than a silent broadening. Runs on every rule, dormant or
         not, so a bad rule is caught before it's ever signed."""
         for i, rule in enumerate(self.rules):
-            rid = rule.get("id", f"#{i}")
+            rid = rule.get("id") or f"#{i}"
+            if not rule.get("id"):
+                raise PolicyError(f"policy {rid!r}: missing required 'id'")
             if not rule.get("gate"):
                 raise PolicyError(f"policy {rid!r}: missing required 'gate'")
             if not rule.get("decision"):
