@@ -2,7 +2,7 @@
 
 The worked example lives in its own repo next door: **[`../software-factory-demo`](../../software-factory-demo)** (a separate git repo, so it mirrors how the factory adopts a real project rather than nesting inside the toolkit).
 
-It's a tiny FastAPI "Quotes API" that the factory drove a full feature through — triage → spec → implement → review → verify → ship → monitor — including one human intervention at spec review that the **Retro station** then turned into a permanent improvement (and a gate that now clears itself for read-only work).
+It's a tiny FastAPI "Quotes API" that the factory drove a full feature through — triage → spec → implement → review → verify → ship — including one human intervention at spec review that the **Retro station** then turned into a permanent improvement (and a gate that now clears itself for read-only work).
 
 Look at, in that repo:
 - `git log` — base → factory tooling → the shipped feature → loop state.

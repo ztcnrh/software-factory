@@ -37,13 +37,13 @@ Each station is a **skill** (the "how" — a focused `SKILL.md`) paired with a *
 | Station | Emits (verdicts) | Model | Notes |
 |---|---|---|---|
 | **triage** | needs_spec · automatable · needs_human_clarification · park | sonnet | minutes, not investigation; assigns risk |
-| **spec** | ready_for_review · blocked | sonnet | writes `specs/<id>/PRODUCT.md` (+`TECH.md`) |
+| **spec** | ready_for_review · blocked | opus | writes `specs/<id>/PRODUCT.md` (+`TECH.md`); planning leverage justifies the tier |
 | **implement** | implemented · blocked | sonnet | branch + tests; opens a PR; never merges |
-| **code_review** | pass · changes_requested | sonnet | escalates high-risk to the `council` skill |
+| **code_review** | pass · changes_requested | opus | correctness/security backstop before the ship gate; escalates high-risk to the `council` skill |
 | **verify** | verified · failed | sonnet | exercises *behavior* (incl. browser), captures evidence |
-| **retro** | (proposes; opens a PR) | opus | the learning station — see LEARNING-LOOP.md |
+| **retro** | (proposes; opens a PR) | fable | the learning station, top-tier model — runs rarely, see LEARNING-LOOP.md |
 
-`deploy` is an **external** station (no agent) — it represents the post-merge CI/CD workflow, so the factory observes its outcome rather than running it. `monitor` (haiku; watches a shipped change and spawns a follow-up) is **deferred** in v1 — its skill/agent ship in the repo but it isn't a state on the line. See [OPTIMIZATION-AREAS.md](OPTIMIZATION-AREAS.md).
+`deploy` is an **external** station (no agent) — it represents the post-merge CI/CD workflow, so the factory observes its outcome rather than running it. `monitor` (haiku; watches a shipped change and spawns a follow-up) is **deferred** in v1 — its skill/agent are parked under `deferred/` (the installer doesn't copy them) and it isn't a state on the line. See [OPTIMIZATION-AREAS.md](OPTIMIZATION-AREAS.md).
 
 Two more skills, adapted from `warpdotdev/common-skills`, sharpen the high-stakes moments: **council** (a model-diverse panel investigates in parallel, you synthesize) and **cross-critique** (competing proposals critique each other). The Spec and Code-review stations reach for these on risky or contested calls.
 

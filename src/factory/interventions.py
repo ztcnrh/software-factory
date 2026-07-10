@@ -3,8 +3,8 @@
 Every time a human steers the factory (sends a spec back, marks "not ready",
 edits an artifact), we capture WHAT the station produced, WHAT the human wanted
 instead, and WHY. The retro station reads these to improve the line so the same
-class of problem stops reaching the human next time. This operationalizes the
-article's line: *every interactive agent use is a failure to learn from.*
+class of problem stops reaching the human next time. The guiding line:
+*every interactive agent use is a failure to learn from.*
 """
 
 from __future__ import annotations

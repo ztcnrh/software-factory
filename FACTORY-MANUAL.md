@@ -88,9 +88,16 @@ Periodically (or on a schedule, in cloud mode), run the learning station:
 /factory retro          # or: factory retro   (then apply the factory-retro skill)
 ```
 
-It reads your accumulated interventions and the metrics, finds the patterns, and **proposes** changes — sharper station skills, better templates, and dormant **gate policies** — written to `.factory/retro/<date>/` and opened as a PR. You **dispose**: review the PR, and activate any proposed policy by setting `approved_by:` on it in `policies.yml`. Each thing you accept permanently removes a class of work from your plate. (See [LEARNING-LOOP.md](docs/LEARNING-LOOP.md) for the worked example, where one intervention led to a gate that now clears itself.)
+It reads your accumulated interventions and the metrics, finds the patterns, and **proposes** changes — sharper station skills, better templates, and dormant **gate policies** — written to `.factory/retro/<date>/` and opened as a PR. You **dispose**: review the PR, and activate any proposed policy by setting `approved_by:` on it in `policies.yml`. Each thing you accept aims to take a recurring class of work off your plate. (See [LEARNING-LOOP.md](docs/LEARNING-LOOP.md) for the worked example, where one intervention led to a gate that now clears itself.)
 
 Watch `factory metrics`. The number to grow is the **one-shot ship rate** — the share of changes that ship with no human rework (send-back, correction, or unblock). It is *not* about removing yourself from the loop: you still own the ship decision and can attend every gate; the goal is that the line gets good enough that your review is a rubber-stamp. Expect it low early on and climbing as the factory learns. The list of "where humans had to step in" tells you and the Retro station where the next win is.
+
+**Looking back at what the factory has learned.** The retro *station* only looks forward — it mines new steers and proposes new changes; it does not review its own past work. So for the backward-looking questions — did a past optimization actually help, has one gone stale, should I finally sign off (or drop) a dormant policy that's been parked in `.factory/retro/` — ask your **main Claude Code session** in plain language rather than running the retro station. Some asks worth keeping in your pocket:
+- *"Read every `.factory/retro/*/report.md` and `proposed-policies.yml`. For each proposal, tell me whether it was adopted (check `policies.yml`, the current station skills, and git history), and whether it's still justified given the interventions since or has gone stale — as a table: proposal → status → your recommendation."*
+- *"Are there any dormant gate policies parked in `.factory/retro/` that I should be signing off on by now? For each, check its evidence bar against the interventions and metrics since it was proposed, and tell me whether to sign it off (and make the `policies.yml` edit), keep waiting, or drop it."*
+- *"Summarize in plain language everything the factory has learned across all retros — what changed, why, and what's still waiting on my decision."*
+
+(That the retro station has no memory of its own past proposals or their outcomes is a known weakness we intend to close — see [OPTIMIZATION-AREAS.md](docs/OPTIMIZATION-AREAS.md).)
 
 ---
 

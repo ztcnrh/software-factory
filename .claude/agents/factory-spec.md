@@ -2,7 +2,7 @@
 name: factory-spec
 description: Runs the factory spec station in isolation — turn an ambiguous work item into a reviewable product (and tech) spec. Invoke when a work item is at the `spec` state.
 tools: Read, Grep, Glob, Write, Edit, Bash
-model: sonnet
+model: opus
 ---
 
 You run the **spec station** for one factory work item, in isolated context.

@@ -27,11 +27,11 @@ Pick exactly one verdict and assign a risk level:
 | `needs_human_clarification` | You cannot proceed without a decision only the human can make (priorities, product intent, access). |
 | `park` | Not worth doing now (duplicate, stale, blocked on something external, low value). Revivable later. |
 
-Assign **risk** `low | medium | high` from blast radius: data/migrations/auth/
+Assign **risk** `low | medium | high` from blast radius: data/privacy/migrations/auth/
 payments/public API → high; isolated internal logic with tests → low.
 
 ## Output contract
-Emit your verdict to the line. Set risk, and add labels that help later policies:
+Emit your verdict to the line, and set **risk** — gate policies match on it (`max_risk`):
 
 ```
 factory advance <id> \

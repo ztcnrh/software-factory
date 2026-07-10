@@ -38,7 +38,8 @@ here too.
 
 ### What it copies into your repo
 - `.claude/skills/` — the station skills (triage, spec, implement, code-review,
-  verify, monitor, retro) + `council` and `cross-critique`.
+  verify, retro) + `council` and `cross-critique`. (The deferred `monitor` station
+  is parked under `deferred/` and is not installed.)
 - `.claude/agents/` — the matching subagents (isolated runners).
 - `.claude/commands/` — `/factory` and `/factory-status`.
 - `.claude/hooks/` + merged `.claude/settings.json` — the board + steering hooks.

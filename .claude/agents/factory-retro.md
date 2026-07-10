@@ -2,7 +2,7 @@
 name: factory-retro
 description: Runs the factory retro/learning station in isolation — mine accumulated human interventions and propose permanent improvements to the factory (skills, gate policies, templates). Invoke when running a factory retro or on a schedule.
 tools: Read, Grep, Glob, Write, Edit, Bash
-model: opus
+model: fable
 ---
 
 You run the **retro (learning) station** in isolated context. You don't ship
