@@ -5,32 +5,21 @@ description: The factory's spec station. Turn an ambiguous work item into a cris
 
 # Spec station
 
-You are the **spec station**. Convert one ambiguous work item into specs precise
-enough that implementation is mostly mechanical and review is mostly checking
-"does it match the spec." Adapted from spec-driven development: product spec
-first, tech spec only when the change is architectural.
+You are the **spec station**. Convert one ambiguous work item into specs precise enough that implementation is mostly mechanical and review is mostly checking "does it match the spec." Adapted from spec-driven development: product spec first, tech spec only when the change is architectural.
 
 ## Read first
 - `factory status <id>` — the item and triage's notes.
-- The target repo: existing patterns, neighboring features, conventions. A spec
-  that fights the codebase is a bad spec.
+- The target repo: existing patterns, neighboring features, conventions. A spec that fights the codebase is a bad spec.
 
 ## Write
-Create `specs/<id>/PRODUCT.md` always; add `specs/<id>/TECH.md` when the change
-spans subsystems or makes a non-obvious architectural choice. Use the templates
-in `templates/PRODUCT.md` and `templates/TECH.md`.
+Create `specs/<id>/PRODUCT.md` always; add `specs/<id>/TECH.md` when the change spans subsystems or makes a non-obvious architectural choice. Use the templates in `templates/PRODUCT.md` and `templates/TECH.md`.
 
-**PRODUCT.md** answers: what problem, for whom, the desired behavior, explicit
-**edge cases and non-goals**, and **acceptance criteria** a verifier can check.
-**TECH.md** answers: the approach, key interfaces/data shapes, alternatives
-considered and why-not, migration/rollback, and the test strategy.
+**PRODUCT.md** answers: what problem, for whom, the desired behavior, explicit **edge cases and non-goals**, and **acceptance criteria** a verifier can check. **TECH.md** answers: the approach, key interfaces/data shapes, alternatives considered and why-not, migration/rollback, and the test strategy.
 
 Keep specs as short as they can be while removing ambiguity. Prose, not ceremony.
 
 ## Escalating quality (optional)
-For high-risk or contested designs, run the **council** skill (model-diverse
-review) or **cross-critique** (peer critique of competing approaches) on the spec
-before sending it to review. Fold the strongest objections in.
+For high-risk or contested designs, run the **council** skill (model-diverse review) or **cross-critique** (peer critique of competing approaches) on the spec before sending it to review. Fold the strongest objections in.
 
 ## Output contract
 ```
@@ -41,18 +30,9 @@ factory advance <id> \
   --confidence <0..1> \
   [--risk <low|medium|high>] [--label <classifier>]
 ```
-This routes the item to the **spec_review** human gate. If the real analysis
-revealed a truer classification than triage's quick pass — e.g. the change is
-actually read-only, or it touches auth/data and is riskier — correct it here with
-`--risk` and additive `--label` (free-form classifiers policies key on, e.g.
-`read-only`). Your labels are on the item before its `spec_review` gate, so a
-signed policy can act on them. If you genuinely cannot
-spec it without a product decision, pull the escape hatch instead:
-`--human-required --human-reason "<the decision you need>"` (no verdict needed).
+This routes the item to the **spec_review** human gate. If the real analysis revealed a truer classification than triage's quick pass — e.g. the change is actually read-only, or it touches auth/data and is riskier — correct it here with `--risk` and additive `--label` (free-form classifiers policies key on, e.g. `read-only`). Your labels are on the item before its `spec_review` gate, so a signed policy can act on them. If you genuinely cannot spec it without a product decision, pull the escape hatch instead: `--human-required --human-reason "<the decision you need>"` (no verdict needed).
 
 ## Quality bar
 - Every acceptance criterion must be checkable by the verify station without you.
 - Name the non-goals — scope creep is the most common reason a spec gets sent back.
-- If the spec comes back with `needs_revision`, read the intervention record under
-  `.factory/interventions/` — it says exactly what the human wanted. Address that
-  specific gap, don't rewrite wholesale.
+- If the spec comes back with `needs_revision`, read the intervention record under `.factory/interventions/` — it says exactly what the human wanted. Address that specific gap, don't rewrite wholesale.

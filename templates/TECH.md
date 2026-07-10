@@ -1,7 +1,6 @@
 # Tech Spec — <WI-id>: <title>
 
-> Written only when the change is architectural or cross-cutting. Skip it for
-> localized work — a tech spec for a one-file fix is waste.
+> Written only when the change is architectural or cross-cutting. Skip it for localized work — a tech spec for a one-file fix is waste.
 
 ## Approach
 The chosen design, in a few sentences. What changes and where.
@@ -19,5 +18,4 @@ Failure modes, blast radius, and how each is contained.
 How it rolls out, and exactly how it rolls back if it goes wrong.
 
 ## Test strategy
-What will prove it works: unit, integration, and the verification evidence the
-ship gate will see.
+What will prove it works: unit, integration, and the verification evidence the ship gate will see.
