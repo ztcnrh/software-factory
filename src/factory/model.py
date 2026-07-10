@@ -93,6 +93,7 @@ class StationReport:
     notes: str = ""
     risk: str | None = None
     pr: str | None = None
+    labels: list[str] = field(default_factory=list)  # classifying labels to add (append-only)
     spawn: list[dict[str, Any]] = field(default_factory=list)  # new items → triage
 
 

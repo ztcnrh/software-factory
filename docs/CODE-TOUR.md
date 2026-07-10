@@ -14,7 +14,7 @@ Read `line.yml` first. It's the single source of truth for the conveyor: `states
 
 Three dataclasses; everything else just moves them around.
 
-- **`WorkItem`** — the thing on the conveyor. The fields that matter: `state` (where it is), `history` (every transition, appended via `log()` — this is why persisted items are readable as a story), `human_touches` (the North Star counter), and `risk` + `labels` (what gate policies match on).
+- **`WorkItem`** — the thing on the conveyor. The fields that matter: `state` (where it is), `history` (every transition, appended via `log()` — this is why persisted items are readable as a story), `human_touches` (the North Star counter), and `risk` + `labels` (what gate policies match on — free-form classifier labels like `read-only`, set via `factory new`/`advance --label`; distinct from the `factory:<state>` conveyor labels in `labels.yml`, which only track GitHub issue state).
 - **`StationReport`** — what a station hands back. `verdict` is the routing key; `human_required` is the escape hatch (below); `spawn` is how a station files a follow-up work item (the mechanism a deferred monitor / future issues-watcher uses; child enters at triage).
 - **`GateDecision`** — a human's call at a gate. `changed` / `notes` / `category` are the learning signal.
 

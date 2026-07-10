@@ -190,6 +190,7 @@ def _inline_report_flags(args: argparse.Namespace) -> list[str]:
         "--cost": args.cost,
         "--risk": args.risk,
         "--pr": args.pr,
+        "--label": args.label or None,
         "--notes": args.notes,
         "--human-required": args.human_required or None,
         "--human-reason": args.human_reason,
@@ -248,6 +249,7 @@ def cmd_advance(args: argparse.Namespace) -> int:
             cost=args.cost or 0.0,
             risk=args.risk,
             pr=args.pr,
+            labels=args.label or [],
             human_required=args.human_required,
             human_reason=args.human_reason or "",
             notes=args.notes or "",
@@ -524,6 +526,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Revised risk, if the station learned something (policies match on this)",
     )
     s.add_argument("--pr", help="PR URL or number for the change")
+    s.add_argument(
+        "--label",
+        action="append",
+        metavar="LABEL",
+        help="Attach a classifying label to the item; repeat for more (--label read-only "
+        "--label docs). Additive — never removes existing labels. Gate policies match on "
+        "these (`labels_any` / `labels_all`).",
+    )
     s.add_argument(
         "--notes",
         help="Free-form station notes for whoever reads the item next (kept in its history)",

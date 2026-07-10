@@ -265,6 +265,11 @@ class Dispatcher:
         for a in report.artifacts:
             if a not in item.artifacts:
                 item.artifacts.append(a)
+        # Labels are additive: a station classifies an item, it never wipes labels
+        # set at intake or by an earlier station (policies match on the union).
+        for lab in report.labels:
+            if lab not in item.labels:
+                item.labels.append(lab)
         if report.risk:
             item.risk = report.risk
         if report.pr:

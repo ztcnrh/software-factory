@@ -86,4 +86,14 @@ Each entry: what it is today · why it's fine for now · the idea for later.
 
 ---
 
+## 9. Metrics are a point-in-time aggregate — no trend over time
+
+**Today.** `metrics.summary()` folds *every* event into one cumulative number; `factory metrics` prints a single one-shot ship rate. There is no time-series, no windowing, no period-over-period comparison — and the events themselves aren't even timestamped (`emit(**event)` writes only what the caller passes, and no caller passes a time). So the North Star we most want to watch *climb as the factory learns* (see LEARNING-LOOP.md) can't actually be shown climbing: a lifetime cumulative rate weights the factory's earliest, worst runs forever, understating recent gains, and there's no way to answer "is it improving?"
+
+**Why it's fine for now.** With few shipped items the cumulative rate *is* the signal, and the honest read is sample-size-first ("a rate over 3 ships is noise"), which the `/factory-status` summary already asks for. Trend matters only once there's enough volume for a window to mean something.
+
+**The idea for later.** Timestamp events at `emit()` (a one-line, backward-compatible `setdefault("ts", ...)`), then add a rolling/bucketed view to `summary()` and surface it in `factory metrics` — e.g. one-shot rate over the last N ships vs. the prior N, or a simple monthly bucket — so the learning loop's payoff is visible, not just asserted. The timestamp is the cheap prerequisite; do it early even before the rest, since it can't be backfilled onto events already written without one.
+
+---
+
 <!-- Add new entries only when you can state the cost AND a direction. Keep it lean. -->

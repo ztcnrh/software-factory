@@ -38,9 +38,15 @@ factory advance <id> \
   --verdict ready_for_review \
   --summary "<what the spec decides, in one line>" \
   --artifact specs/<id>/PRODUCT.md [--artifact specs/<id>/TECH.md] \
-  --confidence <0..1>
+  --confidence <0..1> \
+  [--risk <low|medium|high>] [--label <classifier>]
 ```
-This routes the item to the **spec_review** human gate. If you genuinely cannot
+This routes the item to the **spec_review** human gate. If the real analysis
+revealed a truer classification than triage's quick pass — e.g. the change is
+actually read-only, or it touches auth/data and is riskier — correct it here with
+`--risk` and additive `--label` (free-form classifiers policies key on, e.g.
+`read-only`). Your labels are on the item before its `spec_review` gate, so a
+signed policy can act on them. If you genuinely cannot
 spec it without a product decision, pull the escape hatch instead:
 `--human-required --human-reason "<the decision you need>"` (no verdict needed).
 

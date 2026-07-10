@@ -110,6 +110,33 @@ def test_gate_warns_when_intervention_fields_ride_a_non_steer(factory_root: Path
     assert "add --changed" in capsys.readouterr().err
 
 
+def test_advance_label_flag_lands_on_the_item(factory_root: Path):
+    """`factory advance --label` must persist the label on the work item. Regression:
+    the triage skill instructed stations to add labels, but advance had no --label
+    flag — a phantom instruction with no channel, so classifications were dropped."""
+    item_id = _item_at(factory_root, "triage")
+    rc = main(
+        ["--root", str(factory_root), "advance", item_id,
+         "--verdict", "needs_spec", "--label", "read-only", "--label", "docs"]
+    )
+    assert rc == 0
+    assert Dispatcher(factory_root).store.load(item_id).labels == ["read-only", "docs"]
+
+
+def test_advance_label_conflicts_with_report(factory_root: Path, capsys):
+    """--label is an inline flag, so pairing it with --report must be rejected like
+    the others rather than silently dropped (labels carry into the StationReport JSON)."""
+    item_id = _item_at(factory_root, "triage")
+    report = factory_root / "report.json"
+    report.write_text(json.dumps({"station": "triage", "verdict": "needs_spec"}))
+    rc = main(
+        ["--root", str(factory_root), "advance", item_id,
+         "--report", str(report), "--label", "read-only"]
+    )
+    assert rc == 1
+    assert "--label" in capsys.readouterr().err
+
+
 def test_advance_report_conflicts_with_inline_flags(factory_root: Path, capsys):
     """--report used to silently ignore every inline flag passed alongside it;
     the combination must be rejected, naming the clashing flags."""

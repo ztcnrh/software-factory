@@ -117,6 +117,17 @@ def test_station_report_spawns_child_at_triage(factory_root: Path):
     assert child.state == "triage"
 
 
+def test_advance_labels_are_additive_and_deduped(factory_root: Path):
+    """A station classifies via labels the gate policies match on; the merge must be
+    append-only (never wipe intake or earlier-station labels) and dedup, so a policy
+    keyed on `labels_any` has a durable channel to be fed. Regression: triage's skill
+    told it to 'add labels' when advance had no label channel at all."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("Read-only endpoint", risk="low", labels=["intake"])
+    _advance(d, item, "needs_spec", labels=["read-only", "intake"])
+    assert item.labels == ["intake", "read-only"]  # existing kept, new added, no duplicate
+
+
 def test_park_is_terminal_but_revivable(factory_root: Path):
     """Parking an item must not lose it: it lands in a terminal-but-revivable
     state, not a dead end."""

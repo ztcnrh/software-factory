@@ -31,16 +31,24 @@ Assign **risk** `low | medium | high` from blast radius: data/privacy/migrations
 payments/public API → high; isolated internal logic with tests → low.
 
 ## Output contract
-Emit your verdict to the line, and set **risk** — gate policies match on it (`max_risk`):
+Emit your verdict to the line. Set **risk** and attach any **labels** that classify
+the item — gate policies match on both (`max_risk`, and `labels_any` / `labels_all`),
+so this is how triage feeds the auto-approval loop (e.g. tag a read-only change
+`read-only` so a policy can later clear its gate untouched):
 
 ```
 factory advance <id> \
   --verdict <automatable|needs_spec|needs_human_clarification|park> \
   --risk <low|medium|high> \
+  --label <classifier> \
   --summary "<one-line rationale + repro status>" \
   --confidence <0..1> \
   --notes "<anything the next station should know>"
 ```
+
+These are free-form **classifier** labels the policies key on (e.g. `read-only`) —
+keep them short and consistent so a policy can rely on them, and they're **additive**
+(you classify, never overwrite).
 
 For `needs_human_clarification`, instead phrase the open question crisply in
 `--summary` — the human will see it at the gate.
