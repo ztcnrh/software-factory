@@ -108,7 +108,7 @@ class GateDecision:
     gate: str
     decision: str  # the verdict chosen, e.g. "approved" | "needs_revision"
     by: str = "unknown"  # who decided — the CLI resolves this to a real identity
-    changed: bool = False  # the human edited the work themselves (matters on approvals)
+    changed: bool = False  # human changed the work at the gate, by hand or via their agent
     notes: str = ""
     expected: str = ""  # what the human wanted the station to have produced
     category: str = ""  # e.g. "missing-edge-case" | "wrong-scope" | "style"

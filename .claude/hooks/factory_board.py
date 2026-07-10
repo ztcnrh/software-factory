@@ -38,20 +38,28 @@ def main() -> None:
         except Exception:
             pass
     live = [i for i in items if i.get("state") not in ("done", "parked")]
-    if not live:
-        return
-    waiting = [i for i in live if i.get("state") in GATES]
-    moving = [i for i in live if i.get("state") not in GATES]
-    lines = [f"🏭 Software factory: {len(live)} work item(s) in flight."]
-    if waiting:
-        lines.append("Waiting on you (human gate):")
-        for i in waiting:
-            lines.append(f"  - {i['id']} @ {i['state']}: {i['title']}")
-    if moving:
-        lines.append("Moving down the line:")
-        for i in moving:
-            lines.append(f"  - {i['id']} @ {i['state']}: {i['title']}")
-    lines.append("Drive it with /factory, or see all with /factory-status.")
+    # Speak even when the floor is empty: a cold session must still learn the factory
+    # exists and where its driver protocol lives, or governance (station isolation,
+    # gate etiquette) never reaches a session started without /factory.
+    if live:
+        waiting = [i for i in live if i.get("state") in GATES]
+        moving = [i for i in live if i.get("state") not in GATES]
+        lines = [f"🏭 Software factory: {len(live)} work item(s) in flight."]
+        if waiting:
+            lines.append("Waiting on you (human gate):")
+            for i in waiting:
+                lines.append(f"  - {i['id']} @ {i['state']}: {i['title']}")
+        if moving:
+            lines.append("Moving down the line:")
+            for i in moving:
+                lines.append(f"  - {i['id']} @ {i['state']}: {i['title']}")
+    else:
+        lines = ["🏭 This repo runs a software factory — idle, no work items in flight."]
+    lines.append(
+        "Drive it with /factory, or see all with /factory-status. If asked to run the "
+        "factory without the /factory command, read .claude/commands/factory.md first — "
+        "it is the driver protocol (station dispatch rules, gate etiquette)."
+    )
     out = {
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",

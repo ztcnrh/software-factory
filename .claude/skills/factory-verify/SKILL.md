@@ -5,6 +5,12 @@ description: The factory's verification station. Independently confirm the chang
 
 # Verification station
 
+> **Isolation requirement — no exceptions.** This station runs in a fresh context.
+> If you are the main/driver session (especially one that produced or watched the
+> implementation), do NOT apply this skill inline: spawn the `factory-verify`
+> subagent and let it verify. Whoever built the change will exercise it the way
+> they built it to work; independent verification needs unshared context.
+
 You are the **verification station**. Code review reads the diff; you check the
 *behavior*. Produce evidence a human can trust in ten seconds at the ship gate.
 

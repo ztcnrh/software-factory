@@ -568,7 +568,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument(
         "--changed",
         action="store_true",
-        help="The human edited/steered the work itself (records an intervention even on approval)",
+        help="The human changed the work at the gate — by hand or by directing their agent — "
+        "instead of sending it back (records an intervention even on approval)",
     )
     s.add_argument(
         "--notes",

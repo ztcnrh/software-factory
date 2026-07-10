@@ -20,7 +20,7 @@ These unlock the "runs while you sleep" behavior and richer integrations. None a
 
 - [ ] **Anthropic API key as a GitHub secret** — to run stations unattended via GitHub Actions. Add `ANTHROPIC_API_KEY` (or `CLAUDE_CODE_OAUTH_TOKEN`) under the repo's *Settings → Secrets and variables → Actions*. See [CLOUD-AUTONOMY.md](docs/CLOUD-AUTONOMY.md).
 - [ ] **Enable the workflows** — install with `--with-cloud`, then rename `.github/workflows/factory-*.yml.disabled` → `.yml`. Treat the first runs as a supervised shakedown.
-- [ ] **Create the conveyor labels in GitHub** — `factory labels --github` (needs the `gh` CLI, which you have).
+- [ ] **Create the conveyor labels in GitHub** — `factory labels --github` (needs the `gh` CLI).
 - [ ] **A sandbox repo** — for your first cloud run, point it at a throwaway repo, not something precious.
 - [ ] **(Later) Monitoring + notifications** — connect the Monitor station to whatever you use (Sentry/Datadog/logs) and route gate pings to Slack. Both are noted as extension points in [EXTENDING.md](docs/EXTENDING.md).
 

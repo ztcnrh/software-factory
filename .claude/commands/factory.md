@@ -44,6 +44,10 @@ Repeat until you hit a human gate or a terminal state:
    - **human_gate** → **STOP.** Build the review packet (§3). Never decide for the human.
    - **done / parked / blocked** → report briefly and stop.
 
+Every engine output tells you the next command (the `NEXT:` JSON and the printed
+follow-ups). Unsure about any command's flags? `factory <cmd> -h` is the CLI's
+source-of-truth reference — trust it over memory or these notes.
+
 ## 3 — At a human gate, present a tight review packet
 - Render it per `templates/REVIEW-PACKET.md` — that file is the single source for
   the packet's shape, including the per-gate evidence and the decision commands.

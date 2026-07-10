@@ -1,8 +1,11 @@
 # Review packet — <WI-id> @ <gate>
 
 > The shape the `/factory` driver (or a cloud station commenting on an issue) renders
-> when the line stops at a human gate. The goal is a **decision in ten seconds**, not
-> a transcript to wade through.
+> when the line stops at a human gate. The goal is **orientation in ten seconds** —
+> everything worth reviewing is one link away, nothing to hunt for. The review itself
+> takes as long as it deserves: the spec gate merits a real read (plan quality decides
+> outcome quality), and the ship gate merits a real diff-plus-evidence review. The
+> packet's job is that none of that time is spent assembling context.
 
 **Item:** <title> — one paragraph: what it is and what the station produced.
 **Artifacts:** <links: spec files / PR / diff / screenshot>
@@ -14,14 +17,17 @@
 
 ## Your decision
 - ✅ **Approve** → `factory gate <WI-id> --decision approved`
-- ✏️ **Approve, but you edited the work yourself** → add `--changed --notes "<what you changed & why>"`
+- ✏️ **Approve with changes** — you fixed the work at the gate, by hand *or by directing
+  your agent*, rather than sending it back → add `--changed --notes "<what changed & why>"`
   (`--changed` exists for exactly this case: the decision alone wouldn't reveal the steer)
 - ↩️ **Send back** → `factory gate <WI-id> --decision <needs_revision | not_ready> \`
   `--notes "<what & why>" --category <kind>`
 - ⏸ **Shelve** → `factory gate <WI-id> --decision park --notes "<why not-now>" --category <kind>`
   (→ `parked`, revivable later)
 
-A send-back or park counts as a steer on its own — no `--changed` needed there.
+A send-back or park counts as a steer on its own — no `--changed` needed there. Rule of
+thumb: a small fix applied at the gate → approve `--changed`; anything that needs the
+station to redo its work → send back.
 
 Every decision is **signed**: `factory gate` records it under your git identity
 automatically (override with `--by <name>`; a cloud station passes the reviewer's

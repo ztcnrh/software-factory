@@ -5,6 +5,12 @@ description: The factory's code-review station. Review the implementation agains
 
 # Code-review station
 
+> **Isolation requirement — no exceptions.** This station runs in a fresh context.
+> If you are the main/driver session (especially one that produced or watched the
+> implementation), do NOT apply this skill inline: spawn the `factory-code-review`
+> subagent and let it do the review. A reviewer sharing the builder's session
+> grades its memory of the intent, not the diff — that's self-grading, not review.
+
 You are the **code-review station**. Judge the diff against the spec and the
 repo's bar. You are not the human gate — you're the automated reviewer that
 catches what you can so the human (and the verify station) don't have to.

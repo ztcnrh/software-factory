@@ -56,4 +56,14 @@ Each entry: what it is today · why it's fine for now · the idea for later.
 
 ---
 
+## 6. The learning loop improves instances, not the toolkit — and upgrades have no merge story
+
+**Today.** `install.py` copies the factory into a repo; from that moment the copy is on its own. The retro station improves *that repo's* skills, templates, and policies — and the toolkit never hears about it. Installs are version-stamped (`.factory/install-manifest.json`: toolkit version + commit + created paths — shipped 2026-07-10, enabling safe `--uninstall` and version-aware reinstalls), but upgrades still can't *merge*: a plain reinstall skips existing files, and `--force` replaces factory-owned files wholesale — including exactly the ones retro improved — leaving git history as the only safety net. Relatedly, the prompt layer (skills, driver protocol, CLI breadcrumbs) has no eval: the engine is pinned by unit tests, but "did this wording change make agents drive the line better or worse?" is only observable in live metrics after the fact.
+
+**Why it's fine for now.** One operator, a handful of repos: the human reviews every retro PR anyway and can cherry-pick generalizable improvements into the toolkit by hand — the outer loop exists, it's just social rather than mechanical. `--force` clobbers are recoverable from git, and the reviewer sees the diff before committing. The metrics ledger (one-shot ship rate, steers by stage, cost) is an honest live eval on real work; synthetic agent-driving benchmarks would cost more than v1 justifies.
+
+**The idea for later.** Two pieces. (a) **A real upgrade path**: an upgrade mode diffs three ways (installed copy vs. its original at the manifest's commit vs. current toolkit) so it can apply toolkit upgrades to untouched files, flag retro-modified files for a human merge instead of clobbering, and print a divergence report — which doubles as the upstreaming radar ("this skill drifted the same way in two repos; the toolkit probably wants that change"). The manifest's commit pointer already gives the three-way baseline. (b) **A prompt-layer eval harness**: a scripted scenario repo + headless driver runs, scored on protocol conformance (stopped at gates, honored station isolation, emitted valid CLI calls) and steers/cost — run against toolkit changes to skills/commands before merging, so prompt regressions are caught before adopters inherit them.
+
+---
+
 <!-- Add new entries only when you can state the cost AND a direction. Keep it lean. -->

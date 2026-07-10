@@ -2,24 +2,54 @@
 """Adopt the software factory into a target repository.
 
 Copies the factory's Claude Code config (station skills, subagents, commands,
-hooks), the line/policy/label definitions, the spec templates, and — optionally —
-the disabled GitHub Actions workflows into <target>, then creates the .factory/
-runtime directories. Idempotent: existing files are skipped unless --force.
+hooks), the line/policy/label definitions, the spec templates, the human's
+FACTORY-MANUAL.md, and — optionally — the disabled GitHub Actions workflows into
+<target>, then creates the .factory/ runtime directories. Also plants a short
+factory pointer block in the repo's CLAUDE.md (between sentinel markers; only
+that block is ever touched, and a reinstall refreshes it) and stamps
+.factory/install-manifest.json (toolkit version/commit + which paths this
+installer created — what makes uninstall safe and reinstalls version-aware).
+Idempotent: existing files are skipped unless --force, which overwrites only
+factory-owned files, never the project's own.
 
 Usage:
+    python3 install/install.py /path/to/your/repo --dry-run      # review the plan
     python3 install/install.py /path/to/your/repo
     python3 install/install.py /path/to/your/repo --with-cloud   # also drop workflows
-    python3 install/install.py /path/to/your/repo --force        # overwrite existing
+    python3 install/install.py /path/to/your/repo --force        # refresh factory files
+    python3 install/install.py /path/to/your/repo --uninstall    # remove (keeps .factory/)
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
+import subprocess
+import time
 from pathlib import Path
 
 FACTORY = Path(__file__).resolve().parents[1]
+
+
+def _toolkit_version() -> str:
+    """The toolkit's version, read from pyproject.toml (the single source)."""
+    m = re.search(r'^version\s*=\s*"([^"]+)"', (FACTORY / "pyproject.toml").read_text(), re.M)
+    return m.group(1) if m else "unknown"
+
+
+def _toolkit_commit() -> str:
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(FACTORY), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else "unknown"
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
 
 # Claude Code config copied verbatim into <target>/.claude/.
 CLAUDE_ITEMS = [
@@ -44,12 +74,161 @@ CLAUDE_ITEMS = [
     "hooks/factory_board.py",
     "hooks/record_intervention.py",
 ]
-ROOT_FILES = ["line.yml", "policies.yml", "labels.yml"]
+ROOT_FILES = ["line.yml", "policies.yml", "labels.yml", "FACTORY-MANUAL.md"]
+
+# The CLAUDE.md pointer block. CLAUDE.md is the one context channel with an
+# unconditional load guarantee (every session, from turn one, even before the
+# repo's hooks are trusted) — so it carries discovery pointers and the standing
+# "prefer the factory" policy, never the rules themselves (those live in
+# .claude/commands/factory.md and the station skills, their single homes).
+_BLOCK_BEGIN = "<!-- factory:begin -->"
+_BLOCK_END = "<!-- factory:end -->"
+CLAUDE_MD_BLOCK = (
+    f"{_BLOCK_BEGIN}\n"
+    "## Software factory\n"
+    "Delivery work in this repo runs on a software factory: a deterministic dispatcher "
+    "(the `factory` CLI + `line.yml`) moves work items station by station and pauses at "
+    "human gates. When asked to build a feature or fix a bug, prefer driving it through "
+    "the factory rather than working ad hoc — `/factory <request>`, or read "
+    "`.claude/commands/factory.md`, the driver protocol.\n"
+    "For any factory command, `factory <cmd> -h` is the source-of-truth reference. "
+    "The human's operating guide is `FACTORY-MANUAL.md`. "
+    "(This block is managed by the factory's install.py; a reinstall refreshes it.)\n"
+    f"{_BLOCK_END}\n"
+)
 
 
-def copy(src: Path, dst: Path, force: bool) -> str:
+def plant_claude_md(target: Path, dry: bool = False) -> str:
+    """Plant (or refresh) the factory pointer block in the repo's CLAUDE.md.
+
+    Only the sentinel-marked block is ever written: existing content outside the
+    markers is preserved byte-for-byte, and a stale block between the markers is
+    replaced — so upgrades propagate without --force and without clobbering the
+    project's own instructions."""
+    path = target / "CLAUDE.md"
+    if not path.exists():
+        if dry:
+            return f"would create: {path}"
+        path.write_text(CLAUDE_MD_BLOCK)
+        return f"created: {path}"
+    text = path.read_text()
+    if _BLOCK_BEGIN in text and _BLOCK_END in text:
+        if dry:
+            return f"would refresh factory block: {path}"
+        head, rest = text.split(_BLOCK_BEGIN, 1)
+        tail = rest.split(_BLOCK_END, 1)[1]
+        path.write_text(head + CLAUDE_MD_BLOCK.rstrip("\n") + tail)
+        return f"refreshed factory block: {path}"
+    if dry:
+        return f"would append factory block: {path}"
+    sep = "" if text.endswith("\n\n") else ("\n" if text.endswith("\n") else "\n\n")
+    path.write_text(text + sep + CLAUDE_MD_BLOCK)
+    return f"appended factory block: {path}"
+
+
+def strip_claude_md(target: Path, dry: bool) -> str | None:
+    """Reverse plant_claude_md: remove the marked block, preserving everything
+    else; if the file held nothing but our block, remove the file."""
+    path = target / "CLAUDE.md"
+    if not path.exists():
+        return None
+    text = path.read_text()
+    if _BLOCK_BEGIN not in text or _BLOCK_END not in text:
+        return None
+    if dry:
+        return f"would strip factory block from: {path}"
+    head = text.split(_BLOCK_BEGIN, 1)[0]
+    tail = text.split(_BLOCK_END, 1)[1]
+    remains = (head.rstrip("\n") + "\n\n" + tail.lstrip("\n")).strip("\n")
+    if remains:
+        path.write_text(remains + "\n")
+        return f"stripped factory block from: {path}"
+    path.unlink()
+    return f"removed: {path} (contained only the factory block)"
+
+
+# --- the install manifest -----------------------------------------------------
+# Written to .factory/install-manifest.json: which toolkit version/commit was
+# installed, when, and which paths the installer actually created (vs. skipped
+# because they already existed). This is what makes uninstall safe (only remove
+# what we created), reinstalls version-aware, and future upgrade/divergence
+# tooling possible (see docs/OPTIMIZATION-AREAS.md §6).
+
+_MANIFEST_REL = ".factory/install-manifest.json"
+
+
+def read_manifest(target: Path) -> dict | None:
+    path = target / _MANIFEST_REL
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def write_manifest(target: Path, log: list[str], prior: dict | None) -> str:
+    created_now = []
+    for line in log:
+        for prefix in ("copied: ", "created: "):
+            if line.startswith(prefix):
+                created_now.append(str(Path(line[len(prefix) :]).relative_to(target)))
+    manifest = {
+        "toolkit_version": _toolkit_version(),
+        "toolkit_commit": _toolkit_commit(),
+        "installed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "created": sorted(set((prior or {}).get("created", [])) | set(created_now)),
+    }
+    path = target / _MANIFEST_REL
+    path.write_text(json.dumps(manifest, indent=2) + "\n")
+    return f"stamped: {path} (v{manifest['toolkit_version']} @ {manifest['toolkit_commit']})"
+
+
+def uninstall(target: Path, prior: dict | None, dry: bool) -> int:
+    """Remove the factory from a repo: delete what the installer created, unmerge
+    settings.json, strip the CLAUDE.md block. Deliberately leaves .factory/ —
+    that's the repo's own history (work items, interventions, metrics)."""
+    if prior and prior.get("created"):
+        owned = prior["created"]
+        print(f"uninstalling factory v{prior.get('toolkit_version', '?')} (per install manifest)")
+    else:
+        owned = [f".claude/{i}" for i in CLAUDE_ITEMS] + ROOT_FILES + ["templates"]
+        owned += [f".github/workflows/{w.name}" for w in (FACTORY / "workflows").glob("*.disabled")]
+        print("⚠ no install manifest found (pre-manifest install) — removing the standard file set")
+    log = []
+    for rel in sorted(set(owned)):
+        p = target / rel
+        if not p.exists():
+            continue
+        if dry:
+            log.append(f"would remove: {p}")
+        else:
+            shutil.rmtree(p) if p.is_dir() else p.unlink()
+            log.append(f"removed: {p}")
+    if "CLAUDE.md" not in owned:
+        log.append(strip_claude_md(target, dry))
+    if ".claude/settings.json" not in owned:
+        log.append(unmerge_settings(target, dry))
+    print("\n".join(line for line in log if line))
+    if dry:
+        print(f"\nDry run — nothing was removed. Rerun to uninstall from {target}")
+        return 0
+    print(
+        f"""
+✓ Factory removed from {target}
+  Left in place: .factory/ — your work items, interventions, and metrics (the
+  factory's memory, including the install manifest). Delete it manually for a
+  clean slate. Review the diff and commit when satisfied.
+"""
+    )
+    return 0
+
+
+def copy(src: Path, dst: Path, force: bool, dry: bool = False) -> str:
     if dst.exists() and not force:
         return f"skip (exists): {dst}"
+    if dry:
+        return f"would copy: {dst}"
     dst.parent.mkdir(parents=True, exist_ok=True)
     if src.is_dir():
         shutil.copytree(src, dst, dirs_exist_ok=True)
@@ -58,16 +237,22 @@ def copy(src: Path, dst: Path, force: bool) -> str:
     return f"copied: {dst}"
 
 
-def merge_settings(target: Path, force: bool) -> str:
+def merge_settings(target: Path, dry: bool = False) -> str:
     """Merge the factory's hooks + permission allowlist into the repo's existing
-    settings.json rather than clobbering it."""
+    settings.json rather than clobbering it. settings.json is shared real estate
+    (the project's own hooks/permissions live there too), so even --force never
+    replaces it wholesale — the merge already refreshes the factory's entries."""
     src = FACTORY / ".claude" / "settings.json"
     dst = target / ".claude" / "settings.json"
     new = json.loads(src.read_text())
-    if not dst.exists() or force:
+    if not dst.exists():
+        if dry:
+            return f"would copy: {dst}"
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_text(json.dumps(new, indent=2) + "\n")
         return f"copied: {dst}"
+    if dry:
+        return f"would merge hooks + permissions into: {dst}"
     existing = json.loads(dst.read_text())
     allow = existing.setdefault("permissions", {}).setdefault("allow", [])
     for a in new.get("permissions", {}).get("allow", []):
@@ -78,6 +263,33 @@ def merge_settings(target: Path, force: bool) -> str:
     return f"merged: {dst}"
 
 
+def unmerge_settings(target: Path, dry: bool) -> str | None:
+    """Reverse merge_settings: remove the factory's own hook groups and permission
+    entries from the repo's settings.json, leaving everything else untouched."""
+    dst = target / ".claude" / "settings.json"
+    if not dst.exists():
+        return None
+    fact = json.loads((FACTORY / ".claude" / "settings.json").read_text())
+    cur = json.loads(dst.read_text())
+    changed = False
+    allow = cur.get("permissions", {}).get("allow", [])
+    for a in fact.get("permissions", {}).get("allow", []):
+        while a in allow:
+            allow.remove(a)
+            changed = True
+    hooks = cur.get("hooks", {})
+    for k, v in fact.get("hooks", {}).items():
+        if hooks.get(k) == v:
+            del hooks[k]
+            changed = True
+    if not changed:
+        return None
+    if dry:
+        return f"would remove factory hooks + permissions from: {dst}"
+    dst.write_text(json.dumps(cur, indent=2) + "\n")
+    return f"removed factory hooks + permissions from: {dst}"
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Adopt the software factory into a repo.")
     ap.add_argument("target")
@@ -86,7 +298,22 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="also copy the (disabled) GitHub Actions workflows",
     )
-    ap.add_argument("--force", action="store_true", help="overwrite existing files")
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite existing factory-owned files (never the project's own; "
+        "settings.json is always merged, CLAUDE.md only its marked block)",
+    )
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="list every operation without writing anything (review the plan, then rerun)",
+    )
+    ap.add_argument(
+        "--uninstall",
+        action="store_true",
+        help="remove the factory from the target (keeps .factory/ state; see --dry-run)",
+    )
     args = ap.parse_args(argv)
 
     target = Path(args.target).resolve()
@@ -94,19 +321,49 @@ def main(argv: list[str] | None = None) -> int:
         print(f"✗ target is not a directory: {target}")
         return 1
 
-    log = [copy(FACTORY / ".claude" / i, target / ".claude" / i, args.force) for i in CLAUDE_ITEMS]
-    log.append(merge_settings(target, args.force))
-    log += [copy(FACTORY / f, target / f, args.force) for f in ROOT_FILES]
-    log.append(copy(FACTORY / "templates", target / "templates", args.force))
-    for sub in ("work-items", "interventions", "metrics"):
-        (target / ".factory" / sub).mkdir(parents=True, exist_ok=True)
-    log.append(f"created: {target / '.factory'}")
+    dry = args.dry_run
+    prior = read_manifest(target)
+    if args.uninstall:
+        return uninstall(target, prior, dry)
+    if prior:
+        print(
+            f"→ previously installed: v{prior.get('toolkit_version', '?')} "
+            f"({prior.get('toolkit_commit', '?')}) at {prior.get('installed_at', '?')}; "
+            f"installing v{_toolkit_version()} ({_toolkit_commit()})"
+        )
+
+    log = [
+        copy(FACTORY / ".claude" / i, target / ".claude" / i, args.force, dry)
+        for i in CLAUDE_ITEMS
+    ]
+    log.append(merge_settings(target, dry))
+    log += [copy(FACTORY / f, target / f, args.force, dry) for f in ROOT_FILES]
+    log.append(copy(FACTORY / "templates", target / "templates", args.force, dry))
+    log.append(plant_claude_md(target, dry))
+    runtime = target / ".factory"
+    subs = ("work-items", "interventions", "metrics")
+    missing = [s for s in subs if not (runtime / s).is_dir()]
+    if not missing:
+        log.append(f"skip (exists): {runtime}")
+    elif dry:
+        log.append(f"would create runtime state dirs: {runtime}")
+    else:
+        for sub in subs:
+            (runtime / sub).mkdir(parents=True, exist_ok=True)
+        log.append(f"created runtime state dirs: {runtime}")
     if args.with_cloud:
         wf = target / ".github" / "workflows"
         for w in sorted((FACTORY / "workflows").glob("*.disabled")):
-            log.append(copy(w, wf / w.name, args.force))
+            log.append(copy(w, wf / w.name, args.force, dry))
+    if dry:
+        log.append(f"would stamp: {target / _MANIFEST_REL} (version + created-paths record)")
+    else:
+        log.append(write_manifest(target, log, prior))
 
     print("\n".join(log))
+    if dry:
+        print(f"\nDry run — nothing was written. Rerun without --dry-run to install into {target}")
+        return 0
     cloud_step = ""
     if args.with_cloud:
         cloud_step = "\n  5. Cloud: see docs/CLOUD-AUTONOMY.md to enable the workflows."

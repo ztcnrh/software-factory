@@ -10,7 +10,7 @@ Everything in this directory is **load-bearing**: some component of the factory 
 Two things deliberately **not** here:
 
 - Formats rendered by engine *code* live in that code (e.g. the intervention record's shape is `src/factory/interventions.py`), so the engine stays self-contained when installed as a CLI tool.
-- Human-facing guidance with no consumer lives in `docs/` or `USER-MANUAL.md`, not here.
+- Human-facing guidance with no consumer lives in `docs/` or `FACTORY-MANUAL.md`, not here.
 
 Editing a template changes real factory output — which also makes these files fair game for the **retro station** to improve.
 
