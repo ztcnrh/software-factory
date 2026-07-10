@@ -52,13 +52,13 @@ You rarely type `advance` yourself — `/factory` does. You *do* type `gate`, or
 
 ## 3. The gate playbook (your three decision points)
 
-When the line stops, you get a **review packet**: what the item is, what the station produced (links to the spec / PR / verification evidence), its confidence, and the decision options. Aim to decide in seconds — that's what the packet is for.
+When the line stops, you get a **review packet**: what the item is, what the station produced (links to the spec / PR / verification evidence), its confidence, and the decision options. The packet is built for **orientation in seconds** — everything worth reviewing is one link away, nothing to hunt for. The review itself takes as long as it deserves: these gates are where your judgment is the product, so read the spec, the diff, and the evidence properly. What the packet buys you is that none of that time goes to assembling context.
 
 ### Spec review (`spec_review`)
 The Spec station wrote `specs/<id>/PRODUCT.md`. Approve if it removes the ambiguity and names the non-goals; send it back if something's missing.
 ```bash
 factory gate <id> --decision approved
-factory gate <id> --decision needs_revision --changed \
+factory gate <id> --decision needs_revision \
     --notes "why, generalizably" --category missing-edge-case
 ```
 
@@ -66,17 +66,17 @@ factory gate <id> --decision needs_revision --changed \
 The Verify station attached evidence (tests, behavior, screenshots). **Approving == merging the PR**, which triggers your project's post-merge CI/CD; the external `deploy` step watches it and a green deploy = shipped → done. Bounce to code-review if it's not ready.
 ```bash
 factory gate <id> --decision approved        # merge PR → deploy → done
-factory gate <id> --decision not_ready --changed --notes "..." --category ...
+factory gate <id> --decision not_ready --notes "..." --category ...
 ```
 
 ### Shelving at either gate (`park`)
-Both gates also let you stop the line: `--decision park --changed --notes "why" --category ...` moves the item to `parked` (terminal but **revivable** — `revive` re-enters triage later). Use it when the item shouldn't proceed *now* — an external/org blocker, a premature vision, more tech debt than it's worth. Because `park` is a steering decision, your `--notes` reason is captured as an intervention, so shelving also feeds the learning loop.
+Both gates also let you stop the line: `--decision park --notes "why" --category ...` moves the item to `parked` (terminal but **revivable** — `revive` re-enters triage later). Use it when the item shouldn't proceed *now* — an external/org blocker, a premature vision, more tech debt than it's worth. Because `park` is a steering decision, your `--notes` reason is captured as an intervention, so shelving also feeds the learning loop.
 
 ### Clarification (`needs_human`)
 Triage couldn't proceed without a product/priority call only you can make. Answer, and it re-enters triage.
 
 ### The one habit that matters
-**When you steer, say *why* — generalizably.** `--changed --notes "..." --category ...` is what turns a one-off correction into a permanent fix. "Public write endpoints always need input validation" teaches the factory; "fix this" doesn't. Thirty seconds of *why* now buys you fewer gates later. (Steering in chat while an item waits at a gate is also captured automatically by a hook — but an explicit `gate --notes` is richer.)
+**When you steer, say *why* — generalizably.** A send-back or `park` counts as a steer on its own; add `--changed` only when you *approve* but fixed the work at the gate yourself (by hand or by directing your agent), so that steer gets recorded too. Either way, `--notes "..." --category ...` is what turns a one-off correction into a permanent fix. "Public write endpoints always need input validation" teaches the factory; "fix this" doesn't. Thirty seconds of *why* now buys you fewer gates later. (Steering in chat while an item waits at a gate is also captured automatically by a hook — but an explicit `gate --notes` is richer.)
 
 ---
 

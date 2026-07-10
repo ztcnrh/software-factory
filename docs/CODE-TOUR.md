@@ -64,7 +64,7 @@ Most of this needs one sentence each, because the pattern repeats.
 - **`.claude/commands/factory.md`** — the `/factory` driver: resolve an item, then loop `factory next` → run the station → `factory advance` until a human gate or terminal state. It's the consumer of the `NEXT:` contract from block 1.
 - **`.claude/hooks/`** — two small stdlib scripts: `factory_board.py` injects the board at session start; `record_intervention.py` captures steering you type in chat *while an item sits at a gate* — the second, quieter source of intervention records.
 - **`templates/`** — the live artifact shapes (spec templates, review packet). Its own `README.md` states the rule: one consumer per template, nothing restates a template's shape elsewhere.
-- **`install/install.py`** — copies all of the above into a target repo; read the `CLAUDE_ITEMS` / `ROOT_FILES` lists and you know exactly what "adopting the factory" means.
+- **`install/install.py`** — copies all of the above into a target repo; read the `CLAUDE_ITEMS` / `ROOT_FILES` lists and you know exactly what "adopting the factory" means. It also plants a pointer block in the target's CLAUDE.md, stamps `.factory/install-manifest.json` (toolkit version + created paths), and can `--uninstall` exactly what it created.
 - **`workflows/*.yml.disabled`** — the opt-in cloud layer: GitHub issue labels trigger headless station runs. Ship disabled, least battle-tested; read [CLOUD-AUTONOMY.md](CLOUD-AUTONOMY.md) before enabling. `labels.yml` defines the `factory:<state>` label set that drives it.
 
 ## Cement it: trace one real item (~10 min)

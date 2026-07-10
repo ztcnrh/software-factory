@@ -97,6 +97,19 @@ def test_gate_plain_approval_does_not_warn(factory_root: Path, capsys):
     assert "no --notes" not in capsys.readouterr().err
 
 
+def test_gate_warns_when_intervention_fields_ride_a_non_steer(factory_root: Path, capsys):
+    """--expected/--category/--produced only land in an intervention record, which a
+    plain approval never writes — they used to vanish silently; now the human is told
+    to add --changed if they actually steered."""
+    item_id = _item_at(factory_root, "spec_review")
+    rc = main(
+        ["--root", str(factory_root), "gate", item_id, "--decision", "approved",
+         "--category", "missing-edge-case"]
+    )
+    assert rc == 0
+    assert "add --changed" in capsys.readouterr().err
+
+
 def test_advance_report_conflicts_with_inline_flags(factory_root: Path, capsys):
     """--report used to silently ignore every inline flag passed alongside it;
     the combination must be rejected, naming the clashing flags."""

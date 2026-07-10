@@ -50,7 +50,7 @@ def test_approved_rule_respects_labels_gate_and_risk_ceiling():
 def test_approved_policy_clears_gate_with_no_human_touch(factory_root: Path):
     """End to end: an approved policy lets the dispatcher walk past a gate as an
     'auto_gate', advancing the item without incrementing human_touches. This is
-    the mechanism that raises the auto-ship metric over time."""
+    the mechanism that grows the hands-off share over time."""
     (factory_root / "policies.yml").write_text(
         yaml.safe_dump(
             {

@@ -288,6 +288,14 @@ def cmd_gate(args: argparse.Namespace) -> int:
         produced = Path(args.produced_file).read_text()
     elif args.produced:
         produced = args.produced
+    if not decision.is_steer and (decision.expected or decision.category or produced):
+        # These fields only land in an intervention record, and a non-steer
+        # decision doesn't write one — say so instead of dropping them silently.
+        print(
+            f"⚠ --expected/--category/--produced go into an intervention record, and a plain "
+            f"{decision.decision!r} doesn't write one — add --changed if you steered the work.",
+            file=sys.stderr,
+        )
     new_state = d.gate(item, decision, produced=produced)
     print(f"✓ {item.id}: gate {gate} → {new_state}  (decision: {args.decision})")
     _print_action(_resolve_next(d, item.id), d.line)

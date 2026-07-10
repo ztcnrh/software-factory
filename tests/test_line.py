@@ -48,6 +48,15 @@ def test_deploy_is_the_ship_point_and_fails_back_to_review(factory_root: Path):
     assert line.ships_on("verify") is None  # only the deploy state carries the marker
 
 
+def test_unknown_state_kind_fails_at_load(factory_root: Path):
+    """A typo'd `kind` in line.yml would silently fall through the dispatcher's
+    branching and be treated as a station — loading must fail loudly instead."""
+    text = (factory_root / "line.yml").read_text().replace("kind: station", "kind: staton", 1)
+    (factory_root / "line.yml").write_text(text)
+    with pytest.raises(LineError, match="unknown kind"):
+        Line.load(factory_root / "line.yml")
+
+
 def test_unknown_verdict_raises(factory_root: Path):
     """An unroutable verdict must fail loudly rather than silently stall an item
     in limbo with no next state."""

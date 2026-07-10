@@ -43,4 +43,4 @@ The North Star has two halves: *more* shipped without rework, *and* at an accept
 
 ## What you do
 
-Mostly: **steer with a reason.** `--changed --notes "<generalizable why>" --category <kind>` is the single highest-leverage habit, because it's the difference between the Retro station learning a rule and learning noise. Then run `/factory retro` now and then (or schedule it — [CLOUD-AUTONOMY.md](CLOUD-AUTONOMY.md)), read its PRs, and sign the policies you trust. Watch the one-shot ship rate climb.
+Mostly: **steer with a reason.** `--notes "<generalizable why>" --category <kind>` on every steer is the single highest-leverage habit (add `--changed` when you approved but fixed the work yourself — that counts as a steer too), because it's the difference between the Retro station learning a rule and learning noise. Then run `/factory retro` now and then (or schedule it — [CLOUD-AUTONOMY.md](CLOUD-AUTONOMY.md)), read its PRs, and sign the policies you trust. Watch the one-shot ship rate climb.

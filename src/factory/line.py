@@ -17,6 +17,9 @@ class LineError(Exception):
     """Raised on an invalid line definition or an impossible route."""
 
 
+_KINDS = {"station", "human_gate", "terminal"}
+
+
 class Line:
     def __init__(self, data: dict[str, Any]):
         self.version = data.get("version", 1)
@@ -34,6 +37,14 @@ class Line:
     def _validate(self) -> None:
         if self.start not in self.states:
             raise LineError(f"start state {self.start!r} is not a defined state")
+        for name, spec in self.states.items():
+            # A typo'd kind would otherwise fall through the dispatcher's checks
+            # and be treated as a station — reject it at the boundary instead.
+            if spec.get("kind") not in _KINDS:
+                raise LineError(
+                    f"state {name!r} has unknown kind {spec.get('kind')!r}; "
+                    f"valid: {', '.join(sorted(_KINDS))}"
+                )
         for state, table in self.routing.items():
             if state not in self.states:
                 raise LineError(f"routing references unknown state {state!r}")
