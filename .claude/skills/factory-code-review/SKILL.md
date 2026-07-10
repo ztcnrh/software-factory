@@ -33,7 +33,7 @@ you synthesize. Don't skip this on the risky ones.
 factory advance <id> --verdict pass     --summary "<why it's sound>" --confidence <0..1>
 # or
 factory advance <id> --verdict changes_requested \
-  --summary "<headline>" --note "1) ... 2) ... 3) ..."
+  --summary "<headline>" --confidence <0..1> --notes "1) ... 2) ... 3) ..."
 ```
 `changes_requested` routes back to implementation; make the notes a numbered,
 specific worklist (file:line where you can). Vague review notes cause loops.

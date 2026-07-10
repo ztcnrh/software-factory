@@ -20,7 +20,7 @@ is the brain; you are the hands.
 - `next` or empty → pick the most actionable item from the board (one sitting at a
   station, not one waiting on a human).
 - Anything else → a new request: `factory new "<concise title>" --body "$ARGUMENTS"`
-  (add `--risk` if obvious).
+  (add `--risk` and `--label`s if obvious — labels are what gate policies match on).
 
 ## 2 — Run the loop
 Repeat until you hit a human gate or a terminal state:

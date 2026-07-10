@@ -24,7 +24,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .dispatch import STEERING_VERDICTS, Action, Dispatcher
+from .dispatch import Action, Dispatcher
 from .line import Line
 from .model import GateDecision, StationReport
 from .retro import briefing
@@ -190,7 +190,7 @@ def _inline_report_flags(args: argparse.Namespace) -> list[str]:
         "--cost": args.cost,
         "--risk": args.risk,
         "--pr": args.pr,
-        "--note": args.note,
+        "--notes": args.notes,
         "--human-required": args.human_required or None,
         "--human-reason": args.human_reason,
         "--spawn-title": args.spawn_title,
@@ -250,7 +250,7 @@ def cmd_advance(args: argparse.Namespace) -> int:
             pr=args.pr,
             human_required=args.human_required,
             human_reason=args.human_reason or "",
-            notes=args.note or "",
+            notes=args.notes or "",
             spawn=spawn,
         )
     new_state = d.advance(item, report)
@@ -266,8 +266,16 @@ def cmd_gate(args: argparse.Namespace) -> int:
     d = _disp(args)
     item = d.store.load(args.id)
     gate = d.line.gate_name(item.state) or item.state
-    steered = args.changed or args.decision in STEERING_VERDICTS
-    if steered and not (args.notes or "").strip():
+    decision = GateDecision(
+        gate=gate,
+        decision=args.decision,
+        by=_resolve_actor(args),
+        changed=args.changed,
+        notes=args.notes or "",
+        expected=args.expected or "",
+        category=args.category or "",
+    )
+    if decision.is_steer and not decision.notes.strip():
         # Never block a human at a gate, but don't let the learning signal vanish
         # silently either: an intervention record without a why teaches the retro nothing.
         print(
@@ -280,15 +288,6 @@ def cmd_gate(args: argparse.Namespace) -> int:
         produced = Path(args.produced_file).read_text()
     elif args.produced:
         produced = args.produced
-    decision = GateDecision(
-        gate=gate,
-        decision=args.decision,
-        by=_resolve_actor(args),
-        changed=args.changed,
-        notes=args.notes or "",
-        expected=args.expected or "",
-        category=args.category or "",
-    )
     new_state = d.gate(item, decision, produced=produced)
     print(f"✓ {item.id}: gate {gate} → {new_state}  (decision: {args.decision})")
     _print_action(_resolve_next(d, item.id), d.line)
@@ -517,7 +516,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Revised risk, if the station learned something (policies match on this)",
     )
     s.add_argument("--pr", help="PR URL or number for the change")
-    s.add_argument("--note", help="Free-form station notes, kept on the report")
+    s.add_argument(
+        "--notes",
+        help="Free-form station notes for whoever reads the item next (kept in its history)",
+    )
     s.add_argument(
         "--human-required",
         action="store_true",

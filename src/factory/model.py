@@ -96,6 +96,10 @@ class StationReport:
     spawn: list[dict[str, Any]] = field(default_factory=list)  # new items → triage
 
 
+# Gate decisions that are themselves a steer (rework), regardless of --changed.
+STEERING_VERDICTS = {"needs_revision", "not_ready", "park"}
+
+
 @dataclass
 class GateDecision:
     """A human's decision at a gate. The ``expected``/``category`` fields are the
@@ -104,7 +108,15 @@ class GateDecision:
     gate: str
     decision: str  # the verdict chosen, e.g. "approved" | "needs_revision"
     by: str = "unknown"  # who decided — the CLI resolves this to a real identity
-    changed: bool = False  # did the human change/steer anything?
+    changed: bool = False  # the human edited the work themselves (matters on approvals)
     notes: str = ""
     expected: str = ""  # what the human wanted the station to have produced
     category: str = ""  # e.g. "missing-edge-case" | "wrong-scope" | "style"
+
+    @property
+    def is_steer(self) -> bool:
+        """Did the human steer? True for a send-back/park (the decision itself is
+        rework) or an approval where they edited the work (``changed``). This single
+        definition decides what counts as an intervention everywhere — the dispatcher
+        records one, and the CLI nudges for the missing why."""
+        return self.changed or self.decision in STEERING_VERDICTS

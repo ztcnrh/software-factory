@@ -39,7 +39,7 @@ factory advance <id> \
   --risk <low|medium|high> \
   --summary "<one-line rationale + repro status>" \
   --confidence <0..1> \
-  --note "<anything the next station should know>"
+  --notes "<anything the next station should know>"
 ```
 
 For `needs_human_clarification`, instead phrase the open question crisply in

@@ -13,11 +13,15 @@
 - High-risk items → fold in the `council` skill's synthesis.
 
 ## Your decision
-- ✅ **Approve** → `factory gate <WI-id> --decision <approved>`
+- ✅ **Approve** → `factory gate <WI-id> --decision approved`
+- ✏️ **Approve, but you edited the work yourself** → add `--changed --notes "<what you changed & why>"`
+  (`--changed` exists for exactly this case: the decision alone wouldn't reveal the steer)
 - ↩️ **Send back** → `factory gate <WI-id> --decision <needs_revision | not_ready> \`
-  `--changed --notes "<what & why>" --category <kind>`
-- ⏸ **Shelve** → `factory gate <WI-id> --decision park --changed --notes "<why now-not>" --category <kind>`
+  `--notes "<what & why>" --category <kind>`
+- ⏸ **Shelve** → `factory gate <WI-id> --decision park --notes "<why not-now>" --category <kind>`
   (→ `parked`, revivable later)
+
+A send-back or park counts as a steer on its own — no `--changed` needed there.
 
 Every decision is **signed**: `factory gate` records it under your git identity
 automatically (override with `--by <name>`; a cloud station passes the reviewer's

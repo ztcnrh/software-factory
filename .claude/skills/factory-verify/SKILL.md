@@ -26,7 +26,8 @@ factory advance <id> --verdict verified \
   --artifact <screenshot/log path> --confidence <0..1>
 # or, if behavior doesn't match the spec:
 factory advance <id> --verdict failed \
-  --summary "<criterion that failed + observed vs expected>"
+  --summary "<criterion that failed + observed vs expected>" \
+  [--artifact <failure evidence path>] --confidence <0..1>
 ```
 Both verdicts route to the **ship_review** human gate (the human sees your
 evidence and decides). `verified` means "I confirmed it works"; `failed` means

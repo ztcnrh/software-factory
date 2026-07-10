@@ -128,6 +128,54 @@ def test_park_is_terminal_but_revivable(factory_root: Path):
     assert d.line.states["parked"].get("revivable") is True
 
 
+def test_station_confidence_reaches_the_metrics_ledger(factory_root: Path):
+    """Regression: --confidence was collected by the CLI but never persisted —
+    the report object was discarded after routing. It must land in the station's
+    metrics event, since that history is what a future confidence-weighted gate
+    policy would mine."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("x", risk="low")
+    _advance(d, item, "needs_spec", confidence=0.85)
+    ev = [e for e in d.metrics.events() if e["kind"] == "station"][-1]
+    assert ev["confidence"] == 0.85
+
+
+def test_station_notes_land_in_item_history(factory_root: Path):
+    """Regression: StationReport.notes ('anything the next station should know')
+    was write-only — skills instructed stations to pass it, then it evaporated.
+    It must persist as a note event in the item's history."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("x", risk="low")
+    _advance(d, item, "needs_spec", notes="repro is flaky on CI only")
+    notes = [e for e in item.history if e.kind == "note"]
+    assert notes and notes[-1].note == "repro is flaky on CI only"
+    assert notes[-1].actor == "triage"
+
+
+def test_escalation_notes_and_confidence_survive_the_escape_hatch(factory_root: Path):
+    """The blocked path builds its own event and metrics emit, so it could silently
+    diverge from the normal path — notes and confidence must persist there too."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("x", risk="low")
+    _advance(
+        d, item, "blocked", human_required=True, confidence=0.3, notes="need a prod secret"
+    )
+    assert item.state == "blocked"
+    assert [e.note for e in item.history if e.kind == "note"] == ["need a prod secret"]
+    assert [e for e in d.metrics.events() if e["kind"] == "station"][-1]["confidence"] == 0.3
+
+
+def test_is_steer_is_the_single_definition_of_an_intervention():
+    """The 'did the human steer?' predicate lives on GateDecision so the dispatcher
+    (records the intervention) and the CLI (nudges for the why) can never drift:
+    steering decisions steer on their own; --changed marks an edited approval;
+    a clean approval is not a steer."""
+    assert GateDecision(gate="g", decision="needs_revision").is_steer
+    assert GateDecision(gate="g", decision="park").is_steer
+    assert GateDecision(gate="g", decision="approved", changed=True).is_steer
+    assert not GateDecision(gate="g", decision="approved").is_steer
+
+
 def test_cannot_advance_a_station_report_through_a_gate(factory_root: Path):
     """Guardrail: station verdicts and human decisions are different channels.
     Advancing a report while parked at a human gate must raise, not corrupt state."""

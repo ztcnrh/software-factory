@@ -22,10 +22,6 @@ from .model import GateDecision, StationReport, WorkItem
 from .policies import Policies
 from .store import Store
 
-# Gate decisions that mean the human steered (rework), not just approved.
-# Public: the CLI also consults this to nudge for a --notes learning signal.
-STEERING_VERDICTS = {"needs_revision", "not_ready", "park"}
-
 
 @dataclass
 class Action:
@@ -142,12 +138,15 @@ class Dispatcher:
             )
             item.state = "blocked"
             item.steers += 1  # a block means autonomy broke here — counts as a human step-in
+            if report.notes:
+                item.log(kind="note", actor=report.station, note=report.notes)
             self.store.save(item)
             self.metrics.emit(
                 kind="station",
                 item=item.id,
                 station=report.station,
                 verdict="blocked",
+                confidence=report.confidence,
                 cost=report.cost,
             )
             return item.state
@@ -163,6 +162,10 @@ class Dispatcher:
             cost=report.cost,
         )
         item.state = nxt
+        if report.notes:
+            # Station notes are context for whoever reads the item next (a human at
+            # a gate, the retro) — persist them; the report object itself is discarded.
+            item.log(kind="note", actor=report.station, note=report.notes)
         for spec in report.spawn:
             child = self.new_item(
                 spec.get("title", "Untitled"),
@@ -185,6 +188,9 @@ class Dispatcher:
             item=item.id,
             station=report.station,
             verdict=report.verdict,
+            # Confidence lands in the ledger so a future confidence-weighted gate
+            # policy has history to mine (e.g. auto-clear only above a threshold).
+            confidence=report.confidence,
             cost=report.cost,
         )
         return item.state
@@ -207,8 +213,7 @@ class Dispatcher:
             note=decision.notes,
         )
         item.state = nxt
-        is_intervention = decision.changed or decision.decision in STEERING_VERDICTS
-        if is_intervention:
+        if decision.is_steer:
             item.steers += 1  # a send-back / correction / park is human rework
             path = self.interventions.record(item, decision, state, produced)
             item.log(
@@ -224,7 +229,7 @@ class Dispatcher:
             decision=decision.decision,
             by=decision.by,
             required_human=True,
-            changed=is_intervention,
+            changed=decision.is_steer,
         )
         return item.state
 

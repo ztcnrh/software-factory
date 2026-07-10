@@ -41,8 +41,8 @@ factory advance <id> \
   --confidence <0..1>
 ```
 This routes the item to the **spec_review** human gate. If you genuinely cannot
-spec it without a product decision, emit `--verdict blocked --human-required
---human-reason "<the decision you need>"`.
+spec it without a product decision, pull the escape hatch instead:
+`--human-required --human-reason "<the decision you need>"` (no verdict needed).
 
 ## Quality bar
 - Every acceptance criterion must be checkable by the verify station without you.

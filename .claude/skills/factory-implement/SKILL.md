@@ -31,11 +31,13 @@ factory advance <id> \
   --summary "<what you built, in one line>" \
   --pr "<#NN or branch name>" \
   --artifact <key files touched> \
+  --confidence <0..1> \
   --cost <rough effort proxy>
 ```
 If you hit something the spec didn't anticipate and can't resolve within its
-intent, stop: `--verdict blocked --human-required --human-reason "<the gap>"`.
-Don't guess past a real ambiguity — that's what produces rework.
+intent, stop and pull the escape hatch: `--human-required --human-reason
+"<the gap>"` (no verdict needed). Don't guess past a real ambiguity — that's
+what produces rework.
 
 ## Quality bar
 - Green formatter, linter, and tests before you emit `implemented`. The code-review
