@@ -18,4 +18,5 @@ gate policy in `policies.yml`, or fix a template.
 Write your findings and concrete proposals to `.factory/retro/<date>/` and open a
 PR titled `retro: <date>`. Every proposal must cite the intervention records it
 answers, and must state its blast radius. You propose; the human disposes — but
-each accepted change permanently removes a class of work from their plate.
+each accepted change aims to take a recurring class of work off their plate, and
+even making that class of stumble rarer is a win.
