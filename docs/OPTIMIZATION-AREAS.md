@@ -66,4 +66,14 @@ Each entry: what it is today · why it's fine for now · the idea for later.
 
 ---
 
+## 7. A mis-targeted `advance`/`gate` has no clean correction path
+
+**Today.** State-specific verdicts are the guardrail: `factory advance <wrong-id> --verdict x` almost always fails loudly, because the verdict isn't valid from the wrong item's state and `Line.route` raises before anything is saved. The residual risk is the unlucky case — the wrong item sits at a state where that verdict *is* valid (e.g. two items both at `implement`). Then the item routes, and history/metrics/attempts are polluted with no documented recovery beyond hand-editing the item's JSON (the history event, being append-only, stays — which is arguably correct for an audit trail).
+
+**Why it's fine for now.** The typed-verdict guardrail catches the common typo; the unlucky case needs two items at the same state *and* a wrong id, and the blast radius is one item's state (git-recoverable JSON) plus a few noise events in a ledger that aggregates in the hundreds.
+
+**The idea for later.** An auditable admin verb — `factory correct <id> --state <s> --reason "<why>"` — that sets the state and logs a `correction` event with the operator's identity, rather than a true "undo" (unwinding metrics events, intervention files, and spawned children is complexity the mistake doesn't justify). The mistake stays visible in history; the item gets back on track in one command.
+
+---
+
 <!-- Add new entries only when you can state the cost AND a direction. Keep it lean. -->

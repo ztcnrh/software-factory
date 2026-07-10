@@ -196,7 +196,12 @@ def uninstall(target: Path, prior: dict | None, dry: bool) -> int:
         owned += [f".github/workflows/{w.name}" for w in (FACTORY / "workflows").glob("*.disabled")]
         print("⚠ no install manifest found (pre-manifest install) — removing the standard file set")
     log = []
-    for rel in sorted(set(owned)):
+    # CLAUDE.md and settings.json are shared files: even when the installer
+    # created them, the user may have added their own content since — so they
+    # are never blind-deleted. The strip/unmerge paths remove only the factory's
+    # part and delete the file themselves when nothing else remains.
+    shared = {"CLAUDE.md", ".claude/settings.json"}
+    for rel in sorted(set(owned) - shared):
         p = target / rel
         if not p.exists():
             continue
@@ -205,10 +210,27 @@ def uninstall(target: Path, prior: dict | None, dry: bool) -> int:
         else:
             shutil.rmtree(p) if p.is_dir() else p.unlink()
             log.append(f"removed: {p}")
-    if "CLAUDE.md" not in owned:
-        log.append(strip_claude_md(target, dry))
-    if ".claude/settings.json" not in owned:
-        log.append(unmerge_settings(target, dry))
+    log.append(strip_claude_md(target, dry))
+    log.append(unmerge_settings(target, dry))
+    if not dry:  # prune now-empty factory parent dirs (user content keeps them alive)
+        for rel in (
+            ".claude/skills",
+            ".claude/agents",
+            ".claude/commands",
+            ".claude/hooks",
+            ".claude",
+            ".github/workflows",
+            ".github",
+        ):
+            p = target / rel
+            if p.is_dir() and not any(p.iterdir()):
+                p.rmdir()
+    # A workflow the user enabled (renamed away from .disabled, added secrets)
+    # is a deliberate act of theirs — never delete it, but say it's still there.
+    for w in sorted((FACTORY / "workflows").glob("*.disabled")):
+        live = target / ".github" / "workflows" / w.name.removesuffix(".disabled")
+        if live.exists():
+            log.append(f"⚠ enabled workflow left in place (you activated it): {live}")
     print("\n".join(line for line in log if line))
     if dry:
         print(f"\nDry run — nothing was removed. Rerun to uninstall from {target}")
@@ -263,9 +285,20 @@ def merge_settings(target: Path, dry: bool = False) -> str:
     return f"merged: {dst}"
 
 
+def _hollow(value: object) -> bool:
+    """True when a JSON value holds no real content (only empty containers)."""
+    if isinstance(value, dict):
+        return all(_hollow(v) for v in value.values())
+    if isinstance(value, list):
+        return all(_hollow(v) for v in value)
+    return not value
+
+
 def unmerge_settings(target: Path, dry: bool) -> str | None:
-    """Reverse merge_settings: remove the factory's own hook groups and permission
-    entries from the repo's settings.json, leaving everything else untouched."""
+    """Reverse merge_settings: remove the factory's own hook groups, permission
+    entries, and comment from the repo's settings.json, leaving everything else
+    untouched. If nothing but empty husks remain (we created the file and the
+    user never added to it), remove the file itself."""
     dst = target / ".claude" / "settings.json"
     if not dst.exists():
         return None
@@ -282,8 +315,16 @@ def unmerge_settings(target: Path, dry: bool) -> str | None:
         if hooks.get(k) == v:
             del hooks[k]
             changed = True
+    if cur.get("$comment") == fact.get("$comment"):
+        del cur["$comment"]
+        changed = True
     if not changed:
         return None
+    if _hollow(cur):
+        if dry:
+            return f"would remove: {dst} (holds only factory settings)"
+        dst.unlink()
+        return f"removed: {dst} (held only factory settings)"
     if dry:
         return f"would remove factory hooks + permissions from: {dst}"
     dst.write_text(json.dumps(cur, indent=2) + "\n")

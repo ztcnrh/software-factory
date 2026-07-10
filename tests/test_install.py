@@ -137,3 +137,64 @@ def test_uninstall_dry_run_removes_nothing(tmp_path: Path):
     assert "would remove" in out and "nothing was removed" in out
     assert (tmp_path / "line.yml").exists()
     assert (tmp_path / "CLAUDE.md").exists()
+
+
+def test_with_cloud_workflows_round_trip(tmp_path: Path):
+    """--with-cloud drops the disabled workflows, the manifest records them, and
+    uninstall takes them away again."""
+    _install(tmp_path, "--with-cloud")
+    wf = list((tmp_path / ".github" / "workflows").glob("*.disabled"))
+    assert wf, "expected disabled workflows to be installed"
+    _install(tmp_path, "--uninstall")
+    assert not list((tmp_path / ".github" / "workflows").glob("*.disabled"))
+
+
+def test_uninstall_never_deletes_an_enabled_workflow(tmp_path: Path):
+    """Enabling a workflow (renaming away .disabled, adding secrets) is a
+    deliberate user act — uninstall must leave it running and warn, not silently
+    remove live CI."""
+    _install(tmp_path, "--with-cloud")
+    wf_dir = tmp_path / ".github" / "workflows"
+    disabled = sorted(wf_dir.glob("*.disabled"))[0]
+    enabled = wf_dir / disabled.name.removesuffix(".disabled")
+    disabled.rename(enabled)
+    out = _install(tmp_path, "--uninstall")
+    assert enabled.exists()
+    assert "enabled workflow left in place" in out
+
+
+def test_uninstall_without_manifest_falls_back_to_standard_set(tmp_path: Path):
+    """Pre-manifest installs (before version stamping existed) must still be
+    uninstallable: fall back to the standard factory file set, with a warning."""
+    _install(tmp_path)
+    (tmp_path / ".factory" / "install-manifest.json").unlink()
+    out = _install(tmp_path, "--uninstall")
+    assert "no install manifest" in out
+    assert not (tmp_path / "line.yml").exists()
+    assert not (tmp_path / ".claude" / "skills" / "factory-triage").exists()
+
+
+def test_uninstall_keeps_user_edits_in_a_claude_md_we_created(tmp_path: Path):
+    """Even when the installer created CLAUDE.md, the user may have added their
+    own instructions since — uninstall strips only the factory block and must
+    never blind-delete the file over their content."""
+    _install(tmp_path)  # fresh repo: CLAUDE.md is factory-created
+    path = tmp_path / "CLAUDE.md"
+    path.write_text(path.read_text() + "\n## My own section\nKeep me.\n")
+    _install(tmp_path, "--uninstall")
+    text = path.read_text()
+    assert "Keep me." in text
+    assert "factory:begin" not in text
+
+
+def test_uninstall_removes_untouched_created_files_entirely(tmp_path: Path):
+    """The clean opt-out: when the installer created CLAUDE.md and settings.json
+    and the user never touched them, uninstall leaves no husks behind — no
+    orphan files and no empty .claude/.github parent dirs. Only .factory/
+    (the repo's own history) remains, by design."""
+    _install(tmp_path, "--with-cloud")  # fresh repo: everything factory-created
+    _install(tmp_path, "--uninstall")
+    assert not (tmp_path / "CLAUDE.md").exists()
+    assert not (tmp_path / ".claude").exists()
+    assert not (tmp_path / ".github").exists()
+    assert [p.name for p in tmp_path.iterdir()] == [".factory"]
