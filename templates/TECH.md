@@ -1,6 +1,6 @@
 # Tech Spec — <WI-id>: <title>
 
-> Written only when the change is architectural or cross-cutting. Skip it for localized work — a tech spec for a one-file fix is waste.
+> Written only when the change is architectural or cross-cutting. Skip it for localized work — a tech spec for a one-file fix is waste. Writing it *after* a quick e2e prototype is fine when that yields a more accurate plan; like PRODUCT.md, it's kept true during implementation.
 
 ## Approach
 The chosen design, in a few sentences. What changes and where.

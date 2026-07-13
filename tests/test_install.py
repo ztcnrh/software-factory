@@ -198,3 +198,40 @@ def test_uninstall_removes_untouched_created_files_entirely(tmp_path: Path):
     assert not (tmp_path / ".claude").exists()
     assert not (tmp_path / ".github").exists()
     assert [p.name for p in tmp_path.iterdir()] == [".factory"]
+
+
+def test_reinstall_prunes_retired_paths(tmp_path: Path):
+    """Regression: a reinstall over an older install left retired paths (items the
+    toolkit no longer ships, e.g. a skill folded into another) live in the target
+    and stuck in the manifest — an upgrade must remove them from both."""
+    _install(tmp_path)
+    manifest_path = tmp_path / ".factory" / "install-manifest.json"
+    retired = tmp_path / ".claude" / "skills" / "retired-skill"
+    retired.mkdir(parents=True)
+    (retired / "SKILL.md").write_text("obsolete\n")
+    manifest = json.loads(manifest_path.read_text())
+    manifest["created"].append(".claude/skills/retired-skill")
+    manifest_path.write_text(json.dumps(manifest))
+    out = _install(tmp_path, "--force")
+    assert f"removed (retired): {retired}" in out
+    assert not retired.exists()
+    manifest = json.loads(manifest_path.read_text())
+    assert ".claude/skills/retired-skill" not in manifest["created"]
+    assert ".claude/skills/council" in manifest["created"]  # current items survive
+
+
+def test_reinstall_prune_dry_run_removes_nothing(tmp_path: Path):
+    """The prune must obey --dry-run like every other operation: report the
+    retired path it would remove, but leave disk and manifest untouched."""
+    _install(tmp_path)
+    manifest_path = tmp_path / ".factory" / "install-manifest.json"
+    retired = tmp_path / ".claude" / "skills" / "retired-skill"
+    retired.mkdir(parents=True)
+    (retired / "SKILL.md").write_text("obsolete\n")
+    manifest = json.loads(manifest_path.read_text())
+    manifest["created"].append(".claude/skills/retired-skill")
+    manifest_path.write_text(json.dumps(manifest))
+    out = _install(tmp_path, "--force", "--dry-run")
+    assert f"would remove (retired): {retired}" in out
+    assert retired.exists()
+    assert ".claude/skills/retired-skill" in json.loads(manifest_path.read_text())["created"]

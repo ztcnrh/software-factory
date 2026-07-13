@@ -60,7 +60,6 @@ CLAUDE_ITEMS = [
     "skills/factory-verify",
     "skills/factory-retro",
     "skills/council",
-    "skills/cross-critique",
     "agents/factory-triage.md",
     "agents/factory-spec.md",
     "agents/factory-implement.md",
@@ -154,6 +153,45 @@ def strip_claude_md(target: Path, dry: bool) -> str | None:
 
 _MANIFEST_REL = ".factory/install-manifest.json"
 
+# Shared files are never blind-deleted by uninstall or the reinstall prune: even
+# when the installer created them, the user may have added their own content
+# since. Their strip/unmerge paths remove only the factory's part.
+_SHARED_FILES = {"CLAUDE.md", ".claude/settings.json"}
+
+
+def _shipped_paths() -> list[str]:
+    """Every repo-relative path the CURRENT toolkit ships. The single source for
+    the uninstall fallback (pre-manifest installs) and the reinstall prune of
+    retired paths — both must agree on what 'ours' means."""
+    paths = [f".claude/{i}" for i in CLAUDE_ITEMS] + ROOT_FILES + ["templates"]
+    paths += [f".github/workflows/{w.name}" for w in (FACTORY / "workflows").glob("*.disabled")]
+    return paths
+
+
+def prune_retired(target: Path, prior: dict | None, dry: bool) -> list[str]:
+    """On reinstall, remove previously-installed paths the current toolkit no
+    longer ships (e.g. a skill that was folded into another). Without this, an
+    upgrade leaves the retired skill live in the target repo until a full
+    uninstall. Pruned entries also leave the manifest so they don't resurrect."""
+    if not prior or not prior.get("created"):
+        return []
+    shipped = set(_shipped_paths())
+    log, kept = [], []
+    for rel in prior["created"]:
+        if rel in shipped or rel in _SHARED_FILES:
+            kept.append(rel)
+            continue
+        p = target / rel
+        if p.exists():
+            if dry:
+                log.append(f"would remove (retired): {p}")
+            else:
+                shutil.rmtree(p) if p.is_dir() else p.unlink()
+                log.append(f"removed (retired): {p}")
+    if not dry:
+        prior["created"] = kept
+    return log
+
 
 def read_manifest(target: Path) -> dict | None:
     path = target / _MANIFEST_REL
@@ -190,16 +228,10 @@ def uninstall(target: Path, prior: dict | None, dry: bool) -> int:
         owned = prior["created"]
         print(f"uninstalling factory v{prior.get('toolkit_version', '?')} (per install manifest)")
     else:
-        owned = [f".claude/{i}" for i in CLAUDE_ITEMS] + ROOT_FILES + ["templates"]
-        owned += [f".github/workflows/{w.name}" for w in (FACTORY / "workflows").glob("*.disabled")]
+        owned = _shipped_paths()
         print("⚠ no install manifest found (pre-manifest install) — removing the standard file set")
     log = []
-    # CLAUDE.md and settings.json are shared files: even when the installer
-    # created them, the user may have added their own content since — so they
-    # are never blind-deleted. The strip/unmerge paths remove only the factory's
-    # part and delete the file themselves when nothing else remains.
-    shared = {"CLAUDE.md", ".claude/settings.json"}
-    for rel in sorted(set(owned) - shared):
+    for rel in sorted(set(owned) - _SHARED_FILES):
         p = target / rel
         if not p.exists():
             continue
@@ -371,7 +403,8 @@ def main(argv: list[str] | None = None) -> int:
             f"installing v{_toolkit_version()} ({_toolkit_commit()})"
         )
 
-    log = [
+    log = prune_retired(target, prior, dry)
+    log += [
         copy(FACTORY / ".claude" / i, target / ".claude" / i, args.force, dry)
         for i in CLAUDE_ITEMS
     ]

@@ -1,6 +1,6 @@
 # Product Spec — <WI-id>: <title>
 
-> Written by the factory **spec station**; reviewed at the `spec_review` gate. As short as it can be while removing ambiguity. Prose, not ceremony.
+> Written by the factory **spec station**; reviewed at the `spec_review` gate; kept true during implementation — when reality drifts within the approved intent, the implement station updates this file in the same PR, so it describes what ships, not the first guess. As short as it can be while removing ambiguity. Prose, not ceremony.
 
 ## Problem
 What problem, for whom, and why now. The user-visible pain — not the solution.

@@ -16,10 +16,12 @@ Create `specs/<id>/PRODUCT.md` always; add `specs/<id>/TECH.md` when the change 
 
 **PRODUCT.md** answers: what problem, for whom, the desired behavior, explicit **edge cases and non-goals**, and **acceptance criteria** a verifier can check. **TECH.md** answers: the approach, key interfaces/data shapes, alternatives considered and why-not, migration/rollback, and the test strategy.
 
+If the right design is still too uncertain to plan on paper, it's legitimate to sketch a quick e2e prototype first and write `TECH.md` from what actually held up — an accurate tech spec after a prototype beats a premature one defending guesses. The spec still goes to human review before the real implementation.
+
 Keep specs as short as they can be while removing ambiguity. Prose, not ceremony.
 
 ## Escalating quality (optional)
-For high-risk or contested designs, run the **council** skill (model-diverse review) or **cross-critique** (peer critique of competing approaches) on the spec before sending it to review. Fold the strongest objections in.
+For consequential, contested designs — architecture shape, UX-affecting choices, data/privacy, cost or tech-debt tradeoffs — convene a **council** on the spec before sending it to review: Read `.claude/skills/council/SKILL.md` (the protocol), then spawn the seats via your `Agent` tool (a split council runs its cross-critique second round). Fold the strongest objections into the spec. If the council surfaces a genuinely subjective product call, put it in **Open questions** rather than deciding it silently — that's what the gate is for.
 
 ## Output contract
 ```
@@ -35,4 +37,5 @@ This routes the item to the **spec_review** human gate. If the real analysis rev
 ## Quality bar
 - Every acceptance criterion must be checkable by the verify station without you.
 - Name the non-goals — scope creep is the most common reason a spec gets sent back.
+- When the spec references existing code, pin the reference (`path/file.py:123`, or a commit-SHA permalink) so the reviewer and the implementer land on exactly what you saw.
 - If the spec comes back with `needs_revision`, read the intervention record under `.factory/interventions/` — it says exactly what the human wanted. Address that specific gap, don't rewrite wholesale.

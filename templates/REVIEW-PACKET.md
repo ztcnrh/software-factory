@@ -5,7 +5,7 @@
 **Item:** <title> — one paragraph: what it is and what the station produced. **Artifacts:** <links: spec files / PR / diff / screenshot> **Confidence:** <0..1>   ·   **Risk:** <low | medium | high> **Evidence:**
 - `spec_review` → the spec's key decisions + open questions.
 - `ship_review` → the verification results (tests run, behavior exercised).
-- High-risk items → fold in the `council` skill's synthesis.
+- High-risk or contested items → fold in the `council` synthesis (usually already convened by the spec or code-review station; check the item's notes).
 
 ## Your decision
 - ✅ **Approve** → `factory gate <WI-id> --decision approved`

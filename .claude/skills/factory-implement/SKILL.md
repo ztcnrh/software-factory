@@ -18,6 +18,11 @@ You are the **implementation station**. Build exactly what the spec says — no 
 4. Run the repo's formatter/linter/tests locally; get them green before handing off.
 5. Stage a reviewable change. Open a PR if a remote exists (`gh pr create`), otherwise leave the branch + a clear diff. Do **not** merge.
 
+## Keep the spec true
+Implementation teaches you things the spec couldn't know. When reality drifts from `specs/<id>/`, there are two cases, and the line between them is one question: *does the change still fit the intent the human approved at the spec gate?*
+- **Drift within intent** — you found an edge case, a cleaner approach, a behavior detail the spec missed: update `PRODUCT.md`/`TECH.md` **in the same branch**, so the checked-in spec describes what actually ships, not the first guess. Then flag every spec change in your `--summary`/`--notes` — the human approved the old wording, so they must see that it moved (code review checks spec-vs-code consistency, and the ship gate re-reads what changed).
+- **Drift that breaks intent** — the approved goal itself no longer holds: do **not** quietly rewrite the spec to match your code; that's an unreviewed scope change. Pull the escape hatch (`--human-required`) and let the human re-decide.
+
 ## Output contract
 ```
 factory advance <id> \

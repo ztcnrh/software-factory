@@ -64,6 +64,7 @@ factory gate <id> --decision needs_revision \
 
 ### Ship review (`ship_review`)
 The Verify station attached evidence (tests, behavior, screenshots). **Approving == merging the PR**, which triggers your project's post-merge CI/CD; the external `deploy` step watches it and a green deploy = shipped → done. Bounce to code-review if it's not ready.
+One thing to check for: if implementation legitimately drifted from the spec you approved (an edge case surfaced, a better approach won), the implement station updated `specs/<id>/` in the same PR and flagged it — re-read the changed spec sections here, because you're approving what actually ships, spec included. A drift that *broke* the approved intent never gets this far; the station is required to block and ask you instead.
 ```bash
 factory gate <id> --decision approved        # merge PR → deploy → done
 factory gate <id> --decision not_ready --notes "..." --category ...

@@ -70,4 +70,4 @@ You don't need any cloud accounts to start — it's fully local. Wire up [cloud 
 
 v1, built and proven end-to-end on the demo repo (a full feature shipped through the whole line, one human intervention captured, and the Retro station then auto-cleared that class of work — note the demo predates the tail reshape to a single `deploy` station). The engine has unit tests (`uv run pytest`); the cloud layer is the least-exercised part and ships disabled. It is meant to be used, stress-tested on real projects, and improved — by you, and increasingly by itself.
 
-*Inspired by Zach Lloyd's "factory engineering" thesis and the patterns in [warpdotdev/common-skills](https://github.com/warpdotdev/common-skills) (council, cross-critique, spec-driven development).*
+*Inspired by Zach Lloyd's "factory engineering" thesis and the patterns in [warpdotdev/common-skills](https://github.com/warpdotdev/common-skills) (the council and cross-critique review patterns, spec-driven implementation).*

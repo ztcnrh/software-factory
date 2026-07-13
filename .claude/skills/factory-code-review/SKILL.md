@@ -19,8 +19,9 @@ You are the **code-review station**. Judge the diff against the spec and the rep
 - **Tests** — present, meaningful, and actually exercising the change? A bug fix without a regression test is an automatic `changes_requested`.
 - **Security & data safety** — input handling, authz, secrets, migrations, irreversible operations.
 - **Fit** — matches surrounding conventions; no needless complexity.
+- **Spec currency** — does `specs/<id>/` still describe this change? Implementation may drift *within the approved intent* if it updated the spec in the same PR; a stale spec is a `changes_requested` (it ships misinformation to the ship gate and everyone after). Drift *beyond* the approved intent is a scope finding, not a spec-edit request.
 
-For **high-risk** items (triage risk = high, or auth/data/payments/public API), escalate to the **council** skill: a model-diverse panel reviews in parallel and you synthesize. Don't skip this on the risky ones.
+For **high-risk or contested** items (triage risk = high; auth/data/payments/public API; or the diff embodies a genuinely debatable design call), one reviewer isn't enough — convene the **council** yourself: Read `.claude/skills/council/SKILL.md` (the protocol), then spawn the seats as nested subagents via your `Agent` tool, synthesize, and let the result inform your verdict. Summarize the council's synthesis (and any split) in your `--summary`/`--notes` so it reaches the ship-gate packet. Convene sparingly, per the council skill's trigger list — a panel on a routine diff is waste.
 
 ## Output contract
 ```
