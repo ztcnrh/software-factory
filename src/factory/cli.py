@@ -26,7 +26,7 @@ from pathlib import Path
 
 from .dispatch import Action, Dispatcher
 from .line import Line
-from .model import GateDecision, StationReport
+from .model import GateDecision, StationReport, WorkItem
 from .retro import briefing
 
 # Keyed by Action.type. The `blocked` gate is not an action type — it surfaces as
@@ -308,12 +308,12 @@ def cmd_gate(args: argparse.Namespace) -> int:
 
 
 def _render_board(d: Dispatcher) -> None:
-    items = d.store.list_items()
+    items: list[WorkItem] = d.store.list_items()
     headline = d.line.north_star.splitlines()[0] if d.line.north_star else ""
     print(f"\n🏭 Factory board — {len(items)} work item(s)")
     if headline:
         print(f"   North Star: {headline}")
-    by_state: dict[str, list] = {}
+    by_state: dict[str, list[WorkItem]] = {}
     for it in items:
         by_state.setdefault(it.state, []).append(it)
     for st in _STAGE_ORDER:
@@ -324,7 +324,7 @@ def _render_board(d: Dispatcher) -> None:
         tag = "✋" if kind == "human_gate" else ("✓" if kind == "terminal" else "▸")
         print(f"\n  {tag} {st} ({len(group)})")
         for it in group:
-            meta = f"risk:{it.risk} steers:{it.steers} touches:{it.human_touches}"
+            meta = f"risk:{it.risk} steers:{it.steers} human touches:{it.human_touches}"
             print(f"      {it.id}  {it.title}   [{meta}]")
     print()
 
