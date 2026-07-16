@@ -60,6 +60,8 @@ CLAUDE_ITEMS = [
     "skills/factory-verify",
     "skills/factory-retro",
     "skills/council",
+    "skills/write-product-spec",
+    "skills/write-tech-spec",
     "agents/factory-triage.md",
     "agents/factory-spec.md",
     "agents/factory-implement.md",
@@ -158,6 +160,17 @@ _MANIFEST_REL = ".factory/install-manifest.json"
 # since. Their strip/unmerge paths remove only the factory's part.
 _SHARED_FILES = {"CLAUDE.md", ".claude/settings.json"}
 
+# Paths the toolkit USED to ship and no longer does, but which the manifest-diff
+# prune can't catch because they sit inside a still-shipped directory (so the
+# manifest recorded only the parent). Reinstall removes these explicitly so an
+# upgrade doesn't leave dead files behind. Append here whenever a shipped file is
+# retired from within a kept directory; drop an entry once no live install could
+# still carry it.
+_RETIRED_PATHS = [
+    "templates/PRODUCT.md",  # retired 0.2.0: spec shape moved into the write-product-spec skill
+    "templates/TECH.md",  # retired 0.2.0: spec shape moved into the write-tech-spec skill
+]
+
 
 def _shipped_paths() -> list[str]:
     """Every repo-relative path the CURRENT toolkit ships. The single source for
@@ -173,21 +186,37 @@ def prune_retired(target: Path, prior: dict | None, dry: bool) -> list[str]:
     longer ships (e.g. a skill that was folded into another). Without this, an
     upgrade leaves the retired skill live in the target repo until a full
     uninstall. Pruned entries also leave the manifest so they don't resurrect."""
-    if not prior or not prior.get("created"):
+    # Only prune on a genuine upgrade (a prior manifest exists). On a fresh
+    # install there is nothing of ours to retire, and we must not touch a
+    # same-named file the target already had.
+    if not prior:
         return []
+
+    def _remove(rel: str, log: list[str]) -> None:
+        p = target / rel
+        if not p.exists():
+            return
+        if dry:
+            log.append(f"would remove (retired): {p}")
+        else:
+            shutil.rmtree(p) if p.is_dir() else p.unlink()
+            log.append(f"removed (retired): {p}")
+
+    log: list[str] = []
+    # 1. Explicitly-retired sub-paths: files inside a still-shipped directory, so
+    #    the manifest never tracked them individually (see _RETIRED_PATHS).
+    for rel in _RETIRED_PATHS:
+        _remove(rel, log)
+    # 2. Manifest-tracked paths the current toolkit no longer ships (e.g. a whole
+    #    skill folded into another). Pruned entries also leave the manifest so
+    #    they don't resurrect.
     shipped = set(_shipped_paths())
-    log, kept = [], []
-    for rel in prior["created"]:
+    kept = []
+    for rel in prior.get("created", []):
         if rel in shipped or rel in _SHARED_FILES:
             kept.append(rel)
             continue
-        p = target / rel
-        if p.exists():
-            if dry:
-                log.append(f"would remove (retired): {p}")
-            else:
-                shutil.rmtree(p) if p.is_dir() else p.unlink()
-                log.append(f"removed (retired): {p}")
+        _remove(rel, log)
     if not dry:
         prior["created"] = kept
     return log

@@ -3,7 +3,7 @@
 > The shape the `/factory` driver (or a cloud station commenting on an issue) renders when the line stops at a human gate. The goal is **orientation in ten seconds** — everything worth reviewing is one link away, nothing to hunt for. The review itself takes as long as it deserves: the spec gate merits a real read (plan quality decides outcome quality), and the ship gate merits a real diff-plus-evidence review. The packet's job is that none of that time is spent assembling context.
 
 **Item:** <title> — one paragraph: what it is and what the station produced. **Artifacts:** <links: spec files / PR / diff / screenshot> **Confidence:** <0..1>   ·   **Risk:** <low | medium | high> **Evidence:**
-- `spec_review` → the spec's key decisions + open questions.
+- `spec_review` → the spec's key decisions + open questions, and the draft spec PR when one exists.
 - `ship_review` → the verification results (tests run, behavior exercised).
 - High-risk or contested items → fold in the `council` synthesis (usually already convened by the spec or code-review station; check the item's notes).
 

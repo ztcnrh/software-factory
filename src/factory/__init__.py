@@ -5,5 +5,3 @@ items. All intelligence (running a station) lives in Claude Code skills and
 subagents. This package decides WHAT happens next and records WHAT happened, so
 the moving parts stay testable and the line stays inspectable.
 """
-
-__version__ = "0.1.0"

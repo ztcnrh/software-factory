@@ -4,11 +4,11 @@ Everything in this directory is **load-bearing**: some component of the factory 
 
 | Template | Consumer (the only one) |
 | --- | --- |
-| `PRODUCT.md`, `TECH.md` | the **spec station** (`.claude/skills/factory-spec`) fills them in when writing a spec |
 | `REVIEW-PACKET.md` | the **`/factory` driver** (`.claude/commands/factory.md` §3) renders it at every human gate |
 
-Two things deliberately **not** here:
+Three things deliberately **not** here:
 
+- The spec shapes (`PRODUCT.md`, `TECH.md`) live in the skills that write them — `.claude/skills/write-product-spec` and `write-tech-spec` — because a fixed-heading template file fights their "optional sections earn their place" rule and would be a second home for the same shape.
 - Formats rendered by engine *code* live in that code (e.g. the intervention record's shape is `src/factory/interventions.py`), so the engine stays self-contained when installed as a CLI tool.
 - Human-facing guidance with no consumer lives in `docs/` or `FACTORY-MANUAL.md`, not here.
 

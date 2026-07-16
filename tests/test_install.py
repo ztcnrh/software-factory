@@ -235,3 +235,29 @@ def test_reinstall_prune_dry_run_removes_nothing(tmp_path: Path):
     assert f"would remove (retired): {retired}" in out
     assert retired.exists()
     assert ".claude/skills/retired-skill" in json.loads(manifest_path.read_text())["created"]
+
+
+def test_reinstall_prunes_retired_subpath_inside_kept_dir(tmp_path: Path):
+    """Regression: files retired from *within* a still-shipped directory (the spec
+    templates that moved into the spec-writing skills) aren't in the manifest by
+    name — the parent dir is — so only the explicit _RETIRED_PATHS list catches
+    them. An upgrade must delete the orphan; a fresh install must never touch a
+    same-named file the repo already had."""
+    _install(tmp_path)  # real install: templates/ ships, but not PRODUCT.md/TECH.md
+    orphan = tmp_path / "templates" / "PRODUCT.md"
+    orphan.write_text("stale spec template from an older toolkit\n")  # simulate prior version
+    out = _install(tmp_path, "--force")
+    assert f"removed (retired): {orphan}" in out
+    assert not orphan.exists()
+    assert (tmp_path / "templates" / "REVIEW-PACKET.md").exists()  # kept dir survives
+
+
+def test_fresh_install_never_prunes_a_preexisting_file(tmp_path: Path):
+    """The retired-path prune is upgrade-only: with no prior manifest, a repo that
+    happens to already have templates/PRODUCT.md keeps it — we only clean up our
+    own past installs, never a stranger's file."""
+    (tmp_path / "templates").mkdir()
+    own = "the user's own unrelated product template\n"
+    (tmp_path / "templates" / "PRODUCT.md").write_text(own)
+    _install(tmp_path)  # first install: prior manifest is None
+    assert (tmp_path / "templates" / "PRODUCT.md").read_text() == own

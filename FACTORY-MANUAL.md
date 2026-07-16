@@ -55,7 +55,7 @@ You rarely type `advance` yourself — `/factory` does. You *do* type `gate`, or
 When the line stops, you get a **review packet**: what the item is, what the station produced (links to the spec / PR / verification evidence), its confidence, and the decision options. The packet is built for **orientation in seconds** — everything worth reviewing is one link away, nothing to hunt for. The review itself takes as long as it deserves: these gates are where your judgment is the product, so read the spec, the diff, and the evidence properly. What the packet buys you is that none of that time goes to assembling context.
 
 ### Spec review (`spec_review`)
-The Spec station wrote `specs/<id>/PRODUCT.md`. Approve if it removes the ambiguity and names the non-goals; send it back if something's missing.
+The Spec station wrote `specs/<id>-<slug>/PRODUCT.md` (plus `TECH.md` for architectural changes) and, when a remote exists, opened a **draft spec PR** — review there if you like a PR surface, or read the files directly. The **Behavior** section is the contract — numbered invariants the verify station will later check one by one — with explicit **Latitude** marking what's deliberately left to the implementer, and inline **Open question** markers waiting on you. Approve if the invariants remove the ambiguity and the non-goals are named; send it back if something's missing. After approval, implementation lands on the same branch/PR, so the ship gate later reviews one unit.
 ```bash
 factory gate <id> --decision approved
 factory gate <id> --decision needs_revision \
@@ -64,7 +64,7 @@ factory gate <id> --decision needs_revision \
 
 ### Ship review (`ship_review`)
 The Verify station attached evidence (tests, behavior, screenshots). **Approving == merging the PR**, which triggers your project's post-merge CI/CD; the external `deploy` step watches it and a green deploy = shipped → done. Bounce to code-review if it's not ready.
-One thing to check for: if implementation legitimately drifted from the spec you approved (an edge case surfaced, a better approach won), the implement station updated `specs/<id>/` in the same PR and flagged it — re-read the changed spec sections here, because you're approving what actually ships, spec included. A drift that *broke* the approved intent never gets this far; the station is required to block and ask you instead.
+One thing to check for: if implementation legitimately drifted from the spec you approved (an edge case surfaced, a better approach won), the implement station updated `specs/<id>-<slug>/` in the same PR and flagged it — re-read the changed spec sections here, because you're approving what actually ships, spec included. A drift that *broke* the approved intent never gets this far; the station is required to block and ask you instead.
 ```bash
 factory gate <id> --decision approved        # merge PR → deploy → done
 factory gate <id> --decision not_ready --notes "..." --category ...

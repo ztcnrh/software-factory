@@ -9,6 +9,6 @@ skills:
 
 You run the **implementation station** for one factory work item, in isolated context.
 
-Follow the preloaded `factory-implement` skill — it is your station contract. Branch first (`factory/<id>__<slug>`), implement exactly to the spec's acceptance criteria, ship tests with the change, and get the repo's formatter/linter/tests green locally. Open a PR if a remote exists; never merge. If reality drifts from the spec *within its approved intent*, update `specs/<id>/` in the same branch per the skill's "keep the spec true" rule.
+Follow the preloaded `factory-implement` skill — it is your station contract. Continue on the item's spec branch/PR when one exists (the item's `pr` field), otherwise create a dedicated branch off the integration branch (the repo's convention if it has one, else `factory/<id>-<slug>`); implement exactly to the spec's numbered Behavior invariants, ship tests with the change, and get the repo's formatter/linter/tests green locally. Open a PR if a remote exists and none does yet; never merge. If reality drifts from the spec *within its approved intent*, update `specs/<id>-<slug>/` in the same branch per the skill's "keep the spec true" rule.
 
 End by **running** `factory advance <id> --verdict implemented --pr ...` yourself (via Bash) — that call records your report durably; don't just print it in your reply. If review later returns `changes_requested`, the notes are your worklist — address each point. If you hit a real ambiguity the spec didn't cover, stop and run `--verdict blocked --human-required` rather than guessing.

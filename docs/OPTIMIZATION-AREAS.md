@@ -8,7 +8,7 @@ Each entry: what it is today · why it's fine for now · the idea for later.
 
 ## 1. Lossy handoff between stateless stations
 
-**Today.** Stations are stateless — every run is a fresh context, and continuity rides on durable state (the work item `history` log, `artifacts` paths, the PR/diff, `specs/<id>/`). See [ARCHITECTURE.md](ARCHITECTURE.md), Layer 2. When `code_review` sends work back to `implement` (and back again), the only thing that crosses the boundary is `StationReport.summary`, recorded as a one-line history note. The prior run's actual reasoning is gone.
+**Today.** Stations are stateless — every run is a fresh context, and continuity rides on durable state (the work item `history` log, `artifacts` paths, the PR/diff, `specs/<id>-<slug>/`). See [ARCHITECTURE.md](ARCHITECTURE.md), Layer 2. When `code_review` sends work back to `implement` (and back again), the only thing that crosses the boundary is `StationReport.summary`, recorded as a one-line history note. The prior run's actual reasoning is gone.
 
 **Why it's fine for now.** The `factory-code-review` skill is told to emit a *precise, actionable worklist*, which is the compression of its reasoning. For most changes a good worklist is enough, and statelessness buys determinism + cloud-resumability + no context rot.
 
@@ -93,6 +93,22 @@ Each entry: what it is today · why it's fine for now · the idea for later.
 **Why it's fine for now.** With few shipped items the cumulative rate *is* the signal, and the honest read is sample-size-first ("a rate over 3 ships is noise"), which the `/factory-status` summary already asks for. Trend matters only once there's enough volume for a window to mean something.
 
 **The idea for later.** Timestamp events at `emit()` (a one-line, backward-compatible `setdefault("ts", ...)`), then add a rolling/bucketed view to `summary()` and surface it in `factory metrics` — e.g. one-shot rate over the last N ships vs. the prior N, or a simple monthly bucket — so the learning loop's payoff is visible, not just asserted. The timestamp is the cheap prerequisite; do it early even before the rest, since it can't be backfilled onto events already written without one.
+
+## 10. No project-level north star for the spec station to anchor to
+
+**Today.** The spec station's only durable inputs are the work item and the surrounding code. It has no place to learn *where the product is going* — the vision, the roadmap, the non-negotiables — so a spec is optimized locally to the issue and can drift "off-brand" from the project's direction without anything noticing. The spec-writing skills already read `roadmap.md` / `vision.md` *if a repo happens to have them*, but the factory neither ships those files, prompts the adopter to write them, nor treats them as first-class.
+
+**Why it's fine for now.** For a solo operator holding the vision in their head, the interactive spec interview (the human's taste, captured at the gate) carries the same signal ad hoc. The gap bites as the factory runs more autonomously, or across a team where the direction isn't in one person's head.
+
+**The idea for later.** Make project-direction docs a first-class, optional anchor: ship a `vision.md` + `roadmap.md` starter pair (or a single `DIRECTION.md`) the installer offers to plant, teach the spec station to weight them and to *flag* a spec that diverges rather than silently complying, and let the retro station notice when accepted steers keep pulling against a stale roadmap (a signal the roadmap, not the spec, is what's wrong). Keep it optional — absent files must stay a graceful no-op, never a hard dependency.
+
+## 11. Delivery is serial — one item at a time, no feature decomposition
+
+**Today.** The driver runs one work item start-to-finish before the next, and no station splits a large feature into smaller ones. The engine *can* spawn children (`StationReport.spawn` → new items into triage, linked by `WorkItem.parent`), but that path was built for follow-ups (e.g. a monitor filing a regression); no station skill instructs decomposition. So a big feature flows as one oversized item — one spec, one PR, one review — slower to build, harder to review as a unit, and with no throughput gain from sub-tasks that are genuinely independent.
+
+**Why it's fine for now.** A solo operator driving one interactive session wants one thing moving at a time anyway, and oversized items are rare when intake is well-scoped. The cost bites as volume grows or the factory runs more autonomously.
+
+**The idea for later.** Two complementary levers, both preferring the *item* boundary over intra-station fan-out (which would break a station's per-unit isolation and collide on one branch). (1) Teach **triage** to decompose: when an item is genuinely separable, spawn leaf-sized child items (reusing the existing spawn/parent machinery) instead of routing the whole thing — with a guard against runaway subdivision (children must be leaf-sized, not re-splittable). (2) Let the driver run **independent items concurrently** rather than strictly serially. Together they turn a big feature into several small units that move in parallel, each keeping its own spec/review/verify/PR — which is where the real cycle-time win is, without the review-coherence cost of one giant multi-agent PR.
 
 ---
 
