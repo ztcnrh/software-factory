@@ -18,7 +18,7 @@ This skill owns everything around them: context intake, the human's taste, artif
 ## 1. Gather context
 
 - `factory status <id>` — the item, triage's notes, labels, and history.
-- If the item mirrors a tracker issue (GitHub, Jira, Linear, …), fetch the full thread with the best available integration (MCP tool, `gh` CLI, API): description, comments and discussion, attachments, reproduction steps, linked and likely-duplicate issues. Never spec from a title alone.
+- If the item mirrors a tracker issue (GitHub, Jira, Linear, …), fetch the full thread with the best integration your run actually has — the `gh` CLI or the tracker's CLI/API via Bash; a tracker MCP tool only if your session carries one (isolated station runs don't, unless this repo's agent frontmatter grants it): description, comments and discussion, attachments, reproduction steps, linked and likely-duplicate issues. Never spec from a title alone.
 - `roadmap.md` and `vision.md`, if the repo has them — anchor the spec's direction there, and flag divergence explicitly instead of drifting off-vision in silence.
 - The target repo: existing patterns, neighboring features, conventions. Inspect the code — never guess about a system you can read. You carry `WebSearch`/`WebFetch` for outside research.
 - If critical product intent is genuinely missing and unrecoverable, block the item (see the hand-off) rather than inventing requirements.
@@ -52,20 +52,6 @@ factory advance <id> \
   [--risk <low|medium|high>] [--label <classifier>]
 ```
 `--summary` is the one-line headline that lands on the board and the item's history. `--notes` is optional but usually worth it here: it's the home for the reasoning that isn't in the spec files, and since your own context is discarded the moment you finish, notes is how that reasoning survives — the human at the gate (via the review packet) and the implementer both read it in the item's history. Keep it to the decisions and their why: a few lines, not a re-narration of the spec (that's what the artifact is for). The spec files carry the full detail; `--confidence` is logged for a future confidence-weighted gate policy. This routes the item to the **spec_review** human gate. If the real analysis revealed a truer classification than triage's quick pass — e.g. the change is actually read-only, or it touches auth/data and is riskier — correct it here with `--risk` and additive `--label` (free-form classifiers policies key on, e.g. `read-only`). Your labels land before the `spec_review` gate, so a signed policy can act on them. If you genuinely cannot spec it without a product decision, the line routes for that: `factory advance <id> --verdict blocked --summary "<the decision you need>"` sends the item to the blocked human gate — and honestly counts as a human step-in, because autonomy broke here.
-
-## 6. Report back
-
-The `factory advance` call is your durable output — the conveyor, the source of truth the next station and the human read from `.factory/` state. Your final message to the caller is a **receipt**, not a second copy: keep it concise, point at what already landed in state, and never let it be the only home for anything load-bearing (that would be lost the moment your context is discarded).
-
-```markdown
-## Spec result
-- **Item:** <id> — <title>  ·  **Verdict:** ready_for_review
-- **Spec PR:** <url or branch, when a remote exists>
-- **Product spec:** `specs/<id>-<slug>/PRODUCT.md`
-- **Tech spec:** `specs/<id>-<slug>/TECH.md` (if written)
-- **For the reviewer:** the open questions / decisions the human must make at the gate
-- **Next:** waiting at the `spec_review` gate
-```
 
 ## Revisions
 

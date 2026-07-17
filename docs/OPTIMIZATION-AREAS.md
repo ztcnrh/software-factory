@@ -112,4 +112,14 @@ Each entry: what it is today · why it's fine for now · the idea for later.
 
 ---
 
+## 12. The tracker mirror is one-way and coarse — stations never talk back to the issue
+
+**Today.** When a work item mirrors a tracker issue (`source_ref`), the only feedback to that issue is the `factory:<state>` label sync — and even that runs only in the cloud workflow's prompt; the local `advance` path calls no adapter. A subscriber watching the issue sees label flips at best: no "implementation started", no progress, no final status. (Auto-linking softens this: GitHub links the PR from the `Closes`/`Related to` reference, and a Jira site with the GitHub/Bitbucket app connected populates the issue's Development panel whenever the issue key appears in the branch name or PR title — the stations' follow-the-repo's-branch-convention guidance produces exactly that. So what's missing is narration, not linkage.) All progress narration lives in `--summary`/`--notes` history, visible only on the factory board.
+
+**Why it's fine for now.** The operator is solo and board-centric — `/factory-status` and the review packets are the surfaces that matter, and nobody else subscribes to the mirrored issues. Baking comment etiquette into station skills now would add chatter with no reader, and every posted comment is another surface that can leak or drift.
+
+**The idea for later.** Wire `adapters/github.comment` (and a future Jira adapter, per EXTENDING.md's adapter seam) into the advance path behind config: on the milestone transitions (implementation started, PR opened, blocked-with-reason, shipped), post a terse status comment built from the same `--summary` the board shows — one source of truth, two surfaces. Pairs with the issues-watcher (§5): once issues are the intake surface, the issue becomes the natural progress surface for whoever filed it.
+
+---
+
 <!-- Add new entries only when you can state the cost AND a direction. Keep it lean. -->
