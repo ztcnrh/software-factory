@@ -109,8 +109,9 @@ def _resolve_next(d: Dispatcher, item_id: str) -> Action:
 
 
 def _print_action(action: Action, line: Line) -> None:
-    # Distinct glyph for the blocked gate: it means a station hit the human_required
-    # escape hatch (something went wrong), not a routine checkpoint like ship_review.
+    # Distinct glyph for the blocked gate: it means a station blocked itself (via its
+    # routed `blocked` verdict or the human_required escape hatch — something only a
+    # human can resolve), not a routine checkpoint like ship_review.
     icon = "⛔" if action.gate == "blocked" else _ICONS.get(action.type, "•")
     print(f"\n{icon} {action.item_id} @ {action.state}")
     if action.message:
@@ -542,7 +543,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--human-required",
         action="store_true",
         help="Pull the escape hatch: send the item straight to `blocked` for a human, "
-        "bypassing routing (--verdict is then optional)",
+        "bypassing routing (--verdict is then optional). Stations whose routing has a "
+        "`blocked` verdict (spec, implement) should prefer `--verdict blocked` instead; "
+        "both count as a human step-in",
     )
     s.add_argument("--human-reason", help="Why a human is needed (requires --human-required)")
     s.add_argument("--spawn-title", help="File a follow-up work item; it enters the line at triage")

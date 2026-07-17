@@ -1,6 +1,6 @@
 ---
 name: council
-description: Convene a council of subagents to investigate one contested question from genuinely different angles in parallel, then synthesize by evidence quality into a single recommendation — with an optional cross-critique second round when the seats diverge. Use for consequential decisions with no single right answer (architecture, UX-affecting design, performance/caching strategy, data/privacy, auth, cost or quality-vs-complexity tradeoffs), for review of high-risk changes, or whenever the user asks for a council, second opinions, red-teaming, or parallel investigation.
+description: Convene a council of subagents to investigate one contested question from genuinely different angles in parallel, then synthesize by evidence quality into a single recommendation — with an optional cross-critique second round when the seats diverge. Use for consequential decisions with no single right answer (architecture, UX-affecting design, performance/caching strategy, data/privacy, auth, cost or quality-vs-complexity tradeoffs), for review of high-risk changes, or whenever the user asks for a council, second opinions, red-teaming, or parallel investigation. In the factory, the spec and code-review stations convene councils on contested calls; the driver may also convene one before presenting a high-risk item at a human gate.
 ---
 
 # Council
@@ -21,13 +21,9 @@ That shape shows up across engineering, not just where something might break. Il
 
 Don't convene when a direct test would settle it (verify, don't deliberate), or when any competent path is fine — routine work gets a decision, not a panel. And budget **one council per decision**: a well-framed council either settles the question or escalates it (round two below, then the human). Reconvening to re-ask the same question buys noise, not confidence.
 
-## Where this runs in the factory
+## Who convenes it
 
-Two call sites, same skill:
-- **The main/driver session** — the human asks for a council, or the driver folds one in at a human gate for a high-risk item.
-- **Inside the Spec and Code-review stations** — those agents carry the `Agent` tool precisely so they can convene a panel as *nested* subagents when they hit a contested call, without a round-trip through the driver. The synthesis feeds the station's own verdict (e.g. code review emits `pass` or `changes_requested` informed by it) and gets summarized in the station's `--summary`/`--notes` so it reaches the gate packet.
-
-When driven interactively by the human, tell them which seats you plan to launch and what each will investigate before spawning. A station convening mid-line proceeds without asking — the human sees the synthesis at the next gate.
+Anyone with the `Agent` tool: a human asking directly, a main session mid-task, or a subagent embedded in a larger process (its seats then run as nested subagents). When a human is driving interactively, tell them which seats you plan to launch and what each will investigate before spawning. When running autonomously, proceed without asking — carry the synthesis in your output so it reaches the human at their next review point.
 
 ## Workflow
 
@@ -115,7 +111,7 @@ Skip round two when round one already converges, or when a direct test would set
 
 ## When the council can't settle it
 
-Some splits are *supposed* to reach the human: genuine taste, product priorities, spend-vs-benefit calls. When the synthesis reveals one, don't bury it in the middle of a memo — put the fork and your provisional pick at the **top** of your output so the next station and the human gate see it. Inside a station, if proceeding would bake in an unreviewable guess, pull the escape hatch instead: `factory advance <id> --human-required --human-reason "<the call only a human can make>"`.
+Some splits are *supposed* to reach the human: genuine taste, product priorities, spend-vs-benefit calls. When the synthesis reveals one, don't bury it in the middle of a memo — put the fork and your provisional pick at the **top** of your output so whoever reads it next (the caller, the next agent in the process, the human reviewer) can't miss it. And if you're running autonomously and proceeding would bake in an unreviewable guess, don't proceed — use whatever escalation path your process provides to put the decision in front of a human first.
 
 ## Practical notes
 

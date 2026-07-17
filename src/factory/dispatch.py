@@ -127,44 +127,37 @@ class Dispatcher:
         self._absorb(item, report)
 
         if report.human_required:
-            item.log(
-                kind="station",
-                from_state=state,
-                to_state="blocked",
-                verdict="blocked",
-                actor=report.station,
-                note=report.human_reason or "station requested a human",
-                cost=report.cost,
-            )
-            item.state = "blocked"
-            item.steers += 1  # a block means autonomy broke here — counts as a human step-in
-            if report.notes:
-                item.log(kind="note", actor=report.station, note=report.notes)
-            self.store.save(item)
-            self.metrics.emit(
-                kind="station",
-                item=item.id,
-                station=report.station,
-                verdict="blocked",
-                confidence=report.confidence,
-                cost=report.cost,
-            )
-            return item.state
-
-        nxt = self.line.route(state, report.verdict)
+            # The escape hatch: any station can bypass the routing table and land
+            # the item at the blocked gate, whether or not a `blocked` route exists
+            # from its state.
+            nxt = "blocked"
+            verdict = "blocked"
+            note = report.human_reason or "station requested a human"
+        else:
+            nxt = self.line.route(state, report.verdict)
+            verdict = report.verdict
+            note = report.summary
         item.log(
             kind="station",
             from_state=state,
             to_state=nxt,
-            verdict=report.verdict,
+            verdict=verdict,
             actor=report.station,
-            note=report.summary,
+            note=note,
             cost=report.cost,
         )
         item.state = nxt
+        if nxt == "blocked":
+            # However it arrived — the routed `blocked` verdict or the escape hatch —
+            # landing at the blocked gate means autonomy broke at this station. Count
+            # it as a human step-in, or the one-shot ship rate would lie.
+            item.steers += 1
         if report.notes:
-            # Station notes are context for whoever reads the item next (a human at
-            # a gate, the retro) — persist them; the report object itself is discarded.
+            # Station notes are context for whoever reads the item next — the human
+            # at the gate (via status / the review packet) and the next station.
+            # Persist them; the report object itself is discarded. (The retro
+            # briefing reads interventions + metrics, not these, so notes don't
+            # auto-fuel it — a retro would have to dig into work-item history.)
             item.log(kind="note", actor=report.station, note=report.notes)
         for spec in report.spawn:
             child = self.new_item(
@@ -174,7 +167,7 @@ class Dispatcher:
                 parent=item.id,
             )
             item.log(kind="spawn", actor=report.station, note=f"spawned {child.id}: {child.title}")
-        if report.verdict == self.line.ships_on(state):  # a change just shipped
+        if verdict == self.line.ships_on(state):  # a change just shipped
             self.metrics.emit(
                 kind="shipped",
                 item=item.id,
@@ -187,7 +180,7 @@ class Dispatcher:
             kind="station",
             item=item.id,
             station=report.station,
-            verdict=report.verdict,
+            verdict=verdict,
             # Confidence lands in the ledger so a future confidence-weighted gate
             # policy has history to mine (e.g. auto-clear only above a threshold).
             confidence=report.confidence,

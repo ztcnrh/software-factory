@@ -15,7 +15,7 @@ def _gate_action(gate: str, state: str) -> Action:
 
 
 def test_blocked_gate_renders_a_distinct_glyph(capsys, factory_root: Path):
-    """The blocked gate prints ⛔ (a station hit the human_required escape hatch),
+    """The blocked gate prints ⛔ (a station blocked itself — routed verdict or escape hatch),
     visually distinct from a routine checkpoint. Guards the gate-name special case
     in _print_action against a future 'collapse back to one icon lookup' regression."""
     _print_action(_gate_action("blocked", "blocked"), Line.load(factory_root / "line.yml"))

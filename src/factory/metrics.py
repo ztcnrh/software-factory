@@ -48,8 +48,9 @@ class Metrics:
         one_shot = [s for s in shipped if s.get("steers", 0) == 0]
         hands_off = [s for s in shipped if s.get("human_touches", 0) == 0]
         # Where humans had to step in, ranked worst-first — the retro's to-do list. Gate
-        # rework is keyed by gate; a station that pulled the escape hatch (blocked) is keyed by that
-        # station (that's where autonomy actually broke), tagged so the two don't blur.
+        # rework is keyed by gate; a station that blocked (routed verdict or escape hatch)
+        # is keyed by that station (that's where autonomy actually broke), tagged so the
+        # two don't blur.
         by_stage: dict[str, int] = {}
         for g in steered_gates:
             key = g.get("gate", "?")

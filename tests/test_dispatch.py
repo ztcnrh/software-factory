@@ -59,6 +59,40 @@ def test_gate_rework_and_block_both_count_as_steers_but_clean_approval_does_not(
     assert item.steers == 2  # a block means autonomy broke — counts too
 
 
+def test_routed_blocked_verdict_counts_as_a_steer_like_the_escape_hatch(factory_root: Path):
+    """Regression: spec/implement can reach `blocked` via their routed `blocked`
+    verdict, which skipped the steers increment the escape hatch applied — so an
+    unblocked item could still ship as a 'one-shot', contradicting the North Star's
+    own definition (no unblock). Both spellings must count identically."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("Feature", risk="low")
+    _advance(d, item, "needs_spec")
+    _advance(d, item, "blocked", summary="need a product decision on scope")
+    assert item.state == "blocked"
+    assert item.steers == 1
+    d.gate(item, GateDecision(gate="blocked", decision="unblocked"))
+    assert item.steers == 1  # the steer was counted at block time, not doubled at the gate
+
+
+def test_spawn_survives_the_escape_hatch(factory_root: Path):
+    """Regression: the escape-hatch path returned early before spawn processing,
+    silently dropping any child items a blocking report carried — input the system
+    accepted must land somewhere durable."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("Feature", risk="low")
+    _advance(
+        d,
+        item,
+        "blocked",
+        human_required=True,
+        human_reason="need access",
+        spawn=[{"title": "Side issue found while triaging", "body": "details"}],
+    )
+    assert item.state == "blocked"
+    children = [i for i in d.store.list_items() if i.parent == item.id]
+    assert [c.title for c in children] == ["Side issue found while triaging"]
+
+
 def test_gate_records_the_decider_identity(factory_root: Path):
     """Every gate decision carries a signature (by) into both the item history and
     the metrics ledger, so who approved what is attributable for later analysis."""

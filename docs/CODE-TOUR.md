@@ -27,7 +27,7 @@ Tiny on purpose. Two things to internalize: `_validate()` — every routing sour
 One decider and three movers:
 
 - **`next_action()`** — *pure*: state in, `Action` out, mutates nothing. The order of its checks matters: terminal → gate (policy first, then human) → external → station.
-- **`advance()`** — a station finished; record its report and route on the verdict. Note the **escape hatch** near the top: if the report set `human_required`, the item goes straight to `blocked`, *bypassing the routing table entirely*. Any station can pull this cord at any time — it's the one movement the routing diagram doesn't show.
+- **`advance()`** — a station finished; record its report and route on the verdict. Note the **escape hatch** near the top: if the report set `human_required`, the item goes straight to `blocked`, *bypassing the routing table entirely*. Any station can pull this cord at any time — it's the one movement the routing diagram doesn't show. However an item lands at `blocked` — this hatch or the routed `blocked` verdict spec/implement carry — it counts as a steer (`item.steers += 1`), so an unblocked item can never ship as a "one-shot".
 - **`gate()`** — a human decided. The `is_intervention` line is the learning loop's front door: `changed` or a steering verdict (`needs_revision` / `not_ready` / `park`) → an intervention record gets written.
 - **`apply_auto_gate()`** — a signed policy clears a gate with no human (emits `required_human=False`, and no steer). That's *one* way a change lands one-shot, but not the main one: the headline metric counts ships with zero human *rework*, so the primary driver is stations good enough that the human approves unchanged.
 

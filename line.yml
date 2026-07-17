@@ -55,7 +55,8 @@ states:
   # `blocked` is reachable two ways: the explicit `blocked` verdict routed below
   # (spec, implement), AND an "escape hatch" — ANY station can force an item here
   # by setting `human_required` on its report, bypassing the routing table. So the
-  # routes below are not the only way in; every station can block. See dispatch.advance().
+  # routes below are not the only way in; every station can block. Either arrival
+  # counts as a human step-in against the North Star. See dispatch.advance().
   blocked:      {kind: human_gate, gate: blocked,
                  prompt: "A station is blocked and needs your help."}
   parked:       {kind: terminal,   revivable: true}
