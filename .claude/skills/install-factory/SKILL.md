@@ -15,7 +15,7 @@ If they seem new to the factory, say what they're adopting: an agentic delivery 
 
 - Confirm the target repo path (must be an existing directory, ideally a git repo).
 - Run the plan: `python3 install/install.py <target> --dry-run` (from this toolkit's root).
-- Show the human the operation list, and flag anything notable: `skip (exists)` lines mean those files are already there (a previous install — reinstalling only fills gaps unless `--force`, which overwrites and would clobber any retro-made local improvements); the CLAUDE.md line only ever touches the `<!-- factory:begin/end -->` block.
+- Show the human the operation list, and flag anything notable: `skip (exists)` lines mean those files are already there (a previous install — reinstalling only fills gaps); the CLAUDE.md line only ever touches the `<!-- factory:begin/end -->` block. **For a repo with a previous install, prefer `--upgrade`** — it three-way-merges against the manifest's commit: toolkit changes land on untouched files, retro-made local improvements are kept (and reported as the upstreaming radar), true conflicts are flagged with diff commands instead of clobbered. `--force` is the explicit clobber; warn before using it.
 - Ask whether to include the cloud layer (`--with-cloud`, ships disabled either way). Default: without.
 - Ask whether to plant a `DIRECTION.md` starter (`--with-direction`) — the project north-star doc the spec station anchors specs to. Worth a yes when the repo will run with real autonomy or the direction lives only in the human's head; it's theirs to fill in afterward (untracked, never overwritten or uninstalled). Skippable — `templates/DIRECTION.md` can be copied later.
 

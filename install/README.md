@@ -8,7 +8,8 @@ python3 install/install.py /path/to/your/repo --dry-run  # review the plan first
 python3 install/install.py /path/to/your/repo            # local-first
 python3 install/install.py /path/to/your/repo --with-cloud     # also add the (disabled) workflows
 python3 install/install.py /path/to/your/repo --with-direction # also plant a DIRECTION.md starter
-python3 install/install.py /path/to/your/repo --force        # refresh factory-owned files
+python3 install/install.py /path/to/your/repo --upgrade      # three-way merge to the latest toolkit
+python3 install/install.py /path/to/your/repo --force        # refresh factory-owned files (clobbers)
 python3 install/install.py /path/to/your/repo --uninstall    # opt out (keeps .factory/ state)
 ```
 
@@ -16,7 +17,7 @@ Or let your agent drive it: in a Claude Code session in this repo, say *"install
 
 **Scope guarantee.** The installer only ever touches factory-owned paths (the list below). `--force` overwrites *those* — never anything else the project keeps under `.claude/` or elsewhere. Two shared files get special handling in every mode: `settings.json` is always **merged** (your own hooks/permissions survive), and `CLAUDE.md` is only ever written between its `<!-- factory:begin/end -->` markers.
 
-**Updating.** Pull the latest toolkit, then rerun the installer: a plain rerun fills gaps and refreshes the CLAUDE.md block; `--force` refreshes all factory-owned files to the new version. Every install stamps `.factory/install-manifest.json` (toolkit version + commit + what was created), and a reinstall prints what was there before. ⚠ If the retro station has improved this repo's skills/templates, `--force` replaces them with toolkit versions — review the git diff before committing, and cherry-pick any local improvements you want to keep (git history is your safety net).
+**Updating.** Pull the latest toolkit, then run `--upgrade`. It diffs three ways per file — what's installed, what the toolkit shipped at install time (the manifest's commit is the baseline), and what it ships now — so it can do the right thing per file: apply toolkit changes to files you never touched, **keep** files the retro station (or you) improved locally, and flag true conflicts (both sides changed) for a hand merge, printing the exact diff commands for each. The kept-local list doubles as the **upstreaming radar** — local improvements the toolkit might want back. Nothing is ever clobbered; `--force` remains the explicit "take the toolkit side wholesale" escape hatch, and a plain rerun still just fills gaps. Every install stamps `.factory/install-manifest.json` (toolkit version + commit + what was created); a reinstall or upgrade prints what was there before, and pre-manifest installs fall back to a conservative two-way compare (differences are kept, never overwritten).
 
 **Uninstalling.** `--uninstall` removes exactly what the installer created (per the manifest), strips the CLAUDE.md block, and unmerges the factory's settings entries — your own files are untouched. `.factory/` (work items, interventions, metrics) is deliberately left behind; delete it manually for a clean slate. `--dry-run` works here too.
 

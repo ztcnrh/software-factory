@@ -10,12 +10,16 @@ that block is ever touched, and a reinstall refreshes it) and stamps
 .factory/install-manifest.json (toolkit version/commit + which paths this
 installer created — what makes uninstall safe and reinstalls version-aware).
 Idempotent: existing files are skipped unless --force, which overwrites only
-factory-owned files, never the project's own.
+factory-owned files, never the project's own. --upgrade is the merge-aware
+middle path: a three-way diff against the manifest's commit upgrades untouched
+files, keeps local (retro-made) improvements, and flags real conflicts.
 
 Usage:
     python3 install/install.py /path/to/your/repo --dry-run      # review the plan
     python3 install/install.py /path/to/your/repo
     python3 install/install.py /path/to/your/repo --with-cloud   # also drop workflows
+    python3 install/install.py /path/to/your/repo --with-direction  # plant DIRECTION.md
+    python3 install/install.py /path/to/your/repo --upgrade      # three-way merge to latest
     python3 install/install.py /path/to/your/repo --force        # refresh factory files
     python3 install/install.py /path/to/your/repo --uninstall    # remove (keeps .factory/)
 """
@@ -240,6 +244,143 @@ def prune_retired(target: Path, prior: dict | None, dry: bool) -> list[str]:
     return log
 
 
+# --- upgrade: the three-way merge path ----------------------------------------
+# `--upgrade` compares, per file: what's installed (I), what the toolkit shipped
+# at the manifest's commit (O — the baseline `git show` recovers), and what the
+# toolkit ships now (N). Untouched files upgrade cleanly; files the retro (or
+# the human) improved locally are kept — reported as the upstreaming radar when
+# the toolkit didn't move, as conflicts when both sides did. Nothing the user
+# changed is ever clobbered; `--force` remains the explicit clobber.
+
+
+def _git_show(commit: str | None, rel: str) -> bytes | None:
+    """The toolkit file's content at the manifest's commit, or None when there is
+    no usable baseline (unknown commit, or the file didn't exist back then)."""
+    if not commit or commit == "unknown":
+        return None
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(FACTORY), "show", f"{commit}:{rel}"],
+            capture_output=True,
+            timeout=10,
+        )
+        return r.stdout if r.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _upgrade_pairs(target: Path) -> list[tuple[Path, str, str, bool]]:
+    """Every file the current toolkit ships, at file granularity:
+    (target_path, toolkit_relpath, manifest_granularity_rel, optional).
+    Workflows are optional — they only upgrade if the target opted in."""
+    pairs: list[tuple[Path, str, str, bool]] = []
+
+    def add_tree(toolkit_rel: str, manifest_rel: str) -> None:
+        src = FACTORY / toolkit_rel
+        if src.is_dir():
+            for f in sorted(src.rglob("*")):
+                if f.is_file():
+                    rel = f.relative_to(src)
+                    pairs.append(
+                        (target / toolkit_rel / rel, f"{toolkit_rel}/{rel}", manifest_rel, False)
+                    )
+        elif src.is_file():
+            pairs.append((target / toolkit_rel, toolkit_rel, manifest_rel, False))
+
+    for i in CLAUDE_ITEMS:
+        add_tree(f".claude/{i}", f".claude/{i}")
+    for f in ROOT_FILES:
+        add_tree(f, f)
+    add_tree("templates", "templates")
+    for w in sorted((FACTORY / "workflows").glob("*.disabled")):
+        pairs.append(
+            (
+                target / ".github" / "workflows" / w.name,
+                f"workflows/{w.name}",
+                f".github/workflows/{w.name}",
+                True,
+            )
+        )
+    return pairs
+
+
+def upgrade_files(
+    target: Path, prior: dict | None, dry: bool, with_cloud: bool
+) -> tuple[list[str], list[str], list[tuple[Path, str, str]], list[tuple[Path, str]]]:
+    """Classify and act on every shipped file. Returns (log, created_manifest_rels,
+    conflicts, radar) — conflicts/radar as (target_path, toolkit_rel[, reason])."""
+    commit = (prior or {}).get("toolkit_commit")
+    baseline_ok = bool(commit) and commit != "unknown"
+    log: list[str] = []
+    created: list[str] = []
+    conflicts: list[tuple[Path, str, str]] = []
+    radar: list[tuple[Path, str]] = []
+    would = "would " if dry else ""
+    counts = {"upgraded": 0, "new": 0, "current": 0, "kept": 0, "conflict": 0}
+    if not baseline_ok:
+        log.append(
+            "⚠ no usable toolkit commit in the manifest — two-way compare only "
+            "(identical files count as current; any difference is kept as a conflict)"
+        )
+    for dst, toolkit_rel, manifest_rel, optional in _upgrade_pairs(target):
+        new = (FACTORY / toolkit_rel).read_bytes()
+        if not dst.exists():
+            if optional and not with_cloud:
+                continue  # workflows stay opt-in
+            counts["new"] += 1
+            log.append(f"{would}install (new): {dst}")
+            created.append(manifest_rel)
+            if not dry:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_bytes(new)
+            continue
+        installed = dst.read_bytes()
+        if installed == new:
+            counts["current"] += 1
+            continue
+        original = _git_show(commit, toolkit_rel)
+        if original is not None and installed == original:
+            counts["upgraded"] += 1
+            log.append(f"{would}upgrade: {dst}")
+            if not dry:
+                dst.write_bytes(new)
+        elif original is not None and new == original:
+            counts["kept"] += 1
+            radar.append((dst, toolkit_rel))
+            log.append(f"kept (your changes; toolkit unchanged): {dst}")
+        else:
+            counts["conflict"] += 1
+            why = "both changed" if original is not None else "no baseline for this file"
+            conflicts.append((dst, toolkit_rel, why))
+            log.append(f"conflict — kept yours: {dst} ({why})")
+    log.append(
+        f"upgrade summary: {counts['upgraded']} upgraded, {counts['new']} new, "
+        f"{counts['current']} already current, {counts['kept']} kept local, "
+        f"{counts['conflict']} conflict(s)"
+    )
+    return log, created, conflicts, radar
+
+
+def print_upgrade_guidance(
+    commit: str | None, conflicts: list[tuple[Path, str, str]], radar: list[tuple[Path, str]]
+) -> None:
+    """The divergence report: exact commands to see each side, so the human can
+    merge by hand — and the radar of local improvements the toolkit may want."""
+    show = commit if commit and commit != "unknown" else "<install-commit>"
+    if conflicts:
+        print("\n⚠ Conflicts — you and the toolkit both changed these; kept YOURS untouched:")
+        for dst, rel, why in conflicts:
+            print(f"  {dst}  ({why})")
+            print(f"    your changes:    git -C {FACTORY} show {show}:{rel} | diff - {dst}")
+            print(f"    toolkit changes: git -C {FACTORY} diff {show} HEAD -- {rel}")
+        print("  Merge by hand, or adopt the toolkit side wholesale later with --force.")
+    if radar:
+        print("\n📡 Kept your local improvements (toolkit unchanged) — the upstreaming radar:")
+        for dst, rel in radar:
+            print(f"  {dst}    (see: git -C {FACTORY} show {show}:{rel} | diff - {dst})")
+        print("  If one of these generalizes, consider contributing it back to the toolkit.")
+
+
 def read_manifest(target: Path) -> dict | None:
     path = target / _MANIFEST_REL
     if not path.exists():
@@ -250,8 +391,10 @@ def read_manifest(target: Path) -> dict | None:
         return None
 
 
-def write_manifest(target: Path, log: list[str], prior: dict | None) -> str:
-    created_now = []
+def write_manifest(
+    target: Path, log: list[str], prior: dict | None, extra_created: list[str] | None = None
+) -> str:
+    created_now = list(extra_created or [])
     for line in log:
         for prefix in ("copied: ", "created: "):
             if line.startswith(prefix):
@@ -429,6 +572,14 @@ def main(argv: list[str] | None = None) -> int:
         "settings.json is always merged, CLAUDE.md only its marked block)",
     )
     ap.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="three-way upgrade: apply toolkit changes to files you haven't touched since "
+        "install (baseline = the manifest's commit), keep and report locally-modified files "
+        "(the retro's improvements survive), and flag true conflicts for a hand merge — "
+        "never clobbers; --force stays the explicit clobber",
+    )
+    ap.add_argument(
         "--dry-run",
         action="store_true",
         help="list every operation without writing anything (review the plan, then rerun)",
@@ -446,6 +597,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     dry = args.dry_run
+    if args.upgrade and (args.force or args.uninstall):
+        print("✗ --upgrade cannot combine with --force or --uninstall: upgrade merges, "
+              "--force clobbers, --uninstall removes — pick one")
+        return 1
     prior = read_manifest(target)
     if args.uninstall:
         return uninstall(target, prior, dry)
@@ -453,17 +608,31 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"→ previously installed: v{prior.get('toolkit_version', '?')} "
             f"({prior.get('toolkit_commit', '?')}) at {prior.get('installed_at', '?')}; "
-            f"installing v{_toolkit_version()} ({_toolkit_commit()})"
+            f"{'upgrading to' if args.upgrade else 'installing'} "
+            f"v{_toolkit_version()} ({_toolkit_commit()})"
         )
 
     log = prune_retired(target, prior, dry)
-    log += [
-        copy(FACTORY / ".claude" / i, target / ".claude" / i, args.force, dry)
-        for i in CLAUDE_ITEMS
-    ]
+    conflicts: list[tuple[Path, str, str]] = []
+    radar: list[tuple[Path, str]] = []
+    extra_created: list[str] = []
+    if args.upgrade:
+        up_log, extra_created, conflicts, radar = upgrade_files(
+            target, prior, dry, args.with_cloud
+        )
+        log += up_log
+    else:
+        log += [
+            copy(FACTORY / ".claude" / i, target / ".claude" / i, args.force, dry)
+            for i in CLAUDE_ITEMS
+        ]
+        log += [copy(FACTORY / f, target / f, args.force, dry) for f in ROOT_FILES]
+        log.append(copy(FACTORY / "templates", target / "templates", args.force, dry))
+        if args.with_cloud:
+            wf = target / ".github" / "workflows"
+            for w in sorted((FACTORY / "workflows").glob("*.disabled")):
+                log.append(copy(w, wf / w.name, args.force, dry))
     log.append(merge_settings(target, dry))
-    log += [copy(FACTORY / f, target / f, args.force, dry) for f in ROOT_FILES]
-    log.append(copy(FACTORY / "templates", target / "templates", args.force, dry))
     if args.with_direction:
         log.append(plant_direction(target, dry))
     log.append(plant_claude_md(target, dry))
@@ -478,18 +647,23 @@ def main(argv: list[str] | None = None) -> int:
         for sub in subs:
             (runtime / sub).mkdir(parents=True, exist_ok=True)
         log.append(f"created runtime state dirs: {runtime}")
-    if args.with_cloud:
-        wf = target / ".github" / "workflows"
-        for w in sorted((FACTORY / "workflows").glob("*.disabled")):
-            log.append(copy(w, wf / w.name, args.force, dry))
     if dry:
         log.append(f"would stamp: {target / _MANIFEST_REL} (version + created-paths record)")
     else:
-        log.append(write_manifest(target, log, prior))
+        log.append(write_manifest(target, log, prior, extra_created))
 
     print("\n".join(log))
+    if args.upgrade:
+        print_upgrade_guidance((prior or {}).get("toolkit_commit"), conflicts, radar)
     if dry:
         print(f"\nDry run — nothing was written. Rerun without --dry-run to install into {target}")
+        return 0
+    if args.upgrade:
+        print(
+            f"\n✓ Factory upgraded in {target}\n"
+            "  Review the git diff (upgrades + any conflicts above), merge what needs merging,\n"
+            "  and commit when satisfied."
+        )
         return 0
     cloud_step = ""
     if args.with_cloud:

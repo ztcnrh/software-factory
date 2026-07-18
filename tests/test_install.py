@@ -1,14 +1,30 @@
-"""install.py's CLAUDE.md planting, manifest, and uninstall — exercised as a real
-subprocess against temp target repos (the installer is a standalone script, not
-part of the package)."""
+"""install.py's CLAUDE.md planting, manifest, upgrade, and uninstall — exercised
+as a real subprocess against temp target repos (the installer is a standalone
+script, not part of the package)."""
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[1]
 INSTALL = REPO / "install" / "install.py"
+
+# Everything a toolkit checkout needs for install/upgrade to run.
+_TOOLKIT_PARTS = (
+    "install",
+    ".claude",
+    "templates",
+    "workflows",
+    "line.yml",
+    "policies.yml",
+    "labels.yml",
+    "FACTORY-MANUAL.md",
+    "pyproject.toml",
+)
 
 
 def _install(target: Path, *flags: str) -> str:
@@ -20,6 +36,48 @@ def _install(target: Path, *flags: str) -> str:
     )
     assert r.returncode == 0, r.stderr
     return r.stdout
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.email=t@t", "-c", "user.name=T", *args],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+
+@pytest.fixture
+def toolkit(tmp_path_factory) -> Path:
+    """A throwaway toolkit checkout with its own git history, so upgrade tests
+    can commit toolkit changes without touching the real repo."""
+    clone = tmp_path_factory.mktemp("toolkit")
+    for rel in _TOOLKIT_PARTS:
+        src = REPO / rel
+        dst = clone / rel
+        shutil.copytree(src, dst) if src.is_dir() else shutil.copy2(src, dst)
+    _git(clone, "init", "-q", "-b", "main")
+    _git(clone, "add", "-A")
+    _git(clone, "commit", "-q", "-m", "toolkit v1")
+    return clone
+
+
+def _install_from(toolkit: Path, target: Path, *flags: str, expect_rc: int = 0) -> str:
+    r = subprocess.run(
+        [sys.executable, str(toolkit / "install" / "install.py"), str(target), *flags],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert r.returncode == expect_rc, r.stderr + r.stdout
+    return r.stdout
+
+
+def _bump_toolkit(toolkit: Path, rel: str, text: str) -> None:
+    """Commit a toolkit-side change, moving HEAD past the install baseline."""
+    (toolkit / rel).write_text(text)
+    _git(toolkit, "add", "-A")
+    _git(toolkit, "commit", "-q", "-m", f"toolkit change: {rel}")
 
 
 def test_fresh_repo_gets_claude_md_and_manual(tmp_path: Path):
@@ -280,6 +338,111 @@ def test_reinstall_prunes_retired_subpath_inside_kept_dir(tmp_path: Path):
     assert f"removed (retired): {orphan}" in out
     assert not orphan.exists()
     assert (tmp_path / "templates" / "REVIEW-PACKET.md").exists()  # kept dir survives
+
+
+# --- the three-way upgrade path ----------------------------------------------
+
+
+def test_upgrade_applies_toolkit_changes_to_untouched_files(toolkit: Path, tmp_path: Path):
+    """The clean-upgrade leg: a file the adopter never touched (installed ==
+    baseline) must take the toolkit's new version."""
+    _install_from(toolkit, tmp_path)
+    new_manual = "# FACTORY MANUAL v2\n\nEntirely reworded.\n"
+    _bump_toolkit(toolkit, "FACTORY-MANUAL.md", new_manual)
+    out = _install_from(toolkit, tmp_path, "--upgrade")
+    assert f"upgrade: {tmp_path / 'FACTORY-MANUAL.md'}" in out
+    assert (tmp_path / "FACTORY-MANUAL.md").read_text() == new_manual
+
+
+def test_upgrade_keeps_local_improvements_and_reports_the_radar(toolkit: Path, tmp_path: Path):
+    """The retro's survival leg: a locally-improved file the toolkit didn't touch
+    must be kept byte-for-byte and reported as upstreaming-radar material — the
+    exact case --force used to clobber."""
+    _install_from(toolkit, tmp_path)
+    local = "# Triage skill\n\nLocally sharpened by a retro.\n"
+    skill = tmp_path / ".claude" / "skills" / "factory-triage" / "SKILL.md"
+    skill.write_text(local)
+    out = _install_from(toolkit, tmp_path, "--upgrade")
+    assert skill.read_text() == local
+    assert "kept (your changes; toolkit unchanged)" in out
+    assert "upstreaming radar" in out
+
+
+def test_upgrade_flags_conflicts_and_keeps_yours(toolkit: Path, tmp_path: Path):
+    """Both sides changed: the upgrade must keep the adopter's version untouched
+    and print the two diff commands a human merge needs — never silently pick a
+    winner."""
+    _install_from(toolkit, tmp_path)
+    local = "# labels — locally customized\nversion: 1\nlabels: []\n"
+    (tmp_path / "labels.yml").write_text(local)
+    _bump_toolkit(toolkit, "labels.yml", "# labels — toolkit reworked\nversion: 2\nlabels: []\n")
+    out = _install_from(toolkit, tmp_path, "--upgrade")
+    assert (tmp_path / "labels.yml").read_text() == local
+    assert "conflict — kept yours" in out and "both changed" in out
+    assert "your changes:" in out and "toolkit changes:" in out
+
+
+def test_upgrade_installs_files_the_toolkit_added(toolkit: Path, tmp_path: Path):
+    """A file the new toolkit ships that the install predates must arrive on
+    upgrade — an upgrade is also a gap-fill."""
+    _install_from(toolkit, tmp_path)
+    _bump_toolkit(toolkit, "templates/NEW-SHAPE.md", "# A template added in v2\n")
+    out = _install_from(toolkit, tmp_path, "--upgrade")
+    assert "install (new)" in out
+    assert (tmp_path / "templates" / "NEW-SHAPE.md").read_text() == "# A template added in v2\n"
+
+
+def test_upgrade_without_a_baseline_falls_back_to_conservative_two_way(
+    toolkit: Path, tmp_path: Path
+):
+    """No usable manifest commit means no way to tell who changed a file — every
+    difference must be kept as a conflict (warned), never applied over the
+    adopter's copy."""
+    _install_from(toolkit, tmp_path)
+    manifest_path = tmp_path / ".factory" / "install-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["toolkit_commit"] = "unknown"
+    manifest_path.write_text(json.dumps(manifest))
+    _bump_toolkit(toolkit, "FACTORY-MANUAL.md", "# reworded\n")
+    before = (tmp_path / "FACTORY-MANUAL.md").read_text()
+    out = _install_from(toolkit, tmp_path, "--upgrade")
+    assert "no usable toolkit commit" in out
+    assert "conflict — kept yours" in out and "no baseline" in out
+    assert (tmp_path / "FACTORY-MANUAL.md").read_text() == before
+
+
+def test_upgrade_dry_run_changes_nothing(toolkit: Path, tmp_path: Path):
+    """--dry-run must narrate the would-upgrades and leave every byte in place."""
+    _install_from(toolkit, tmp_path)
+    _bump_toolkit(toolkit, "FACTORY-MANUAL.md", "# reworded\n")
+    before = (tmp_path / "FACTORY-MANUAL.md").read_text()
+    out = _install_from(toolkit, tmp_path, "--upgrade", "--dry-run")
+    assert "would upgrade:" in out
+    assert (tmp_path / "FACTORY-MANUAL.md").read_text() == before
+
+
+def test_upgrade_restamps_the_manifest(toolkit: Path, tmp_path: Path):
+    """After an upgrade the manifest must carry the new toolkit commit — the next
+    upgrade's baseline; a stale stamp would mis-classify every later diff."""
+    _install_from(toolkit, tmp_path)
+    _bump_toolkit(toolkit, "FACTORY-MANUAL.md", "# reworded\n")
+    _install_from(toolkit, tmp_path, "--upgrade")
+    head = subprocess.run(
+        ["git", "-C", str(toolkit), "rev-parse", "--short", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    manifest = json.loads((tmp_path / ".factory" / "install-manifest.json").read_text())
+    assert manifest["toolkit_commit"] == head
+
+
+def test_upgrade_refuses_the_force_combination(toolkit: Path, tmp_path: Path):
+    """--upgrade merges and --force clobbers — passing both must be an explicit
+    error, not a silent pick of one behavior."""
+    _install_from(toolkit, tmp_path)
+    out = _install_from(toolkit, tmp_path, "--upgrade", "--force", expect_rc=1)
+    assert "--upgrade cannot combine" in out
 
 
 def test_fresh_install_never_prunes_a_preexisting_file(tmp_path: Path):
