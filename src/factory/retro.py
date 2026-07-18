@@ -2,8 +2,10 @@
 
 The retro *station* — a Claude skill — does the reasoning: clustering
 interventions, proposing edits to station skills, and proposing gate policies.
-This module just gathers the raw material (intervention records + metrics) into
-one compact, structured document so the skill starts from signal, not noise.
+This module just gathers the raw material — intervention records, metrics, and
+the automated-churn signal (items whose per-state ``attempts`` show an inner
+loop thrashing with no human present) — into one compact, structured document
+so the skill starts from signal, not noise.
 """
 
 from __future__ import annotations
@@ -12,9 +14,14 @@ from pathlib import Path
 
 from .interventions import Interventions
 from .metrics import Metrics
+from .store import Store
+
+# Station runs on one state before an item is flagged as internal thrash: 3 runs
+# of e.g. implement = 2 automated send-backs that no human ever saw.
+CHURN_THRESHOLD = 3
 
 
-def briefing(root: str | Path) -> str:
+def briefing(root: str | Path, churn_threshold: int = CHURN_THRESHOLD) -> str:
     interventions = Interventions(root)
     summary = Metrics(root).summary()
     files = interventions.list()
@@ -29,6 +36,26 @@ def briefing(root: str | Path) -> str:
         lines.append("- Where humans had to step in (aim the learning here, worst first):")
         for stage, n in summary["steers_by_stage"].items():
             lines.append(f"    - `{stage}`: {n}")
+
+    churn = []
+    for item in Store(root).list_items():
+        hot = {s: n for s, n in item.attempts.items() if n >= churn_threshold}
+        if hot:
+            churn.append((max(hot.values()), item, hot))
+    if churn:
+        lines += [
+            "",
+            "## Automated churn (no human saw these)",
+            "",
+            f"Items where a station ran {churn_threshold}+ times. The inner loops "
+            "(e.g. code_review ↔ implement) are fully automated, so this thrash writes no "
+            "intervention record — read it as \"this class of work churns internally\" and "
+            "weigh sharpening the spec bar or the review bar even though no human stepped in.",
+            "",
+        ]
+        for _, item, hot in sorted(churn, key=lambda c: -c[0]):
+            counts = ", ".join(f"`{s}`×{n}" for s, n in sorted(hot.items()))
+            lines.append(f"- **{item.id}** ({item.state}): {item.title} — {counts}")
     lines += ["", "## Raw intervention records", ""]
     if not files:
         lines.append("_No interventions recorded yet — nothing to learn from._")

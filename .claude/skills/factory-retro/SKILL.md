@@ -10,6 +10,7 @@ You are the **learning station**. Every other station produces software; you pro
 ## Read first
 - Run `factory retro` (or `factory retro --emit .factory/retro/briefing.md`). It gives you the metrics and every intervention record.
 - `factory metrics` — where humans had to step in most (gate rework or a station block). Aim there first; that's where the leverage is.
+- The briefing's **Automated churn** section, when present: items whose stations re-ran repeatedly inside the automated loops (e.g. `code_review ↔ implement` ping-pong). No intervention record exists for these — no human was there — but they are still rework, paid in tokens and cycle time. Treat a churning class of work as a signal on par with a human steer: usually the spec bar (ambiguity reached implement) or the review bar (vague worklists causing loops) is what needs sharpening.
 - The current station skills under `.claude/skills/` and `policies.yml`.
 
 ## Find the pattern
