@@ -62,6 +62,7 @@ CLAUDE_ITEMS = [
     "skills/council",
     "skills/write-product-spec",
     "skills/write-tech-spec",
+    "skills/research",
     "agents/factory-triage.md",
     "agents/factory-spec.md",
     "agents/factory-implement.md",

@@ -20,7 +20,7 @@ Or let your agent drive it: in a Claude Code session in this repo, say *"install
 **Uninstalling.** `--uninstall` removes exactly what the installer created (per the manifest), strips the CLAUDE.md block, and unmerges the factory's settings entries — your own files are untouched. `.factory/` (work items, interventions, metrics) is deliberately left behind; delete it manually for a clean slate. `--dry-run` works here too.
 
 ### What it copies into your repo
-- `.claude/skills/` — the station skills (triage, spec, implement, code-review, verify, retro), the spec-writing pair the spec station drives (`write-product-spec`, `write-tech-spec`), and `council` (which includes its cross-critique second round). (The deferred `monitor` station is parked under `deferred/` and is not installed.)
+- `.claude/skills/` — the station skills (triage, spec, implement, code-review, verify, retro), the spec-writing pair the spec station drives (`write-product-spec`, `write-tech-spec`), `council` (which includes its cross-critique second round), and `research` (delegate noisy investigation to a subagent, keep the caller's context clean). (The deferred `monitor` station is parked under `deferred/` and is not installed.)
 - `.claude/agents/` — the matching subagents (isolated runners).
 - `.claude/commands/` — `/factory` and `/factory-status`.
 - `.claude/hooks/` + merged `.claude/settings.json` — the board + steering hooks.

@@ -17,6 +17,8 @@ Implement → Code review → Verify → [✋ you: ready to ship?] → Deploy �
                                      (approve = merge PR → post-merge CI/CD; green = shipped)
 ```
 
+The full line as a diagram: [docs/diagram.png](docs/diagram.png) (rendered) · [docs/diagram.md](docs/diagram.md) (Mermaid source).
+
 Five **stations** (Triage, Spec, Implement, Code-review, Verify) do the work; a sixth — **Retro** — watches where you stepped in and rewrites the factory so you don't have to next time. Three **human gates** are where you steer. Approving the ship gate merges the PR, which triggers your project's post-merge CI/CD; the external **Deploy** step watches it, and a green deploy (health-wait baked in) is the ship signal. Continuous **monitoring** and auto-spawning follow-up work is deferred — new post-ship work enters as fresh items (see [docs/OPTIMIZATION-AREAS.md](docs/OPTIMIZATION-AREAS.md)).
 
 ## How it maps to Claude Code
@@ -64,7 +66,6 @@ You don't need any cloud accounts to start — it's fully local. Wire up [cloud 
 - **[docs/CLOUD-AUTONOMY.md](docs/CLOUD-AUTONOMY.md)** — enabling the unattended GitHub Actions layer (opt-in).
 - **[docs/EXTENDING.md](docs/EXTENDING.md)** — adding stations, language/tracker adapters, and a candid take on what's still hard.
 - **[docs/OPTIMIZATION-AREAS.md](docs/OPTIMIZATION-AREAS.md)** — a living log of deliberate v1 tradeoffs and the ideas for improving them later.
-- **[docs/diagram.md](docs/diagram.md)** — the loop as Mermaid source.
 
 ## Status
 
