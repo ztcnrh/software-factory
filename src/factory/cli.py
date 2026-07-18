@@ -305,6 +305,19 @@ def cmd_gate(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- correct: admin fix for a mis-targeted advance/gate -----------------------
+
+
+def cmd_correct(args: argparse.Namespace) -> int:
+    d = _disp(args)
+    item = d.store.load(args.id)
+    old = item.state
+    new_state = d.correct(item, args.state, by=_resolve_actor(args), reason=args.reason)
+    print(f"✓ {item.id}: corrected {old} → {new_state}  (audited; the mistaken event stays)")
+    _print_action(_resolve_next(d, item.id), d.line)
+    return 0
+
+
 # --- status / metrics / retro / labels: read-outs and setup ------------------
 
 
@@ -617,6 +630,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="Read the produced artifact from FILE instead of --produced",
     )
     s.set_defaults(func=cmd_gate)
+
+    # -- correct --
+    s = sub.add_parser(
+        "correct",
+        help="Admin: set an item's state after a mis-targeted advance/gate (audited, not an undo)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  factory correct WI-0007 --state implement \\\n"
+            '      --reason "advanced WI-0007 instead of WI-0008"\n'
+            "\n"
+            "Use when a verdict landed on the wrong item and happened to be valid from its state,\n"
+            "so it routed. This sets the state back in one recorded move and logs a `correction`\n"
+            "event under your identity. It is not an undo: the mistaken event stays in history\n"
+            "(append-only is the audit trail), and it does not count as a steer — it fixes the\n"
+            "operator's slip, not the station's work."
+        ),
+    )
+    s.add_argument("id", help="Work item id (WI-####)")
+    s.add_argument("--state", required=True, help="The state the item should be at")
+    s.add_argument(
+        "--reason",
+        required=True,
+        help="Why the correction is needed — recorded in the item history and metrics ledger",
+    )
+    s.add_argument("--by", help="Who is correcting; defaults to $FACTORY_USER or your git identity")
+    s.set_defaults(func=cmd_correct)
 
     # -- status / metrics / retro / labels --
     s = sub.add_parser("status", help="Show the board, or one item's history")

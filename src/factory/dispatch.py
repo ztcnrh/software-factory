@@ -226,6 +226,36 @@ class Dispatcher:
         )
         return item.state
 
+    def correct(self, item: WorkItem, state: str, by: str, reason: str) -> str:
+        """Admin correction: set the item's state directly, with an audited event.
+
+        For the unlucky mis-target — an `advance`/`gate` that hit the wrong item
+        whose state happened to accept the verdict. This is not an undo: the
+        mistaken event stays in history (append-only is the audit trail); this
+        puts the item back on track in one recorded move. Not a steer — it fixes
+        the operator's slip, not the work."""
+        if not reason.strip():
+            raise ValueError("a correction must carry a --reason (it's the audit trail)")
+        if state not in self.line.states:
+            valid = ", ".join(self.line.states)
+            raise ValueError(f"unknown state {state!r}; valid: {valid}")
+        if state == item.state:
+            raise ValueError(f"{item.id} is already at {state!r} — nothing to correct")
+        old = item.state
+        item.log(
+            kind="correction",
+            from_state=old,
+            to_state=state,
+            actor=f"human:{by}",
+            note=reason,
+        )
+        item.state = state
+        self.store.save(item)
+        self.metrics.emit(
+            kind="correction", item=item.id, from_state=old, to_state=state, by=by
+        )
+        return item.state
+
     def apply_auto_gate(self, item: WorkItem, gate: str, rule: dict) -> str:
         """Clear a gate via an approved policy — no human, no intervention."""
         state = item.state

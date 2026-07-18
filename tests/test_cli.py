@@ -227,6 +227,31 @@ def test_advance_human_required_needs_no_verdict(factory_root: Path):
     assert Dispatcher(factory_root).store.load(item_id).state == "blocked"
 
 
+def test_correct_requires_state_and_reason(factory_root: Path, capsys):
+    """`factory correct` without --state/--reason must fail at the parser — an
+    unexplained correction would be an audit-trail hole, not a convenience."""
+    item_id = _item_at(factory_root, "spec")
+    with pytest.raises(SystemExit) as exc:
+        main(["--root", str(factory_root), "correct", item_id, "--state", "triage"])
+    assert exc.value.code == 2
+    assert "--reason" in capsys.readouterr().err
+
+
+def test_correct_moves_the_item_via_the_cli(factory_root: Path, capsys):
+    """The full correct path through main(): state set, audit note in the output,
+    and the next action printed so the operator lands back in the loop."""
+    item_id = _item_at(factory_root, "spec")
+    rc = main(
+        ["--root", str(factory_root), "correct", item_id,
+         "--state", "triage", "--reason", "advanced the wrong item", "--by", "alice"]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "corrected spec → triage" in out
+    assert "NEXT:" in out
+    assert Dispatcher(factory_root).store.load(item_id).state == "triage"
+
+
 def test_metrics_prints_trend_only_with_a_prior_window(factory_root: Path, capsys):
     """`factory metrics` shows the recent-vs-prior trend line once a prior window
     exists, and hides it before that — an early 'trend' over too few ships would

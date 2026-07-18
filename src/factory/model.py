@@ -24,7 +24,7 @@ class Event:
     item's whole journey down the line is auditable and replayable."""
 
     ts: str
-    kind: str  # created | station | gate | auto_gate | spawn | note
+    kind: str  # created | station | gate | auto_gate | spawn | note | correction | revive
     from_state: str | None = None
     to_state: str | None = None
     verdict: str | None = None

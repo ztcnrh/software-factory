@@ -221,6 +221,53 @@ def test_is_steer_is_the_single_definition_of_an_intervention():
     assert not GateDecision(gate="g", decision="approved").is_steer
 
 
+def test_correct_moves_the_item_and_audits_the_move(factory_root: Path):
+    """A mis-targeted advance has a one-command recovery: `correct` sets the state
+    and logs a correction event under the operator's identity, in both the item
+    history and the metrics ledger — visible, not an undo."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("x")
+    _advance(d, item, "needs_spec")  # oops — meant a different item
+    assert d.correct(item, "triage", by="alice", reason="advanced the wrong item") == "triage"
+    assert d.store.load(item.id).state == "triage"
+    ev = [e for e in item.history if e.kind == "correction"][-1]
+    assert (ev.actor, ev.note) == ("human:alice", "advanced the wrong item")
+    assert [e for e in d.metrics.events() if e["kind"] == "correction"][-1]["by"] == "alice"
+
+
+def test_correct_does_not_count_as_a_steer(factory_root: Path):
+    """A correction fixes the operator's slip, not the station's work — it must
+    not pollute the North Star's rework counters."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("x")
+    _advance(d, item, "needs_spec")
+    d.correct(item, "triage", by="alice", reason="wrong item")
+    assert item.steers == 0
+    assert item.human_touches == 0
+
+
+def test_correct_rejects_unknown_state_and_saves_nothing(factory_root: Path):
+    """Garbage in must be rejected at the boundary: an unknown target state
+    raises before anything persists, so a typo can't strand the item off-line."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("x")
+    with pytest.raises(ValueError, match="unknown state"):
+        d.correct(item, "implment", by="alice", reason="typo demo")
+    assert d.store.load(item.id).state == "triage"
+    assert not [e for e in item.history if e.kind == "correction"]
+
+
+def test_correct_rejects_a_noop_and_an_empty_reason(factory_root: Path):
+    """A same-state correction or a blank reason would pollute the audit trail
+    with noise — both are rejected loudly instead of recorded."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("x")
+    with pytest.raises(ValueError, match="already at"):
+        d.correct(item, "triage", by="alice", reason="noop")
+    with pytest.raises(ValueError, match="--reason"):
+        d.correct(item, "spec", by="alice", reason="   ")
+
+
 def test_cannot_advance_a_station_report_through_a_gate(factory_root: Path):
     """Guardrail: station verdicts and human decisions are different channels.
     Advancing a report while parked at a human gate must raise, not corrupt state."""
