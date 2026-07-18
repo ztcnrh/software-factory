@@ -67,4 +67,4 @@ factory advance <id> \
 - Green validation before you emit `implemented` — and never claim a check passed that you didn't run or that failed; report it instead.
 - Never write secrets, tokens, credentials, or private env values into code, the PR, or your notes.
 - Leave the mirrored issue's metadata alone — don't close, re-label, or reassign it; the factory's mirror owns the `factory:<state>` labels, and closing happens when the PR merges.
-- If review returns `changes_requested`, the review notes are your worklist. Address each point; don't reopen settled ones.
+- If review returns `changes_requested`, read the latest `.factory/work-items/<id>/review-<n>.md` (registered in the item's artifacts; fall back to the review `--notes` in the item history if no file exists) — it carries the numbered worklist *and* the reviewer's rationale. Address each point; don't reopen settled ones. Before you advance, append your half to that same file — a `## Response — implement` section stating, per worklist item, what you changed and why, or why you pushed back (explicitly, never silently) — so the re-review reads a conversation, not a mystery diff.
