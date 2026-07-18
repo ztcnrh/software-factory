@@ -103,4 +103,5 @@ routing:
     unblocked: triage
     park: parked
   parked:
-    revive: triage
+    revive: triage                 # default re-entry (`factory revive`); the engine records the
+                                   # pre-park state, and `revive --resume` re-enters there instead

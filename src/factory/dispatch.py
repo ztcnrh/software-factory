@@ -79,8 +79,19 @@ class Dispatcher:
         applies them), so this never mutates."""
         state = item.state
         if self.line.is_terminal(state):
-            kind = "parked" if state == "parked" else "done"
-            return Action(type=kind, item_id=item.id, state=state, message=f"{item.id} is {state}.")
+            # Revivable terminals surface as "parked" (with the way back), any
+            # other terminal as "done" — keyed off line.yml, not a state name.
+            if self.line.states[state].get("revivable"):
+                return Action(
+                    type="parked",
+                    item_id=item.id,
+                    state=state,
+                    message=f"{item.id} is {state}. Revive it: factory revive {item.id}"
+                    " (add --resume to re-enter where it left off).",
+                )
+            return Action(
+                type="done", item_id=item.id, state=state, message=f"{item.id} is {state}."
+            )
         if self.line.is_gate(state):
             gate = self.line.gate_name(state) or state
             rule = self.policies.auto_decision(gate, item)
@@ -147,6 +158,7 @@ class Dispatcher:
             cost=report.cost,
         )
         item.state = nxt
+        self._note_park(item, state, nxt)
         if nxt == "blocked":
             # However it arrived — the routed `blocked` verdict or the escape hatch —
             # landing at the blocked gate means autonomy broke at this station. Count
@@ -206,6 +218,7 @@ class Dispatcher:
             note=decision.notes,
         )
         item.state = nxt
+        self._note_park(item, state, nxt)
         if decision.is_steer:
             item.steers += 1  # a send-back / correction / park is human rework
             path = self.interventions.record(item, decision, state, produced)
@@ -224,6 +237,49 @@ class Dispatcher:
             required_human=True,
             changed=decision.is_steer,
         )
+        return item.state
+
+    def _note_park(self, item: WorkItem, from_state: str, nxt: str) -> None:
+        """Remember where a park came from (any route into a revivable terminal),
+        so ``revive --resume`` can re-enter there instead of the top of the line."""
+        if self.line.is_terminal(nxt) and self.line.states[nxt].get("revivable"):
+            item.metadata["parked_from"] = from_state
+
+    def revive(self, item: WorkItem, by: str, resume: bool = False, notes: str = "") -> str:
+        """Bring a revivable (parked) item back onto the line.
+
+        Default re-entry is the line's ``revive`` route (triage) — the safe path,
+        since the codebase and priorities may have moved while it sat. With
+        ``resume``, re-enter at the recorded pre-park state instead — for when
+        the human signals the shelved context is still fresh."""
+        state = item.state
+        if not (self.line.is_terminal(state) and self.line.states[state].get("revivable")):
+            raise ValueError(f"{item.id} at {state!r} is not a revivable state")
+        nxt = self.line.route(state, "revive")
+        if resume:
+            prev = item.metadata.get("parked_from")
+            if not prev:
+                raise ValueError(
+                    f"{item.id} has no recorded pre-park state (parked before this factory "
+                    "tracked it) — revive without --resume to re-enter at the top"
+                )
+            if prev not in self.line.states:
+                raise ValueError(
+                    f"{item.id} was parked from {prev!r}, which is no longer on the line — "
+                    "revive without --resume to re-enter at the top"
+                )
+            nxt = prev
+        item.log(
+            kind="revive",
+            from_state=state,
+            to_state=nxt,
+            verdict="revive",
+            actor=f"human:{by}",
+            note=notes or ("resumed where it left off" if resume else ""),
+        )
+        item.state = nxt
+        self.store.save(item)
+        self.metrics.emit(kind="revive", item=item.id, to_state=nxt, resumed=resume, by=by)
         return item.state
 
     def correct(self, item: WorkItem, state: str, by: str, reason: str) -> str:
@@ -271,6 +327,7 @@ class Dispatcher:
             note=f"rationale: {rationale}" if rationale else "cleared by approved policy",
         )
         item.state = nxt
+        self._note_park(item, state, nxt)
         self.store.save(item)
         self.metrics.emit(
             kind="gate",

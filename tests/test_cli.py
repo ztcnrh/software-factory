@@ -227,6 +227,26 @@ def test_advance_human_required_needs_no_verdict(factory_root: Path):
     assert Dispatcher(factory_root).store.load(item_id).state == "blocked"
 
 
+def test_revive_via_cli_lands_back_in_the_loop(factory_root: Path, capsys):
+    """The full revive path through main(): the parked item re-enters the line
+    and the operator gets the NEXT: directive to keep driving."""
+    item_id = _item_at(factory_root, "parked")
+    rc = main(["--root", str(factory_root), "revive", item_id, "--notes", "back on"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "revived" in out and "NEXT:" in out
+    assert Dispatcher(factory_root).store.load(item_id).state == "triage"
+
+
+def test_parked_next_action_advertises_revive(factory_root: Path, capsys):
+    """`factory next` on a parked item must say how to get it back — a terminal
+    message with no way forward makes parked feel like a dead end."""
+    item_id = _item_at(factory_root, "parked")
+    rc = main(["--root", str(factory_root), "next", item_id])
+    assert rc == 0
+    assert f"factory revive {item_id}" in capsys.readouterr().out
+
+
 def test_correct_requires_state_and_reason(factory_root: Path, capsys):
     """`factory correct` without --state/--reason must fail at the parser — an
     unexplained correction would be an audit-trail hole, not a convenience."""

@@ -71,7 +71,9 @@ factory gate <id> --decision not_ready --notes "..." --category ...
 ```
 
 ### Shelving at either gate (`park`)
-Both gates also let you stop the line: `--decision park --notes "why" --category ...` moves the item to `parked` (terminal but **revivable** — `revive` re-enters triage later). Use it when the item shouldn't proceed *now* — an external/org blocker, a premature vision, more tech debt than it's worth. Because `park` is a steering decision, your `--notes` reason is captured as an intervention, so shelving also feeds the learning loop.
+Both gates also let you stop the line: `--decision park --notes "why" --category ...` moves the item to `parked` (terminal but **revivable**). Use it when the item shouldn't proceed *now* — an external/org blocker, a premature vision, more tech debt than it's worth. Because `park` is a steering decision, your `--notes` reason is captured as an intervention, so shelving also feeds the learning loop.
+
+To bring it back: `factory revive <id>` re-enters at triage (the safe default — the codebase and priorities may have moved while it sat), or `factory revive <id> --resume` re-enters at the state it was parked from (recorded at park time) when you know the shelved context is still fresh — e.g. an item parked at `ship_review` goes straight back to that gate instead of re-running the whole line.
 
 ### Clarification (`needs_human`)
 Triage couldn't proceed without a product/priority call only you can make. Answer, and it re-enters triage.

@@ -173,6 +173,81 @@ def test_park_is_terminal_but_revivable(factory_root: Path):
     assert d.line.states["parked"].get("revivable") is True
 
 
+def test_every_park_path_records_where_it_came_from(factory_root: Path):
+    """All three routes into parked (station verdict, human gate, auto-gate
+    policy) must record the pre-park state — otherwise revive --resume has
+    nothing to resume to, depending on how the item happened to be shelved."""
+    d = Dispatcher(factory_root)
+    a = d.new_item("via station")
+    d.advance(a, StationReport(station="triage", verdict="park"))
+    assert a.metadata["parked_from"] == "triage"
+    b = d.new_item("via gate")
+    _advance(d, b, "needs_spec")
+    _advance(d, b, "ready_for_review")
+    d.gate(b, GateDecision(gate="spec_review", decision="park", notes="not now"))
+    assert b.metadata["parked_from"] == "spec_review"
+    c = d.new_item("via policy")
+    _advance(d, c, "needs_spec")
+    _advance(d, c, "ready_for_review")
+    d.apply_auto_gate(c, "spec_review", {"id": "r1", "decision": "park"})
+    assert c.metadata["parked_from"] == "spec_review"
+
+
+def test_revive_defaults_to_the_top_of_the_line(factory_root: Path):
+    """Reviving without --resume must follow the line's `revive` route (triage) —
+    the safe default while the codebase may have moved — and log the move."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("shelved")
+    d.advance(item, StationReport(station="triage", verdict="park"))
+    assert d.revive(item, by="alice") == "triage"
+    ev = [e for e in item.history if e.kind == "revive"][-1]
+    assert (ev.actor, ev.to_state) == ("human:alice", "triage")
+    assert [e for e in d.metrics.events() if e["kind"] == "revive"][-1]["resumed"] is False
+
+
+def test_revive_resume_reenters_at_the_pre_park_state(factory_root: Path):
+    """--resume is the whole point of recording parked_from: an item shelved at
+    ship_review must come back to ship_review, not re-run the entire line."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("shelved late")
+    item.state = "ship_review"
+    d.store.save(item)
+    d.gate(item, GateDecision(gate="ship_review", decision="park", notes="freeze week"))
+    assert item.state == "parked"
+    assert d.revive(item, by="alice", resume=True) == "ship_review"
+    assert d.store.load(item.id).state == "ship_review"
+
+
+def test_revive_resume_fails_loudly_without_a_recorded_state(factory_root: Path):
+    """An item parked before parked_from existed (or whose recorded state left the
+    line) must not silently fall back — the human asked to resume; tell them why
+    that can't happen and leave the item parked."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("old park")
+    d.advance(item, StationReport(station="triage", verdict="park"))
+    del item.metadata["parked_from"]
+    d.store.save(item)
+    with pytest.raises(ValueError, match="no recorded pre-park state"):
+        d.revive(item, by="alice", resume=True)
+    assert d.store.load(item.id).state == "parked"
+    item.metadata["parked_from"] = "a_state_that_left_the_line"
+    with pytest.raises(ValueError, match="no longer on the line"):
+        d.revive(item, by="alice", resume=True)
+
+
+def test_revive_rejects_non_revivable_states(factory_root: Path):
+    """`done` is final and stations aren't shelved — revive must only work from a
+    revivable terminal, never as a generic state mover (that's `correct`)."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("x")
+    with pytest.raises(ValueError, match="not a revivable"):
+        d.revive(item, by="alice")
+    item.state = "done"
+    d.store.save(item)
+    with pytest.raises(ValueError, match="not a revivable"):
+        d.revive(item, by="alice")
+
+
 def test_station_confidence_reaches_the_metrics_ledger(factory_root: Path):
     """Regression: --confidence was collected by the CLI but never persisted —
     the report object was discarded after routing. It must land in the station's

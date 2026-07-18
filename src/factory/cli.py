@@ -305,6 +305,21 @@ def cmd_gate(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- revive: bring a parked item back ----------------------------------------
+
+
+def cmd_revive(args: argparse.Namespace) -> int:
+    d = _disp(args)
+    item = d.store.load(args.id)
+    new_state = d.revive(
+        item, by=_resolve_actor(args), resume=args.resume, notes=args.notes or ""
+    )
+    how = "resumed at" if args.resume else "re-entered at"
+    print(f"✓ {item.id}: revived — {how} {new_state}")
+    _print_action(_resolve_next(d, item.id), d.line)
+    return 0
+
+
 # --- correct: admin fix for a mis-targeted advance/gate -----------------------
 
 
@@ -630,6 +645,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Read the produced artifact from FILE instead of --produced",
     )
     s.set_defaults(func=cmd_gate)
+
+    # -- revive --
+    s = sub.add_parser(
+        "revive",
+        help="Bring a parked item back onto the line (default: re-enter at the top, triage)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  factory revive WI-0007\n"
+            '  factory revive WI-0007 --resume --notes "spec still holds; priorities flipped"\n'
+            "\n"
+            "Default re-entry is triage — the safe path, since the codebase and priorities may\n"
+            "have moved while the item sat parked. --resume re-enters at the state it was parked\n"
+            "from (recorded at park time) — use it when you know the shelved context is still\n"
+            "fresh. If no pre-park state was recorded, --resume fails loudly; rerun without it."
+        ),
+    )
+    s.add_argument("id", help="Work item id (WI-####)")
+    s.add_argument(
+        "--resume",
+        action="store_true",
+        help="Re-enter at the recorded pre-park state instead of triage (context still fresh)",
+    )
+    s.add_argument("--notes", help="Why it's coming back (lands in the item history)")
+    s.add_argument("--by", help="Who is reviving; defaults to $FACTORY_USER or your git identity")
+    s.set_defaults(func=cmd_revive)
 
     # -- correct --
     s = sub.add_parser(
