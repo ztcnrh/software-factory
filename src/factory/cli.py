@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 from .dispatch import Action, Dispatcher
-from .ledger import STATUSES, Ledger
+from .ledger import CLOSED, STATUSES, Ledger
 from .line import Line
 from .model import GateDecision, StationReport, WorkItem
 from .retro import briefing
@@ -498,7 +498,7 @@ def cmd_retro(args: argparse.Namespace) -> int:
 
 
 def _print_ledger_entry(e: dict) -> None:
-    open_marker = "" if (e["status"] in ("rejected", "superseded") or e.get("outcome")) else " open"
+    open_marker = "" if (e["status"] in CLOSED or e.get("outcome")) else " open"
     print(f"  {e['id']}  [{e['status']}{open_marker}]  {e['title']}")
     print(f"        lever: {e['lever']}   date: {e['date']}")
     if e.get("pr"):
