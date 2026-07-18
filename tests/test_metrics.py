@@ -43,6 +43,50 @@ def test_steers_by_stage_ranks_worst_first_and_includes_blocks(factory_root: Pat
     assert s["human_steers"] == 4  # 3 gate reworks + 1 block
 
 
+def test_events_are_timestamped_at_emit(factory_root: Path):
+    """Every event must carry a ts stamped at the source — timestamps can't be
+    backfilled onto an append-only ledger, so emit() is the one place to add them."""
+    m = Metrics(factory_root)
+    m.emit(kind="created", item="WI-1")
+    ev = m.events()[0]
+    assert "ts" in ev
+    assert ev["ts"].endswith("Z") and "T" in ev["ts"]
+
+
+def test_caller_supplied_ts_is_preserved(factory_root: Path):
+    """A caller that already knows the event's time (e.g. a backfill or replay)
+    must win over the stamp — setdefault, not overwrite."""
+    m = Metrics(factory_root)
+    m.emit(kind="created", item="WI-1", ts="2020-01-01T00:00:00Z")
+    assert m.events()[0]["ts"] == "2020-01-01T00:00:00Z"
+
+
+def test_trend_compares_recent_ships_to_the_prior_window(factory_root: Path):
+    """The North Star must be visible *moving*: with 7 ships (first 2 steered,
+    last 5 clean) and window 5, recent reads 100% vs prior 0% — the improvement
+    the lifetime cumulative rate (5/7) would forever understate."""
+    m = Metrics(factory_root)
+    for i in range(2):
+        m.emit(kind="shipped", item=f"old-{i}", steers=1, cost=1.0)
+    for i in range(5):
+        m.emit(kind="shipped", item=f"new-{i}", steers=0, cost=1.0)
+    t = m.summary(window=5)["trend"]
+    assert (t["recent_ships"], t["recent_one_shot_rate"]) == (5, 1.0)
+    assert (t["prior_ships"], t["prior_one_shot_rate"]) == (2, 0.0)
+
+
+def test_trend_has_no_prior_window_until_enough_ships(factory_root: Path):
+    """With fewer ships than the window there is nothing to compare against —
+    the prior side must read empty/None, never a fabricated 0% rate."""
+    m = Metrics(factory_root)
+    for i in range(3):
+        m.emit(kind="shipped", item=f"s{i}", steers=0, cost=1.0)
+    t = m.summary(window=5)["trend"]
+    assert t["recent_ships"] == 3
+    assert t["prior_ships"] == 0
+    assert t["prior_one_shot_rate"] is None
+
+
 def test_clean_approvals_do_not_register_as_steers(factory_root: Path):
     """A gate stop that required the human's presence but no change (changed=False)
     is not rework — it must not inflate human_steers or block a one-shot ship."""

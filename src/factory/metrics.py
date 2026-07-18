@@ -6,13 +6,22 @@ unblock). The human still owns the ship decision and stays in the loop; this
 measures how often the line was good enough that review was a rubber-stamp, not
 how often the human was absent. Plus where humans had to step in (so the retro
 station knows where to aim) and a cost-per-change proxy.
+
+Events are timestamped at ``emit`` time, and ``summary`` includes a windowed
+trend (the last N ships vs the N before) alongside the lifetime aggregate — so
+"is the factory improving?" has an answer, not just a cumulative average.
 """
 
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
+
+
+def _now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 class Metrics:
@@ -20,6 +29,10 @@ class Metrics:
         self.path = Path(root) / ".factory" / "metrics" / "events.jsonl"
 
     def emit(self, **event: Any) -> None:
+        # Every event is timestamped at the source — a caller-supplied ts wins, but
+        # no caller should need to pass one. Timestamps can't be backfilled onto
+        # events already written, so this happens here, not in any view.
+        event.setdefault("ts", _now())
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.path, "a") as f:
             f.write(json.dumps(event) + "\n")
@@ -35,7 +48,7 @@ class Metrics:
                     out.append(json.loads(line))
         return out
 
-    def summary(self) -> dict:
+    def summary(self, window: int = 5) -> dict:
         events = self.events()
         shipped = [e for e in events if e.get("kind") == "shipped"]
         gates = [e for e in events if e.get("kind") == "gate"]
@@ -60,6 +73,17 @@ class Metrics:
             by_stage[key] = by_stage.get(key, 0) + 1
         total = len(shipped)
         cost = sum(e.get("cost", 0.0) for e in events)
+        # Trend: the last `window` ships vs the `window` before them, in ledger
+        # (append) order — so the North Star can be seen moving, not just its
+        # lifetime average, which weights the factory's earliest runs forever.
+        recent = shipped[-window:]
+        prior = shipped[-2 * window : -window] if total > window else []
+
+        def _rate(group: list[dict]) -> float | None:
+            if not group:
+                return None
+            return len([s for s in group if s.get("steers", 0) == 0]) / len(group)
+
         return {
             "shipped": total,
             "one_shot_shipped": len(one_shot),
@@ -70,4 +94,11 @@ class Metrics:
             "steers_by_stage": dict(sorted(by_stage.items(), key=lambda kv: -kv[1])),
             "total_cost": round(cost, 4),
             "cost_per_shipped": round(cost / total, 4) if total else 0.0,
+            "trend": {
+                "window": window,
+                "recent_ships": len(recent),
+                "recent_one_shot_rate": _rate(recent),
+                "prior_ships": len(prior),
+                "prior_one_shot_rate": _rate(prior),
+            },
         }

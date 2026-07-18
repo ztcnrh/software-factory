@@ -366,6 +366,15 @@ def cmd_metrics(args: argparse.Namespace) -> int:
         f"  one-shot ship rate: {s['one_shot_ship_rate']:.0%}  "
         f"({s['one_shot_shipped']}/{s['shipped']} shipped with no rework)"
     )
+    t = s["trend"]
+    if t["prior_ships"]:
+        # Only meaningful once there's a prior window to compare against; before
+        # that, the cumulative rate above is the whole story.
+        print(
+            f"  trend:              last {t['recent_ships']} ships "
+            f"{t['recent_one_shot_rate']:.0%} one-shot vs prior {t['prior_ships']} "
+            f"{t['prior_one_shot_rate']:.0%}"
+        )
     print(f"  human gate stops:   {s['human_gate_stops']}  (human present (expected))")
     print(f"  human steers:       {s['human_steers']}  (send-backs, corrections, unblocks)")
     print(f"  fully hands-off:    {s['hands_off_shipped']}/{s['shipped']}  (no human present)")

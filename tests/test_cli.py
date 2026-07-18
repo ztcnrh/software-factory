@@ -227,6 +227,25 @@ def test_advance_human_required_needs_no_verdict(factory_root: Path):
     assert Dispatcher(factory_root).store.load(item_id).state == "blocked"
 
 
+def test_metrics_prints_trend_only_with_a_prior_window(factory_root: Path, capsys):
+    """`factory metrics` shows the recent-vs-prior trend line once a prior window
+    exists, and hides it before that — an early 'trend' over too few ships would
+    be noise dressed as signal."""
+    from factory.metrics import Metrics
+
+    m = Metrics(factory_root)
+    for i in range(3):
+        m.emit(kind="shipped", item=f"s{i}", steers=0, cost=1.0)
+    main(["--root", str(factory_root), "metrics"])
+    assert "trend:" not in capsys.readouterr().out
+    for i in range(4):
+        m.emit(kind="shipped", item=f"t{i}", steers=1, cost=1.0)
+    main(["--root", str(factory_root), "metrics"])
+    out = capsys.readouterr().out
+    assert "trend:" in out
+    assert "last 5 ships" in out and "prior 2" in out
+
+
 def test_help_renders_usage_examples(capsys):
     """The parser is the CLI's source-of-truth documentation: `-h` on the three
     workhorse commands must render the Examples epilog (cheap drift protection)."""
