@@ -18,7 +18,7 @@ A small, dependency-light Python package (the `factory` CLI). The pieces:
 - **`store.py`** persists work items as JSON under `.factory/work-items/`. Local is the source of truth.
 - **`policies.py`** evaluates gate policies (Layer 4). **`metrics.py`** is the North Star ledger. **`interventions.py`** writes the learning records. **`retro.py`** assembles them into a briefing.
 - **`cli.py`** is the thin command surface the `/factory` command and the GitHub Actions call into.
-- **`adapters/github.py`** is an *optional* mirror: it keeps a GitHub issue's `factory:<state>` label in sync so the conveyor is visible in GitHub and the cloud workflows can trigger. Nothing depends on it.
+- **`adapters/github.py`** is an *optional* mirror: it keeps a GitHub issue's `factory:<state>` label in sync so the conveyor is visible in GitHub and the cloud workflows can trigger, and lists `intake`-labeled issues for the `factory intake` sensor (issues as the factory's inbox). Nothing on the line depends on it.
 
 The state machine is a faithful encoding of the factory diagram. The routing table in `line.yml` maps `(state, verdict) → next state`; `tests/test_line.py` pins every critical hop so a careless edit can't silently re-wire the line, and `tests/test_dispatch.py` drives full passes, loop-backs, the spawn-a-follow-up mechanism, and the parking case.
 
@@ -28,7 +28,7 @@ Stations: `triage → spec → implement → code_review → verify → deploy`.
 - triage fans out four ways (spec / implement / needs_human / parked), exactly the diamond in the diagram.
 - `spec_review --needs_revision--> spec` and `ship_review --not_ready--> code_review` are the backward loops — the motion the learning loop tries to eliminate. Every human gate can also `park → parked` (a recorded, revivable halt).
 - `ship_review --approved--> deploy` — approval *is* merging the PR, which triggers the project's post-merge CI/CD. `deploy` is a single **external** station (no agent) that watches that workflow: `deploy --succeeded--> done` is the ship point, and `deploy --failed--> code_review` re-enters the code loop. The `shipped` metric is emitted here, keyed declaratively off the `deploy` state's `ships_on: succeeded` marker (see `line.ships_on`) rather than a hardcoded state name.
-- The `monitor` station (continuous watch + auto-spawn a follow-up item) is **deferred** in v1 — a green deploy is the success signal, so the item is *done* when it ships. New post-ship work enters as fresh items (via a planned issues-watcher). The `spawn` mechanism that would feed it still exists on every station report. See [OPTIMIZATION-AREAS.md](OPTIMIZATION-AREAS.md).
+- The `monitor` station (continuous watch + auto-spawn a follow-up item) is **deferred** in v1 — a green deploy is the success signal, so the item is *done* when it ships. New post-ship work enters as fresh items: `factory intake` files labeled GitHub issues onto the line, and `factory new --parent <origin>` keeps a regression linked to the shipped change that caused it. The `spawn` mechanism that would feed a monitor still exists on every station report (triage's decomposition path uses it today). See [OPTIMIZATION-AREAS.md](OPTIMIZATION-AREAS.md).
 
 ## Layer 2 — the stations (`.claude/skills`, `.claude/agents`)
 

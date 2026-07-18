@@ -15,7 +15,7 @@ Read `line.yml` first. It's the single source of truth for the conveyor: `states
 Three dataclasses; everything else just moves them around.
 
 - **`WorkItem`** — the thing on the conveyor. The fields that matter: `state` (where it is), `history` (every transition, appended via `log()` — this is why persisted items are readable as a story), `human_touches` (the North Star counter), and `risk` + `labels` (what gate policies match on — free-form classifier labels like `read-only`, set via `factory new`/`advance --label`; distinct from the `factory:<state>` conveyor labels in `labels.yml`, which only track GitHub issue state).
-- **`StationReport`** — what a station hands back. `verdict` is the routing key; `human_required` is the escape hatch (below); `spawn` is how a station files a follow-up work item (the mechanism a deferred monitor / future issues-watcher uses; child enters at triage).
+- **`StationReport`** — what a station hands back. `verdict` is the routing key; `human_required` is the escape hatch (below); `spawn` is how a station files a follow-up work item (the mechanism triage's decomposition path and the deferred monitor ride on; the child enters at triage, linked to its parent — whereas `factory intake` files brand-new items directly).
 - **`GateDecision`** — a human's call at a gate. `changed` / `notes` / `category` are the learning signal.
 
 ### 2. `src/factory/line.py` (~5 min) — the map reader
@@ -40,7 +40,7 @@ Read it *after* dispatch.py, because it's the boundary, not the brain — argpar
 - **`_resolve_next()`** — the auto-gate walker. `next_action()` never mutates, so *someone* has to actually apply policy-cleared gates and step forward; this loop is that someone, and it runs after every `new` / `next` / `advance` / `gate`. When you wonder "when do policies actually fire?", the answer is here.
 - **`_print_action()`** — prints the `NEXT: {json}` line. This is the protocol between the engine and the LLM driver: `/factory` parses that JSON to decide what to do. It's the factory's only API contract with Claude.
 
-The rest (board rendering, label creation) is skimmable plumbing.
+The rest (board rendering, label creation, and the operator verbs — `revive`, `correct`, `intake`, `ledger`) is skimmable plumbing; each verb's `-h` is its documentation.
 
 **Pair with:** `tests/test_dispatch.py` — it drives full passes down the line; reading one test case after dispatch.py confirms your mental model cheaply.
 
@@ -54,7 +54,7 @@ These are the leaf modules the motor calls into. None of them affect the line's 
 - **`metrics.py`** — an append-only event ledger (`.factory/metrics/events.jsonl`) rolled up by `summary()` into the North Star: the one-shot ship rate (shipped with no human rework), where humans had to step in (ranked worst-stage-first, blocks included), cost per shipped change.
 - **`retro.py`** — assembles interventions + metrics + the automated-churn signal into a briefing for the retro *station* (the skill does the thinking; this module just gathers).
 - **`ledger.py`** — the retro ledger: one row per learning-loop proposal (lever, evidence, the "how you'll know it worked" signal, a mutable status plus the observed outcome), stored append-only in `.factory/retro/ledger.jsonl` and rendered to `LEDGER.md`. The briefing opens with its open rows, so the retro adjudicates its own past proposals before making new ones.
-- **`adapters/github.py`** — optional mirror: syncs a `factory:<state>` label and comments onto a GitHub issue so the conveyor is visible there. Nothing depends on it; skip until you care about cloud mode.
+- **`adapters/github.py`** — optional mirror: syncs a `factory:<state>` label and comments onto a GitHub issue so the conveyor is visible there, and lists `intake`-labeled issues for the `factory intake` sensor. Nothing on the line depends on it; skip until you care about issues-as-inbox or cloud mode.
 
 ## Block 3 — the intelligence layer and the periphery (~15 min)
 

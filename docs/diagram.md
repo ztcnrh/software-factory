@@ -1,6 +1,6 @@
 # The factory loop
 
-This is the line encoded in [`line.yml`](../line.yml). **Stations are blue rectangles** (`deploy` is green-tinted because it's external — post-merge CI/CD, not an agent — and green means shipped), **human gates are soft-yellow ✋ diamonds**, **terminals are cylinders**. Solid green edges are the forward happy path; thin gray dashed edges are everything off it — the backward loops the learning loop tries to eliminate, plus the `park` shelving edges. `ship_review` approval means *merging the PR*, which triggers the post-merge CI/CD `deploy` — a green deploy (health-wait baked in) is the ship point, so the item is *done* when it ships. Continuous monitoring is deferred; the intended intake for new work is an **issues-watcher** that files GitHub issues into triage (see [OPTIMIZATION-AREAS.md](OPTIMIZATION-AREAS.md)).
+This is the line encoded in [`line.yml`](../line.yml). **Stations are blue rectangles** (`deploy` is green-tinted because it's external — post-merge CI/CD, not an agent — and green means shipped), **human gates are soft-yellow ✋ diamonds**, **terminals are cylinders**. Solid green edges are the forward happy path; thin gray dashed edges are everything off it — the backward loops the learning loop tries to eliminate, plus the `park` shelving edges. `ship_review` approval means *merging the PR*, which triggers the post-merge CI/CD `deploy` — a green deploy (health-wait baked in) is the ship point, so the item is *done* when it ships. Continuous monitoring is deferred; new work arrives via `factory new` or the **`factory intake`** sensor, which files GitHub issues labeled `intake` into triage (see [OPTIMIZATION-AREAS.md](OPTIMIZATION-AREAS.md)).
 
 A pre-rendered copy lives at [`diagram.png`](diagram.png) — regenerate it with `scripts/render-diagram.sh` after editing the diagram below.
 
@@ -23,7 +23,7 @@ flowchart TD
     clar -- "provided" --> triage
 
     %% ---- off the happy path: backward loops and shelving ----
-    issues([New GitHub issue]) -. "issues-watcher" .-> triage
+    issues([New GitHub issue]) -. "factory intake" .-> triage
     verify -. "failed" .-> shiprev
     specrev -. "needs revision" .-> spec
     review -. "changes requested" .-> impl

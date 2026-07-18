@@ -14,8 +14,8 @@
 # post-merge CI/CD (build + deploy, with a health-wait baked in). `deploy` is the
 # single external station that watches that workflow: green == shipped -> done.
 # Continuous monitoring + auto-spawn is deferred (see docs/OPTIMIZATION-AREAS.md);
-# the intended v1 intake is an issues-watcher that files new GitHub issues into
-# triage, not a monitor loop.
+# intake is `factory new` or the `factory intake` sensor (labeled GitHub issues
+# filed into triage), not a monitor loop.
 
 version: 1
 
