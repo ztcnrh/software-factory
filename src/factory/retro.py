@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .interventions import Interventions
+from .ledger import Ledger
 from .metrics import Metrics
 from .store import Store
 
@@ -36,6 +37,28 @@ def briefing(root: str | Path, churn_threshold: int = CHURN_THRESHOLD) -> str:
         lines.append("- Where humans had to step in (aim the learning here, worst first):")
         for stage, n in summary["steers_by_stage"].items():
             lines.append(f"    - `{stage}`: {n}")
+
+    ledger = Ledger(root)
+    open_rows = ledger.open_entries()
+    if open_rows or ledger.warnings:
+        lines += [
+            "",
+            "## Reconcile past proposals first",
+            "",
+            "Open ledger rows — adjudicate these against the record above *before* proposing "
+            "anything new: has each row's signal shown up (record it: `factory ledger update "
+            "<id> --outcome ...`)? Is a dormant policy's evidence bar now met, or has an "
+            "accepted change stopped paying off (`--status activated|superseded`)? "
+            "Full detail: `.factory/retro/LEDGER.md`.",
+            "",
+        ]
+        for e in open_rows:
+            lines.append(
+                f"- **{e['id']}** [{e['status']}, {str(e['date'])[:10]}] {e['title']} — "
+                f"watch for: {e['signal']}"
+            )
+        for w in ledger.warnings:
+            lines.append(f"- ⚠ ledger: {w}")
 
     churn = []
     for item in Store(root).list_items():

@@ -328,6 +328,28 @@ def test_metrics_prints_trend_only_with_a_prior_window(factory_root: Path, capsy
     assert "last 5 ships" in out and "prior 2" in out
 
 
+def test_ledger_round_trip_via_cli(factory_root: Path, capsys):
+    """The retro station drives the ledger through the CLI — add, update, and the
+    open-rows list must round-trip, and the rendered LEDGER.md must land."""
+    rc = main(
+        ["--root", str(factory_root), "ledger", "add", "--title", "sharpen spec skill",
+         "--lever", "skill-edit", "--signal", "validation send-backs stop",
+         "--file", ".claude/skills/write-product-spec/SKILL.md"]
+    )
+    assert rc == 0
+    assert "RP-0001" in capsys.readouterr().out
+    rc = main(
+        ["--root", str(factory_root), "ledger", "update", "RP-0001",
+         "--status", "applied", "--pr", "https://pr/7"]
+    )
+    assert rc == 0
+    capsys.readouterr()
+    main(["--root", str(factory_root), "ledger", "list", "--open"])
+    out = capsys.readouterr().out
+    assert "RP-0001" in out and "[applied open]" in out
+    assert (factory_root / ".factory" / "retro" / "LEDGER.md").exists()
+
+
 def test_help_renders_usage_examples(capsys):
     """The parser is the CLI's source-of-truth documentation: `-h` on the three
     workhorse commands must render the Examples epilog (cheap drift protection)."""

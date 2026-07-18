@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 
 from .dispatch import Action, Dispatcher
+from .ledger import STATUSES, Ledger
 from .line import Line
 from .model import GateDecision, StationReport, WorkItem
 from .retro import briefing
@@ -444,6 +445,49 @@ def cmd_retro(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_ledger_entry(e: dict) -> None:
+    open_marker = "" if (e["status"] in ("rejected", "superseded") or e.get("outcome")) else " open"
+    print(f"  {e['id']}  [{e['status']}{open_marker}]  {e['title']}")
+    print(f"        lever: {e['lever']}   date: {e['date']}")
+    if e.get("pr"):
+        print(f"        pr: {e['pr']}")
+    if e.get("outcome"):
+        print(f"        outcome: {e['outcome']}")
+
+
+def cmd_ledger(args: argparse.Namespace) -> int:
+    led = Ledger(_root(args))
+    if args.ledger_cmd == "add":
+        e = led.add(
+            title=args.title,
+            lever=args.lever,
+            signal=args.signal,
+            files=args.file or [],
+            answers=args.answers or [],
+            pr=args.pr or "",
+            status=args.status,
+        )
+        print(f"✓ recorded {e['id']}: {e['title']}")
+        print(f"  rendered: {led.view}")
+        return 0
+    if args.ledger_cmd == "update":
+        e = led.update(args.id, status=args.status, outcome=args.outcome, pr=args.pr)
+        print(f"✓ {e['id']} → status: {e['status']}" + (", outcome noted" if args.outcome else ""))
+        print(f"  rendered: {led.view}")
+        return 0
+    # list
+    entries = led.open_entries() if args.open else led.entries()
+    if args.status_filter:
+        entries = [e for e in entries if e["status"] == args.status_filter]
+    if not entries:
+        print("(no ledger rows match)")
+    for e in entries:
+        _print_ledger_entry(e)
+    for w in led.warnings:
+        print(f"⚠ {w}", file=sys.stderr)
+    return 0
+
+
 def cmd_labels(args: argparse.Namespace) -> int:
     import shutil
     import subprocess
@@ -749,6 +793,96 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("retro", help="Assemble a briefing for the learning station")
     s.add_argument("--emit", help="Write the briefing to this file instead of stdout")
     s.set_defaults(func=cmd_retro)
+
+    # -- ledger --
+    s = sub.add_parser(
+        "ledger",
+        help="The retro ledger: one row per learning-loop proposal and what became of it",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "The durable memory of the learning loop (.factory/retro/ledger.jsonl, append-only;\n"
+            "LEDGER.md is the regenerated human view). The retro station records every proposal\n"
+            "here and opens each run by reconciling the open rows; the human audits from the\n"
+            "rendered file. See `factory ledger <cmd> -h` for each verb."
+        ),
+    )
+    lsub = s.add_subparsers(dest="ledger_cmd", required=True)
+    a = lsub.add_parser(
+        "add",
+        help="Record a proposal (the retro station runs this for each one)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Example:\n"
+            '  factory ledger add --title "spec skill: require validation section" \\\n'
+            "      --lever skill-edit --file .claude/skills/write-product-spec/SKILL.md \\\n"
+            "      --answers WI-0001-spec_review-2026-06-27.md \\\n"
+            '      --signal "no more missing-validation send-backs at spec_review"'
+        ),
+    )
+    a.add_argument("--title", required=True, help="One line: what the proposal changes")
+    a.add_argument(
+        "--lever",
+        required=True,
+        help="The kind of change, e.g. skill-edit | gate-policy | template | line (free-form)",
+    )
+    a.add_argument(
+        "--signal",
+        required=True,
+        help="How you'll know it worked — the observable signal to reconcile against later",
+    )
+    a.add_argument(
+        "--file",
+        action="append",
+        metavar="PATH",
+        help="A file the proposal touches; repeat for more. Not comma-separated.",
+    )
+    a.add_argument(
+        "--answers",
+        action="append",
+        metavar="REF",
+        help="An intervention record (or churn item) this answers; repeat for more",
+    )
+    a.add_argument("--pr", help="The retro PR carrying the change, once opened")
+    a.add_argument(
+        "--status",
+        default="proposed",
+        choices=sorted(STATUSES),
+        help="Initial status (default: %(default)s)",
+    )
+    a.set_defaults(func=cmd_ledger)
+    u = lsub.add_parser(
+        "update",
+        help="Record what became of a proposal (status, observed outcome, PR)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  factory ledger update RP-0001 --status applied --pr https://github.com/o/r/pull/7\n"
+            '  factory ledger update RP-0001 --outcome "3 retros later: the send-back stopped"\n'
+            "\n"
+            "Status is mutable state; the jsonl stays append-only (an update is a new event).\n"
+            "applied = merged; dormant = waiting on evidence; activated = policy signed;\n"
+            "rejected / superseded close the row. An --outcome records what was actually\n"
+            "observed against the row's signal — that's what closes the learning loop."
+        ),
+    )
+    u.add_argument("id", help="Ledger row id (RP-####)")
+    u.add_argument("--status", choices=sorted(STATUSES), help="New status for the row")
+    u.add_argument("--outcome", help="What was observed against the row's signal")
+    u.add_argument("--pr", help="The PR carrying the change")
+    u.set_defaults(func=cmd_ledger)
+    ll = lsub.add_parser("list", help="List ledger rows (compact; LEDGER.md is the full view)")
+    ll.add_argument(
+        "--open",
+        action="store_true",
+        help="Only rows awaiting adjudication (not closed, no outcome recorded)",
+    )
+    ll.add_argument(
+        "--status",
+        dest="status_filter",
+        choices=sorted(STATUSES),
+        help="Only rows currently at this status",
+    )
+    ll.set_defaults(func=cmd_ledger)
 
     s = sub.add_parser("labels", help="List the factory labels, or create them in a repo (gh)")
     s.add_argument("--github", action="store_true", help="Create the labels via the gh CLI")

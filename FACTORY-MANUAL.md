@@ -97,12 +97,11 @@ It reads your accumulated interventions and the metrics, finds the patterns, and
 
 Watch `factory metrics`. The number to grow is the **one-shot ship rate** — the share of changes that ship with no human rework (send-back, correction, or unblock). It is *not* about removing yourself from the loop: you still own the ship decision and can attend every gate; the goal is that the line gets good enough that your review is a rubber-stamp. Expect it low early on and climbing as the factory learns. The list of "where humans had to step in" tells you and the Retro station where the next win is.
 
-**Looking back at what the factory has learned.** The retro *station* only looks forward — it mines new steers and proposes new changes; it does not review its own past work. So for the backward-looking questions — did a past optimization actually help, has one gone stale, should I finally sign off (or drop) a dormant policy that's been parked in `.factory/retro/` — ask your **main Claude Code session** in plain language rather than running the retro station. Some asks worth keeping in your pocket:
-- *"Read every `.factory/retro/*/report.md` and `proposed-policies.yml`. For each proposal, tell me whether it was adopted (check `policies.yml`, the current station skills, and git history), and whether it's still justified given the interventions since or has gone stale — as a table: proposal → status → your recommendation."*
-- *"Are there any dormant gate policies parked in `.factory/retro/` that I should be signing off on by now? For each, check its evidence bar against the interventions and metrics since it was proposed, and tell me whether to sign it off (and make the `policies.yml` edit), keep waiting, or drop it."*
-- *"Summarize in plain language everything the factory has learned across all retros — what changed, why, and what's still waiting on my decision."*
+**Looking back at what the factory has learned.** Every retro proposal gets a row in the **retro ledger** — `.factory/retro/LEDGER.md`, rendered from the append-only `ledger.jsonl`: what changed, the evidence it answered, the *"how you'll know it worked"* signal, a status (`proposed / applied / dormant / activated / rejected / superseded`), and the outcome once one is observed. The retro station opens every run by **reconciling its open rows** against the record since — adjudicating past proposals, resurfacing dormant policies whose evidence bar is now met, and flagging optimizations that stopped paying off — so the learning loop grades its own past decisions instead of only proposing new ones.
 
-(That the retro station has no memory of its own past proposals or their outcomes is a known weakness we intend to close — see [OPTIMIZATION-AREAS.md](docs/OPTIMIZATION-AREAS.md).)
+Two habits keep the ledger honest on your side:
+- When you merge or decline a retro PR, make sure the verdict lands on the row — `factory ledger update RP-#### --status applied` (or `activated` when you sign a policy, `rejected` when you decline). The session handling the PR review usually does this for you; it takes seconds either way.
+- For your own backward-looking audit, start from `factory ledger list --open` (or read `LEDGER.md`, or ask your main session to walk it) — one file, no folder archaeology. Each row links its PR, so the full detail is one click away.
 
 ---
 

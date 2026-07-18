@@ -13,9 +13,9 @@ This is the part that makes it a *factory* and not just a pipeline. A pipeline r
    - a gate approves the same category unchanged every time → **propose a dormant gate policy**;
    - specs keep omitting the same section → **edit the template**;
    - work is mis-routed → **adjust `line.yml`** (rare, conservative).
-   It writes its findings and concrete proposals to `.factory/retro/<date>/` and opens a PR titled `retro: <date>`.
+   It writes its findings and concrete proposals to `.factory/retro/<date>/`, records each one as a row in the **retro ledger** (`.factory/retro/LEDGER.md` — lever, evidence, and the *"how you'll know it worked"* signal to reconcile against later), and opens a PR titled `retro: <date>`.
 
-4. **Dispose.** You review the PR. Skill/template edits take effect when you merge. **Gate policies stay dormant until you sign them** — you activate a proposed rule by setting `approved_by:` on it in `policies.yml`. From then on, every matching work item clears that gate untouched; that slice ships without reaching you at all — one more class of change that lands one-shot.
+4. **Dispose.** You review the PR. Skill/template edits take effect when you merge. **Gate policies stay dormant until you sign them** — you activate a proposed rule by setting `approved_by:` on it in `policies.yml`. From then on, every matching work item clears that gate untouched; that slice ships without reaching you at all — one more class of change that lands one-shot. Your verdict is written back to the proposal's ledger row (`applied` / `activated` / `rejected`), and the next retro **opens by reconciling the open rows** — did each accepted change actually deliver its signal? — so the loop grades its own past decisions rather than being write-only.
 
 The asymmetry is the whole point: you make a decision *once* (or a few times), the Retro station generalizes it, and the factory carries it forever. You propose nothing and dispose everything; the machine proposes and you dispose.
 
