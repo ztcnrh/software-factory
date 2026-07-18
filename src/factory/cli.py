@@ -154,7 +154,21 @@ def cmd_new(args: argparse.Namespace) -> int:
     body = args.body or ""
     if args.body_file:
         body = Path(args.body_file).read_text()
-    item = d.new_item(args.title, body=body, labels=args.label or [], risk=args.risk)
+    if args.parent and not d.store.exists(args.parent):
+        # Reject a dangling lineage pointer at the boundary — a typo'd parent
+        # would silently break the origin thread the retro later mines.
+        print(f"✗ parent {args.parent!r} is not a known work item", file=sys.stderr)
+        return 1
+    source = args.source or ("github" if args.source_ref else "local")
+    item = d.new_item(
+        args.title,
+        body=body,
+        labels=args.label or [],
+        risk=args.risk,
+        parent=args.parent,
+        source=source,
+        source_ref=args.source_ref,
+    )
     print(f"✓ created {item.id}: {item.title}")
     _print_action(_resolve_next(d, item.id), d.line)
     return 0
@@ -367,6 +381,10 @@ def _render_item(d: Dispatcher, item_id: str) -> None:
     )
     if item.labels:
         print(f"  labels: {', '.join(item.labels)}")
+    if item.parent:
+        print(f"  parent: {item.parent}")
+    if item.source_ref:
+        print(f"  source: {item.source} {item.source_ref}")
     if item.artifacts:
         print(f"  artifacts: {', '.join(item.artifacts)}")
     if item.pr:
@@ -491,7 +509,12 @@ def build_parser() -> argparse.ArgumentParser:
             '  factory new "Add rate limiting to the quotes API"\n'
             '  factory new "Fix flaky auth test" --body "Fails ~1 in 5 runs on CI." \\\n'
             "      --label bug --label ci --risk low\n"
-            '  factory new "Migrate DB to Postgres 17" --body-file request.md --risk high'
+            '  factory new "Migrate DB to Postgres 17" --body-file request.md --risk high\n'
+            '  factory new "Fix regression in CSV export" --parent WI-0007 --label bug\n'
+            "\n"
+            "Keep the thread: when new work traces back to an earlier item (a regression from a\n"
+            "shipped change, a follow-on), --parent records the lineage — that link is how a\n"
+            "retro can connect a shipped item to the bug it later caused."
         ),
     )
     s.add_argument("title", help="One-line summary; becomes the item's title on the board")
@@ -514,6 +537,22 @@ def build_parser() -> argparse.ArgumentParser:
         default="unknown",
         choices=["low", "medium", "high", "unknown"],
         help="Initial estimated risk level; triage may revise it (default: %(default)s)",
+    )
+    s.add_argument(
+        "--parent",
+        metavar="WI-ID",
+        help="The earlier work item this one traces back to (a regression's origin, a "
+        "follow-on's feature) — keeps the lineage the retro station mines",
+    )
+    s.add_argument(
+        "--source-ref",
+        metavar="REF",
+        help="Tracker reference this item mirrors (e.g. a GitHub issue number); "
+        "sets --source to 'github' unless given explicitly",
+    )
+    s.add_argument(
+        "--source",
+        help="Where the item came from (default: 'local'; 'github' when --source-ref is set)",
     )
     s.set_defaults(func=cmd_new)
 

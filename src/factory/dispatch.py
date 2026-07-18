@@ -57,6 +57,8 @@ class Dispatcher:
         labels: list[str] | None = None,
         risk: str = "unknown",
         parent: str | None = None,
+        source: str = "local",
+        source_ref: str | None = None,
     ) -> WorkItem:
         item = WorkItem(
             id=self.store.next_id(),
@@ -66,6 +68,8 @@ class Dispatcher:
             risk=risk,
             state=self.line.start,
             parent=parent,
+            source=source,
+            source_ref=source_ref,
         )
         item.log(kind="created", to_state=item.state, actor="factory")
         self.store.save(item)

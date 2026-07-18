@@ -40,6 +40,8 @@ factory new "let users export their data as CSV"   # or open a GitHub issue
 
 When writing a new item (`factory new --body`, or a GitHub issue), you don't need to *pre-solve* it — no spec, no edge cases, no technical design; that's the line's job. But do be *clear*, not just brief: name the two things triage can't guess — **what** it is (one paragraph) and **why** it matters — plus any **notes** you already have (links, constraints, context). Triage can refine a rough idea; it can't read your mind, and a genuinely vague item just bounces straight back to you as a clarification. Clear-but-brief is the target, not precise-but-exhaustive.
 
+**Keep the thread on follow-ups.** When new work traces back to an earlier item — a regression from a shipped change, a follow-on to a feature — create it with `--parent <WI-id>` so the lineage is recorded (station-spawned follow-ups get this automatically). That link is what lets a retro connect *"this shipped item later caused a bug"* back to the verify/code-review bar that let it through — the single highest-value learning signal post-ship work carries. If the item mirrors a tracker issue, `--source-ref <n>` records that link too.
+
 Under the hood each step is just the CLI:
 - `factory next <id>` — what to do next (auto-clears any gates an approved policy covers).
 - `factory advance <id> --verdict <v> ...` — a station reports its result; the item routes onward.

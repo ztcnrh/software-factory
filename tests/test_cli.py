@@ -227,6 +227,43 @@ def test_advance_human_required_needs_no_verdict(factory_root: Path):
     assert Dispatcher(factory_root).store.load(item_id).state == "blocked"
 
 
+def test_new_parent_links_the_lineage(factory_root: Path, capsys):
+    """A follow-up created with --parent must persist the origin link — it's the
+    thread a retro follows from a regression back to the shipped change."""
+    parent_id = _item_at(factory_root, "done")
+    rc = main(
+        ["--root", str(factory_root), "new", "Fix regression in export", "--parent", parent_id]
+    )
+    assert rc == 0
+    d = Dispatcher(factory_root)
+    child = [i for i in d.store.list_items() if i.id != parent_id][0]
+    assert child.parent == parent_id
+    main(["--root", str(factory_root), "status", child.id])
+    assert f"parent: {parent_id}" in capsys.readouterr().out
+
+
+def test_new_rejects_a_dangling_parent(factory_root: Path, capsys):
+    """A typo'd --parent must fail loudly with nothing created — a silent dangling
+    pointer would break the lineage exactly when someone tried to record it."""
+    rc = main(["--root", str(factory_root), "new", "Follow-up", "--parent", "WI-9999"])
+    assert rc == 1
+    assert "not a known work item" in capsys.readouterr().err
+    assert Dispatcher(factory_root).store.list_ids() == []
+
+
+def test_new_source_ref_defaults_source_to_github(factory_root: Path, capsys):
+    """--source-ref alone must mark the item as a github mirror (the one adapter
+    that exists) while an explicit --source wins — the mirror link is what makes
+    an issue-ingested item recognizable and deduplicatable."""
+    rc = main(["--root", str(factory_root), "new", "From issue", "--source-ref", "42"])
+    assert rc == 0
+    d = Dispatcher(factory_root)
+    item = d.store.list_items()[0]
+    assert (item.source, item.source_ref) == ("github", "42")
+    main(["--root", str(factory_root), "status", item.id])
+    assert "source: github 42" in capsys.readouterr().out
+
+
 def test_revive_via_cli_lands_back_in_the_loop(factory_root: Path, capsys):
     """The full revive path through main(): the parked item re-enters the line
     and the operator gets the NEXT: directive to keep driving."""
