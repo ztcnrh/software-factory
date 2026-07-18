@@ -31,10 +31,13 @@ These unlock the "runs while you sleep" behavior and richer integrations. None a
 The mental model: **the `factory` CLI decides what's next; Claude does the work; you only show up at gates.**
 
 ```bash
-factory new "let users export their data as CSV"   # or open a GitHub issue
+factory new "let users export their data as CSV"   # or open a GitHub issue…
+factory intake          # …and pull every open issue labeled `intake` onto the line (needs gh)
 /factory                # drives the item down the line until it needs you
 /factory-status         # the board, the metrics, and anything waiting on you
 ```
+
+GitHub issues can be the factory's inbox: label an issue `intake` (the label set from `factory labels --github` includes it) and `factory intake` files it as a work item — title/body carried over, the mirror link recorded, already-ingested issues skipped, so it's safe to run on a schedule. `factory intake --dry-run` previews.
 
 `/factory` keeps moving an item — triage, spec, implement, review, verify — running each station and advancing automatically, and **stops at the first human gate** (or when it's done). You can also drive a specific item (`/factory WI-0003`) or kick the most actionable one (`/factory next`).
 

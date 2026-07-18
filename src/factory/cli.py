@@ -320,6 +320,58 @@ def cmd_gate(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- intake: pull labeled GitHub issues onto the line -------------------------
+
+
+def cmd_intake(args: argparse.Namespace) -> int:
+    from .adapters import github
+
+    d = _disp(args)
+    if not github.available():
+        print("✗ gh not found; the intake sensor needs the GitHub CLI", file=sys.stderr)
+        return 1
+    rc, issues, err = github.list_issues(args.label, repo=args.repo, limit=args.limit)
+    if rc != 0:
+        print(f"✗ gh issue list failed: {err}", file=sys.stderr)
+        return 1
+    where = f" in {args.repo}" if args.repo else ""
+    if not issues:
+        print(f"No open issues labeled {args.label!r}{where}.")
+        return 0
+    # Dedupe against the store, not issue labels: the mirror link (source_ref) is
+    # the durable record of what's already on the line.
+    known = {i.source_ref for i in d.store.list_items() if i.source == "github" and i.source_ref}
+    new = [i for i in issues if str(i["number"]) not in known]
+    skipped = len(issues) - len(new)
+    if args.dry_run:
+        for iss in new:
+            print(f"would ingest: #{iss['number']} {iss['title']}")
+        print(f"{len(new)} to ingest, {skipped} already on the line. Rerun without --dry-run.")
+        return 0
+    for iss in new:
+        body = (iss.get("body") or "").strip()
+        if iss.get("url"):
+            # The mirror link in the body is what lets stations fetch the full
+            # issue thread later (comments, attachments, discussion).
+            body = (body + "\n\n" if body else "") + f"Mirrors: {iss['url']}"
+        item = d.new_item(
+            iss["title"],
+            body=body,
+            labels=[args.label],
+            source="github",
+            source_ref=str(iss["number"]),
+        )
+        line = f"✓ ingested #{iss['number']} → {item.id}: {item.title}"
+        lrc, msg = github.sync_label(str(iss["number"]), item.state, repo=args.repo)
+        if lrc != 0:
+            # Best-effort mirror: the work item exists regardless; only the
+            # issue-side breadcrumb failed, and silence would hide that.
+            line += f"  (⚠ issue label sync failed: {msg})"
+        print(line)
+    print(f"\n{len(new)} ingested, {skipped} already on the line. Drive them with /factory.")
+    return 0
+
+
 # --- revive: bring a parked item back ----------------------------------------
 
 
@@ -728,6 +780,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Read the produced artifact from FILE instead of --produced",
     )
     s.set_defaults(func=cmd_gate)
+
+    # -- intake --
+    s = sub.add_parser(
+        "intake",
+        help="Ingest open GitHub issues labeled for the factory as new work items (needs gh)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  factory intake --dry-run\n"
+            "  factory intake\n"
+            "  factory intake --label factory-inbox --repo owner/name\n"
+            "\n"
+            "The intake sensor: GitHub issues become the factory's inbox. Label an issue\n"
+            "`intake` (created by `factory labels --github`), run this, and each labeled issue\n"
+            "becomes a work item at the top of the line — title and body carried over, the\n"
+            "mirror link recorded (source_ref), and the issue marked with the factory:<state>\n"
+            "conveyor label (best-effort). Idempotent: issues already on the line (matched by\n"
+            "source_ref) are skipped, so it's safe on a schedule — e.g. /loop or cron locally,\n"
+            "or an `issues: opened` workflow calling it in cloud mode. It touches nothing on\n"
+            "the line itself; items enter at the start state like any `factory new`."
+        ),
+    )
+    s.add_argument(
+        "--label",
+        default="intake",
+        help="GitHub label that marks an issue as factory inbox (default: %(default)s)",
+    )
+    s.add_argument("--repo", help="Target repo (owner/name); defaults to the current dir's repo")
+    s.add_argument("--limit", type=int, default=50, help="Max issues to fetch (default: 50)")
+    s.add_argument(
+        "--dry-run", action="store_true", help="List what would be ingested; create nothing"
+    )
+    s.set_defaults(func=cmd_intake)
 
     # -- revive --
     s = sub.add_parser(

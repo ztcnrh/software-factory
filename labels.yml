@@ -6,6 +6,10 @@
 # and label changes are what trigger the cloud-autonomy workflows.
 version: 1
 labels:
+  # The inbox label is different in kind from the factory:<state> set below: a human
+  # (or bot) puts `intake` on an issue to say "factory, pick this up", and the
+  # `factory intake` sensor files every open issue carrying it onto the line.
+  - {name: "intake",              color: "d4c5f9", description: "Factory inbox: factory intake files this issue onto the line"}
   - {name: "factory:triage",      color: "ededed", description: "At the triage station"}
   - {name: "factory:spec",        color: "c5def5", description: "At the spec station"}
   - {name: "factory:spec-review", color: "fbca04", description: "Human gate: spec review"}
