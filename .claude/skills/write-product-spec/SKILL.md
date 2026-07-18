@@ -21,7 +21,7 @@ Describe the feature purely from the user's perspective — what they see, do, a
 
 Gather only the context you need — and inspect rather than guess. You're pinning down four things: **who** the consumer is, **what** behavior they need, the **edge cases** the item implies, and the **outcome** that counts as success. Sources:
 - The work item: title, body, discussion, attachments. If it mirrors a tracker issue (GitHub, Jira, Linear, …), fetch the full thread — never spec from a title alone.
-- `roadmap.md` and `vision.md` if the repo has them: anchor the spec's direction to them, and flag divergence explicitly rather than drifting off-vision in silence.
+- `DIRECTION.md`, `roadmap.md`, and `vision.md` if the repo has them: anchor the spec's direction to them, and flag divergence explicitly rather than drifting off-vision in silence — a divergence you can name is a decision for the reviewer; one you can't is drift.
 - Neighboring, already-shipped features: how the adjacent behavior works *for the user*, so this feature stays consistent with what they already know. This is product consistency — the code-level conventions are `TECH.md`'s concern, not this spec's.
 - Missing product intent: if you can ask the human (interactive session), ask targeted questions rather than guessing; if you can't (a non-interactive run), decide what's decidable and mark the rest as inline **Open question:** markers — they surface for whoever reviews the spec.
 

@@ -126,6 +126,23 @@ def plant_claude_md(target: Path, dry: bool = False) -> str:
     return f"appended factory block: {path}"
 
 
+def plant_direction(target: Path, dry: bool) -> str:
+    """Plant the DIRECTION.md starter at the target root (--with-direction).
+
+    Unlike factory-owned files, it becomes the *project's* document the moment it
+    lands: the human fills in the north star and non-negotiables, the spec
+    station anchors to it. So it's deliberately untracked — not recorded in the
+    manifest, never overwritten (--force included; this skip is unconditional),
+    never uninstalled."""
+    dst = target / "DIRECTION.md"
+    if dst.exists():
+        return f"skip (exists — it's yours): {dst}"
+    if dry:
+        return f"would plant: {dst} (yours after that; untracked, never overwritten)"
+    shutil.copy2(FACTORY / "templates" / "DIRECTION.md", dst)
+    return f"planted: {dst} (yours now — fill in the north star; untracked, never overwritten)"
+
+
 def strip_claude_md(target: Path, dry: bool) -> str | None:
     """Reverse plant_claude_md: remove the marked block, preserving everything
     else; if the file held nothing but our block, remove the file."""
@@ -400,6 +417,12 @@ def main(argv: list[str] | None = None) -> int:
         help="also copy the (disabled) GitHub Actions workflows",
     )
     ap.add_argument(
+        "--with-direction",
+        action="store_true",
+        help="also plant a DIRECTION.md starter at the repo root (the project north star the "
+        "spec station anchors to); yours from then on — untracked, never overwritten or removed",
+    )
+    ap.add_argument(
         "--force",
         action="store_true",
         help="overwrite existing factory-owned files (never the project's own; "
@@ -441,6 +464,8 @@ def main(argv: list[str] | None = None) -> int:
     log.append(merge_settings(target, dry))
     log += [copy(FACTORY / f, target / f, args.force, dry) for f in ROOT_FILES]
     log.append(copy(FACTORY / "templates", target / "templates", args.force, dry))
+    if args.with_direction:
+        log.append(plant_direction(target, dry))
     log.append(plant_claude_md(target, dry))
     runtime = target / ".factory"
     subs = ("work-items", "interventions", "metrics")

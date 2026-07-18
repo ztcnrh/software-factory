@@ -19,7 +19,7 @@ This skill owns everything around them: context intake, the human's taste, artif
 
 - `factory status <id>` — the item, triage's notes, labels, and history.
 - If the item mirrors a tracker issue (GitHub, Jira, Linear, …), fetch the full thread with the best integration your run actually has — the `gh` CLI or the tracker's CLI/API via Bash; a tracker MCP tool only if your session carries one (isolated station runs don't, unless this repo's agent frontmatter grants it): description, comments and discussion, attachments, reproduction steps, linked and likely-duplicate issues. Never spec from a title alone.
-- `roadmap.md` and `vision.md`, if the repo has them — anchor the spec's direction there, and flag divergence explicitly instead of drifting off-vision in silence.
+- `DIRECTION.md` at the repo root (the project's north star, roadmap buckets, and non-negotiables — the installer plants a starter on request), plus `roadmap.md` / `vision.md`, if the repo has them. Treat them as the product frame: anchor the spec's direction there, and when the right spec for *this* item genuinely pulls against the stated direction, **flag the divergence** — an explicit callout in the spec (Open questions is a good home) and in your `--notes` — rather than silently complying with either side; the human at the gate decides whether the spec or the direction doc is what's stale. Absent files are a normal no-op, never a reason to block.
 - The target repo: existing patterns, neighboring features, conventions. Inspect the code — never guess about a system you can read. You carry `WebSearch`/`WebFetch` for outside research.
 - If critical product intent is genuinely missing and unrecoverable, block the item (see the hand-off) rather than inventing requirements.
 

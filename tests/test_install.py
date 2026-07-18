@@ -200,6 +200,36 @@ def test_uninstall_removes_untouched_created_files_entirely(tmp_path: Path):
     assert [p.name for p in tmp_path.iterdir()] == [".factory"]
 
 
+def test_with_direction_plants_a_user_owned_starter(tmp_path: Path):
+    """--with-direction plants DIRECTION.md at the root but the file is the
+    project's from birth: absent from the manifest, so uninstall must leave it
+    standing while removing the factory."""
+    _install(tmp_path, "--with-direction")
+    direction = tmp_path / "DIRECTION.md"
+    assert "## North star" in direction.read_text()
+    manifest = json.loads((tmp_path / ".factory" / "install-manifest.json").read_text())
+    assert "DIRECTION.md" not in manifest["created"]
+    _install(tmp_path, "--uninstall")
+    assert direction.exists()
+    assert not (tmp_path / "line.yml").exists()
+
+
+def test_with_direction_never_overwrites_the_users_file(tmp_path: Path):
+    """Once the human fills DIRECTION.md in, it's their vision doc — a reinstall,
+    even with --force, must not touch a byte of it."""
+    own = "# Direction\n\nShip the exporter above all else.\n"
+    (tmp_path / "DIRECTION.md").write_text(own)
+    _install(tmp_path, "--with-direction", "--force")
+    assert (tmp_path / "DIRECTION.md").read_text() == own
+
+
+def test_with_direction_dry_run_plants_nothing(tmp_path: Path):
+    """The plan must speak about the plant without performing it."""
+    out = _install(tmp_path, "--with-direction", "--dry-run")
+    assert "would plant" in out
+    assert not (tmp_path / "DIRECTION.md").exists()
+
+
 def test_reinstall_prunes_retired_paths(tmp_path: Path):
     """Regression: a reinstall over an older install left retired paths (items the
     toolkit no longer ships, e.g. a skill folded into another) live in the target

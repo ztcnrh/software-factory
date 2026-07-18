@@ -5,6 +5,7 @@ Everything in this directory is **load-bearing**: some component of the factory 
 | Template | Consumer (the only one) |
 | --- | --- |
 | `REVIEW-PACKET.md` | the **`/factory` driver** (`.claude/commands/factory.md` §3) renders it at every human gate |
+| `DIRECTION.md` | **`install/install.py --with-direction`** plants it at an adopting repo's root, where it becomes that project's own north-star doc (the spec station anchors to the planted copy, not this template). In an adopted repo, this file under `templates/` is the source to copy from if you skipped the flag and want it later. |
 
 Three things deliberately **not** here:
 

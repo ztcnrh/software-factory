@@ -6,7 +6,8 @@ The factory operates *on* a target repository. This installer drops everything a
 # from the software-factory directory:
 python3 install/install.py /path/to/your/repo --dry-run  # review the plan first (writes nothing)
 python3 install/install.py /path/to/your/repo            # local-first
-python3 install/install.py /path/to/your/repo --with-cloud   # also add the (disabled) workflows
+python3 install/install.py /path/to/your/repo --with-cloud     # also add the (disabled) workflows
+python3 install/install.py /path/to/your/repo --with-direction # also plant a DIRECTION.md starter
 python3 install/install.py /path/to/your/repo --force        # refresh factory-owned files
 python3 install/install.py /path/to/your/repo --uninstall    # opt out (keeps .factory/ state)
 ```
@@ -30,6 +31,7 @@ Or let your agent drive it: in a Claude Code session in this repo, say *"install
 - `.factory/` — empty runtime state dirs (the factory's memory).
 - A short **factory block in `CLAUDE.md`** (created or appended between `<!-- factory:begin/end -->` markers; reinstalls refresh only that block, your own content is never touched) — so every session discovers the factory even before the repo's hooks are trusted.
 - `--with-cloud`: `.github/workflows/*.disabled` — the opt-in cloud layer.
+- `--with-direction`: a `DIRECTION.md` starter at the repo root — the project north star / roadmap buckets / non-negotiables the spec station anchors specs to (it flags divergence rather than drifting). Planted once, then it's **yours**: untracked by the manifest, never overwritten (not even by `--force`), never uninstalled. Skipped the flag? Copy `templates/DIRECTION.md` yourself anytime.
 
 ### Then
 1. `uv tool install /path/to/software-factory` — puts the `factory` CLI on PATH.
