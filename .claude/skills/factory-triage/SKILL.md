@@ -20,9 +20,34 @@ Pick exactly one verdict and assign a risk level:
 | `automatable` | Small, unambiguous, low-risk. A clear fix or tiny feature with an obvious approach and existing test patterns. Skips the spec station. |
 | `needs_spec` | Real product or architectural ambiguity, cross-cutting change, ~1k+ LOC, or expensive-to-reverse behavior. Most non-trivial features. |
 | `needs_human_clarification` | You cannot proceed without a decision only the human can make (priorities, product intent, access). |
-| `park` | Not worth doing now (duplicate, stale, blocked on something external, low value). Revivable later. |
+| `park` | Not worth doing now (duplicate, stale, blocked on something external, low value). Revivable later. Also the umbrella's resting place after a decomposition (below). |
 
 Assign **risk** `low | medium | high` from blast radius: data/privacy/migrations/auth/ payments/public API → high; isolated internal logic with tests → low.
+
+## Decompose an oversized item (the rare fifth path)
+
+When one item is genuinely **several independent, leaf-sized changes** — each shippable and reviewable on its own, none sharing an unresolved design decision with another — don't send the whole thing down the line as one oversized unit (one bloated spec, one hard-to-review PR). Split it at the item boundary: spawn each leaf as its own work item and park the original as the umbrella. Multiple spawns need the report-file form of advance:
+
+```
+cat > /tmp/<id>-triage-report.json <<'EOF'
+{"verdict": "park",
+ "summary": "decomposed into leaf items (see spawn events)",
+ "risk": "<low|medium|high>",
+ "spawn": [
+   {"title": "<leaf 1, self-contained>", "body": "<context + the ask + what done looks like>"},
+   {"title": "<leaf 2, self-contained>", "body": "<same — children do not inherit this body>"}
+ ]}
+EOF
+factory advance <id> --report /tmp/<id>-triage-report.json
+```
+
+Each child enters at triage with `parent` set to the umbrella automatically; the umbrella lands in `parked` (revivable if the split turns out wrong) with every spawn recorded in its history. Write each child's body **self-contained** — carry over whatever context that leaf needs, because it won't see the parent's.
+
+Guards — decomposition is for the clear case, not a habit:
+- **Leaf-sized means not re-splittable.** If a child could plausibly be decomposed again, the split was wrong — the request is a project, not a work item: route it `needs_human_clarification` instead and say so.
+- **Independence is the bar.** Leaves that must land in one PR, share one migration, or settle one design together are *one* item — route `needs_spec` and let the spec scope it.
+- **More than ~5 leaves is a roadmap**, not a decomposition — `needs_human_clarification`.
+- **When in doubt, don't split.** `needs_spec` on the whole item is the safe default; a spec handles scoped complexity fine.
 
 ## Output contract
 Emit your verdict to the line. Set **risk** and attach any **labels** that classify the item — gate policies match on both (`max_risk`, and `labels_any` / `labels_all`), so this is how triage feeds the auto-approval loop (e.g. tag a read-only change `read-only` so a policy can later clear its gate untouched):

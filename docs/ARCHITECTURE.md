@@ -36,7 +36,7 @@ Each station is a **skill** (the "how" — a focused `SKILL.md`) paired with a *
 
 | Station | Emits (verdicts) | Model | Notes |
 |---|---|---|---|
-| **triage** | needs_spec · automatable · needs_human_clarification · park | sonnet | minutes, not investigation; assigns risk |
+| **triage** | needs_spec · automatable · needs_human_clarification · park | sonnet | minutes, not investigation; assigns risk; may split a genuinely separable item into leaf-sized children (spawn; the umbrella parks) |
 | **spec** | ready_for_review · blocked | opus | coordinates `write-product-spec`/`write-tech-spec` → `specs/<id>-<slug>/`; opens the draft spec PR; planning leverage justifies the tier |
 | **implement** | implemented · blocked | sonnet | continues on the spec branch/PR; tests; never merges; keeps the spec true to what ships |
 | **code_review** | pass · changes_requested | opus | correctness/security backstop before the ship gate; convenes a `council` on high-risk or contested diffs |
