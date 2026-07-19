@@ -27,6 +27,17 @@ def test_a_human_present_but_not_steering_still_counts_as_one_shot(factory_root:
     assert s["hands_off_shipped"] == 0  # a human WAS present — just didn't steer
 
 
+def test_summary_counts_one_ship_per_item_keeping_the_last(factory_root: Path):
+    """A phantom `shipped` from a mis-targeted advance can't be retracted from the
+    append-only file — views must count one ship per item, last event wins."""
+    m = Metrics(factory_root)
+    m.emit(kind="shipped", item="WI-1", human_touches=0, steers=3, cost=1.0)  # phantom
+    m.emit(kind="shipped", item="WI-1", human_touches=0, steers=0, cost=1.0)  # the real ship
+    s = m.summary()
+    assert s["shipped"] == 1
+    assert s["one_shot_shipped"] == 1
+
+
 def test_steers_by_stage_ranks_worst_first_and_includes_blocks(factory_root: Path):
     """The retro's to-do list must rank where humans had to step in — both gate
     rework (keyed by gate) and station blocks (keyed by the station that broke),

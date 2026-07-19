@@ -201,7 +201,7 @@ def test_revive_defaults_to_the_top_of_the_line(factory_root: Path):
     d.advance(item, StationReport(station="triage", verdict="park"))
     assert d.revive(item, by="alice") == "triage"
     ev = [e for e in item.history if e.kind == "revive"][-1]
-    assert (ev.actor, ev.to_state) == ("human:alice", "triage")
+    assert (ev.actor, ev.to_state) == ("alice", "triage")
     assert [e for e in d.metrics.events() if e["kind"] == "revive"][-1]["resumed"] is False
 
 
@@ -306,7 +306,7 @@ def test_correct_moves_the_item_and_audits_the_move(factory_root: Path):
     assert d.correct(item, "triage", by="alice", reason="advanced the wrong item") == "triage"
     assert d.store.load(item.id).state == "triage"
     ev = [e for e in item.history if e.kind == "correction"][-1]
-    assert (ev.actor, ev.note) == ("human:alice", "advanced the wrong item")
+    assert (ev.actor, ev.note) == ("alice", "advanced the wrong item")
     assert [e for e in d.metrics.events() if e["kind"] == "correction"][-1]["by"] == "alice"
 
 

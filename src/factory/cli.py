@@ -71,10 +71,11 @@ def _disp(args: argparse.Namespace) -> Dispatcher:
 
 
 def _resolve_actor(args: argparse.Namespace) -> str:
-    """Who is deciding at this gate — a real, trackable signature, not a generic
-    'human'. Explicit --by wins; then $FACTORY_USER, the repo's git identity, the
-    OS login. 'unknown' only if every source comes up empty. This is what keeps
-    every gate decision attributable, so who approved what is analyzable later."""
+    """Who signs this mutation (gate / revive / correct) — a real, trackable
+    identity, not a generic 'human'. Explicit --by wins; then $FACTORY_USER, the
+    repo's git identity, the OS login. 'unknown' only if every source comes up
+    empty. Every fallback names the human at the keyboard — which is why an agent
+    acting for itself must pass --by explicitly, or it signs as the human."""
     if getattr(args, "by", None):
         return args.by.strip()
     env = os.environ.get("FACTORY_USER", "").strip()
@@ -837,7 +838,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Re-enter at the recorded pre-park state instead of triage (context still fresh)",
     )
     s.add_argument("--notes", help="Why it's coming back (lands in the item history)")
-    s.add_argument("--by", help="Who is reviving; defaults to $FACTORY_USER or your git identity")
+    s.add_argument(
+        "--by",
+        help="Who is reviving; defaults to $FACTORY_USER or your git identity. An agent "
+        "acting for itself signs with its own name (e.g. driver:claude)",
+    )
     s.set_defaults(func=cmd_revive)
 
     # -- correct --
@@ -854,7 +859,13 @@ def build_parser() -> argparse.ArgumentParser:
             "so it routed. This sets the state back in one recorded move and logs a `correction`\n"
             "event under your identity. It is not an undo: the mistaken event stays in history\n"
             "(append-only is the audit trail), and it does not count as a steer — it fixes the\n"
-            "operator's slip, not the station's work."
+            "operator's slip, not the station's work.\n"
+            "\n"
+            "The operator may be the driving agent fixing a slip it just made — it signs\n"
+            "--by with its own name (e.g. driver:claude); omitted, --by resolves to the\n"
+            "human. A correction can target any state (a slip can point either way), but\n"
+            "it only restores: a swallowed real decision (a gate or deploy outcome) gets\n"
+            "the item put back at that state, then re-recorded via factory gate/advance."
         ),
     )
     s.add_argument("id", help="Work item id (WI-####)")
@@ -864,7 +875,11 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Why the correction is needed — recorded in the item history and metrics ledger",
     )
-    s.add_argument("--by", help="Who is correcting; defaults to $FACTORY_USER or your git identity")
+    s.add_argument(
+        "--by",
+        help="Who is correcting; defaults to $FACTORY_USER or your git identity. An agent "
+        "fixing its own slip signs with its own name (e.g. driver:claude)",
+    )
     s.set_defaults(func=cmd_correct)
 
     # -- status / metrics / retro / labels --

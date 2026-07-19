@@ -50,7 +50,11 @@ class Metrics:
 
     def summary(self, window: int = 5) -> dict:
         events = self.events()
-        shipped = [e for e in events if e.get("kind") == "shipped"]
+        # One ship per item, last event wins: a mis-targeted advance can fire
+        # ships_on for the wrong item, and the append-only file keeps that line.
+        raw = [e for e in events if e.get("kind") == "shipped"]
+        last = {e.get("item"): i for i, e in enumerate(raw)}
+        shipped = [e for i, e in enumerate(raw) if last[e.get("item")] == i]
         gates = [e for e in events if e.get("kind") == "gate"]
         human_gates = [g for g in gates if g.get("required_human")]
         steered_gates = [g for g in gates if g.get("changed")]  # human reworked at a gate

@@ -243,12 +243,6 @@ class Dispatcher:
         )
         return item.state
 
-    def _note_park(self, item: WorkItem, from_state: str, nxt: str) -> None:
-        """Remember where a park came from (any route into a revivable terminal),
-        so ``revive --resume`` can re-enter there instead of the top of the line."""
-        if self.line.is_terminal(nxt) and self.line.states[nxt].get("revivable"):
-            item.metadata["parked_from"] = from_state
-
     def revive(self, item: WorkItem, by: str, resume: bool = False, notes: str = "") -> str:
         """Bring a revivable (parked) item back onto the line.
 
@@ -278,7 +272,7 @@ class Dispatcher:
             from_state=state,
             to_state=nxt,
             verdict="revive",
-            actor=f"human:{by}",
+            actor=by,
             note=notes or ("resumed where it left off" if resume else ""),
         )
         item.state = nxt
@@ -306,7 +300,7 @@ class Dispatcher:
             kind="correction",
             from_state=old,
             to_state=state,
-            actor=f"human:{by}",
+            actor=by,
             note=reason,
         )
         item.state = state
@@ -343,6 +337,13 @@ class Dispatcher:
             rule=rule["id"],
         )
         return nxt
+
+    # --- internals ----------------------------------------------------------
+    def _note_park(self, item: WorkItem, from_state: str, nxt: str) -> None:
+        """Remember where a park came from (any route into a revivable terminal),
+        so ``revive --resume`` can re-enter there instead of the top of the line."""
+        if self.line.is_terminal(nxt) and self.line.states[nxt].get("revivable"):
+            item.metadata["parked_from"] = from_state
 
     @staticmethod
     def _absorb(item: WorkItem, report: StationReport) -> None:
