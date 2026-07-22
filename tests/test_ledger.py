@@ -77,10 +77,10 @@ def test_every_mutation_rerenders_the_human_view(tmp_path):
     led = Ledger(tmp_path)
     e = _add(led)
     assert led.view.exists()
-    led.update(e["id"], status="activated", outcome="gate cleared 4 items untouched")
+    led.update(e["id"], status="applied", outcome="gate cleared 4 items untouched")
     text = led.view.read_text()
     assert "RP-0001" in text
-    assert "activated" in text
+    assert "applied" in text
     assert "gate cleared 4 items untouched" in text
 
 

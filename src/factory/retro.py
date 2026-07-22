@@ -45,11 +45,11 @@ def briefing(root: str | Path, churn_threshold: int = CHURN_THRESHOLD) -> str:
             "",
             "## Reconcile past proposals first",
             "",
-            "Open ledger rows — adjudicate these against the record above *before* proposing "
-            "anything new: has each row's signal shown up (record it: `factory ledger update "
-            "<id> --outcome ...`)? Is a dormant policy's evidence bar now met, or has an "
-            "accepted change stopped paying off (`--status activated|superseded`)? "
-            "Full detail: `.factory/retro/LEDGER.md`.",
+            "Open ledger rows — adjudicate each against the record above and its PR's real "
+            "state *before* proposing anything new: did its signal show up (record it: "
+            "`factory ledger update <id> --outcome ...`)? Did a dormant policy earn its "
+            "signature (→ `--status applied`), or an accepted change stop paying off "
+            "(`--status superseded`)? Full detail: `.factory/retro/LEDGER.md`.",
             "",
         ]
         for e in open_rows:

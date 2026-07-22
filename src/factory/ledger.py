@@ -1,10 +1,11 @@
 """The retro ledger: durable memory for the learning loop's own proposals.
 
-Every retro proposal gets one row — what it changed, the intervention(s) it
-answered, the "how you'll know it worked" signal, and a status that tracks what
-actually happened to it (``proposed`` → ``applied``/``dormant``/``activated``/
-``rejected``/``superseded``) plus the later observed outcome. The retro station
-opens every run by reconciling the open rows; the human audits from one file.
+Every retro proposal (``RP-####`` — Retro Proposal) gets one row — what it
+changed, the intervention(s) it answered, the "how you'll know it worked"
+signal, and a status tracking what became of it (``proposed`` → ``applied``, via
+``dormant`` for a policy awaiting its signature; ``rejected``/``superseded``
+closes it) plus the later observed outcome. The retro station opens every run by
+reconciling the open rows; the human audits from one file.
 
 Storage follows the factory's history discipline: ``.factory/retro/ledger.jsonl``
 is append-only events (``add`` / ``update`` rows — a status change is a new
@@ -19,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-STATUSES = {"proposed", "applied", "dormant", "activated", "rejected", "superseded"}
+STATUSES = {"proposed", "applied", "dormant", "rejected", "superseded"}
 # Closed rows have had their final adjudication; everything else is open until an
 # observed outcome is recorded — that's what "reconcile past proposals" means.
 CLOSED = {"rejected", "superseded"}

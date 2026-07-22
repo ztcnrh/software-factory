@@ -9,7 +9,7 @@ You are the **learning station**. Every other station produces software; you pro
 
 ## Read first
 - Run `factory retro` (or `factory retro --emit .factory/retro/briefing.md`). It gives you the metrics, the open ledger rows, and every intervention record.
-- **Reconcile before you propose.** The briefing opens with the open rows of the retro ledger (`.factory/retro/LEDGER.md`) — your own past proposals awaiting adjudication. For each: has its "how you'll know it worked" signal actually shown up in the interventions/metrics since? Record what you observe (`factory ledger update <RP-id> --outcome "..."`), promote a dormant policy whose evidence bar is now met (recommend signing; `--status activated` once the human signs it), and mark a change that stopped paying off or got replaced (`--status superseded`). A learning loop that never grades its own past decisions is write-only.
+- **Reconcile before you propose.** The briefing's "Reconcile past proposals first" section lists your open ledger rows — past proposals awaiting adjudication. The rows are inline there; `.factory/retro/LEDGER.md` is the always-regenerated full-detail view beside them. Work each one *before* proposing anything new — the how (check the PR, judge the signal, record what you find) is in **Managing the ledger** below. A learning loop that never grades its own past decisions is write-only.
 - `factory metrics` — where humans had to step in most (gate rework or a station block). Aim there first; that's where the leverage is.
 - The briefing's **churn** section, when present: items where a station re-ran several times. That's real rework paid in tokens and cycle time, often with no intervention record — so it's worth a look on par with a human steer. But the count is a flag, not a diagnosis, and it does *not* mean "an automated loop with no human": a state re-enters for several reasons — the automated `code_review ↔ implement` loop, a human `not_ready` at ship_review pushing it back, a deploy failure re-entering the code loop, or an unblock. Don't assume which. Open the item's history (see below) and read the transitions before you pick a lever; the honest cause might be a vague spec, vague review worklists, a mis-route, a flaky deploy, or a genuinely hard item that legitimately needed the passes (in which case there's nothing to fix — say so).
 - **Read the churning items' history — it's your only window into what happened.** You run in fresh, isolated context: no prior station's session, no earlier retro's memory. Each item's `.factory/work-items/<id>.json` carries the full `history` log (every transition: `from_state → to_state`, `verdict`, `actor`, `note`), which is where a churn item's cause actually lives — it has no intervention record to cluster from. Read it before diagnosing.
@@ -40,12 +40,38 @@ Write to `.factory/retro/<YYYY-MM-DD>/`:
    - **How you'll know it worked** — the concrete signal to watch, since there's no robust quantitative eval yet. Name the leading indicator a human can actually observe: which steer or send-back should stop showing up, at which station, over roughly how many items — something checkable in the next stretch of interventions, not a vibe. If you can't name what would visibly change, you can't tell a real fix from a placebo; say so instead of inventing a metric.
    - **What could get worse (blast radius)** — your honest read on where this could regress, *anywhere*, not just for gate policies: a sharper station check can manufacture false send-backs; a new template field taxes every future item; a policy can clear a gate too broadly and wave a bad change through. State what you'd watch to catch the backfire. If you genuinely see no downside, say that and why — don't pad the section.
 2. The concrete artifacts: edited skill files, a `proposed-policies.yml` snippet, template diffs.
-3. **A ledger row per proposal** — `factory ledger add --title "<what it changes>" --lever <skill-edit|gate-policy|template|line> --file <each artifact> --answers <each intervention record it cites> --signal "<the same 'how you'll know it worked' from the report>"`. The ledger (plus the PR) is the durable provenance — which is exactly why nothing goes inline into the artifacts you edit.
+3. **A ledger row per proposal** — record each with `factory ledger add` (title, `--lever`, the `--file`s it touches, the `--answers` it cites, and the `--signal`; see **Managing the ledger**). The ledger plus the PR is the durable provenance — which is exactly why nothing goes inline into the artifacts you edit.
 
 Then open a PR against the factory repo titled `retro: <date>` so the human reviews and merges — a **draft** PR is fine, since you're proposing, not merging. Once it's open, attach it to the rows (`factory ledger update <RP-id> --pr <url>`) and list the RP ids in the PR body, so ledger and PR point at each other. Put the *why* for each edit in the PR description, **not** as an inline note in the skill or template you changed: the artifact stays clean, and the ledger row + PR are the durable provenance. Policies stay dormant until the human sets `approved_by`; skill/template edits take effect when the PR merges. **You propose; the human disposes** — each accepted proposal aims to take a recurring class of work off the human's plate, and even making that class of stumble rarer is a win.
 
+## Managing the ledger
+Each proposal gets one durable row (`RP-####` — Retro Proposal) in `.factory/retro/ledger.jsonl`, rendered to `LEDGER.md`. The row is the *only* thing that carries a proposal across sessions: you file it now, a human merges or declines the PR in a later session you'll never see, and a future retro has to pick up the thread. So the ledger is how the loop grades its own past decisions — treat it as memory, not bookkeeping. Flags live in `--help`; run `factory ledger -h` (and `add -h` / `update -h`) rather than guessing them.
+
+**Statuses** — a row stays *open* until it's closed or carries an observed outcome:
+- `proposed` — filed, PR open, awaiting merge.
+- `dormant` — a gate policy that's written but not firing, awaiting human signature (`approved_by:` in `policies.yml`).
+- `applied` — in effect: a merged edit, or a signed policy.
+- `rejected` — declined, or reverted as a failure. Closes the row.
+- `superseded` — replaced by a later proposal. Closes the row.
+
+**Reconcile open rows first — reconstruct, don't remember.** You wake with no memory of what became of a proposal's PR, so don't assume it shipped just because you filed it. For each open row:
+1. **Check the PR's real fate** — `gh pr view <url> --json state,mergedAt`. Merged → `--status applied` (a policy lands `dormant` on merge, `applied` once you confirm it's signed). Closed unmerged → `--status rejected`.
+2. **Then judge the outcome** — did the row's signal actually show up? Scope the evidence to what happened *since it merged* (the merge date is "in effect since"): interventions and `factory metrics` dated after it. Record it with `--outcome` — that's what closes the row. If too few items have flowed to tell yet, leave it open and say so; don't force a verdict.
+3. For a **policy**, `git log -p policies.yml` is the durable record of how it actually evolved (signed, tightened, removed) — read it rather than trusting the row alone.
+
+A live policy that proved too permissive — it auto-cleared something that needed a human — becomes a *new* proposal to remove or tighten it, citing the false clear; the old row gets `--status superseded` with an `--outcome` naming what slipped through.
+
+Command shapes (not the flags — those are in `-h`):
+```
+factory ledger add --title "..." --lever gate-policy --file policies.yml --answers <record> --signal "..."
+factory ledger update RP-0002 --pr <url>                    # attach the PR once opened
+factory ledger update RP-0002 --status applied              # its PR merged / the policy is now signed
+factory ledger update RP-0002 --outcome "3 retros on: ..."  # what happened vs the signal — closes it
+factory ledger list [--open]                                # ledger history or the open proposals to reconcile
+```
+
 ## Revising a proposal from human feedback
-A retro PR usually comes back with a tweak, not a demand to redo it. **Whatever the verdict, write it back to the ledger** — merged: `factory ledger update <RP-id> --status applied` (or `activated` when the human signs a policy); declined: `--status rejected` — so the ledger tracks what actually happened, not just what was proposed. The main session handling the PR review does this; it takes seconds. Then match the response to the size of the change:
+A retro PR usually comes back with a tweak, not a demand to redo it. **Whatever the verdict, write it back to the ledger** (merged → `--status applied`, declined → `--status rejected`; see **Managing the ledger**) — so it tracks what actually happened, not just what was proposed. The main session handling the PR review does this; it takes seconds. Then match the response to the size of the change:
 - **Minor edit** (reword a rationale, narrow a policy's `when`, drop one proposal): the main session can make it directly — loading *this* skill is enough context, a fresh subagent isn't needed. Preserve the station's invariants: keep the dormant-policy shape valid (only `labels_any` / `labels_all` / `max_risk` under `when`), keep provenance in the PR (not inline), and push to the **same** PR and `retro/<date>/` folder — a revision of one batch is not a new retro.
 - **Substantive rework** (re-cluster, re-derive the proposals): send it back to the retro station. If the original retro subagent is still available in this session, **resume it** (SendMessage) — it keeps the full context of the interventions it mined, which a fresh spawn would re-derive lossily from the briefing. Otherwise re-run the station fresh in clean, isolated context.
 

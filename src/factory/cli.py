@@ -960,9 +960,10 @@ def build_parser() -> argparse.ArgumentParser:
             '  factory ledger update RP-0001 --outcome "3 retros later: the send-back stopped"\n'
             "\n"
             "Status is mutable state; the jsonl stays append-only (an update is a new event).\n"
-            "applied = merged; dormant = waiting on evidence; activated = policy signed;\n"
-            "rejected / superseded close the row. An --outcome records what was actually\n"
-            "observed against the row's signal — that's what closes the learning loop."
+            "applied = in effect (a merged edit, or a signed policy); dormant = a policy\n"
+            "written but awaiting your signature; rejected / superseded close the row. An\n"
+            "--outcome records what was actually observed against the row's signal — that's\n"
+            "what closes the learning loop."
         ),
     )
     u.add_argument("id", help="Ledger row id (RP-####)")
