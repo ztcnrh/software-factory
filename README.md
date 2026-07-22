@@ -33,7 +33,7 @@ Five **stations** (Triage, Spec, Implement, Code-review, Verify) do the work; a 
 | The learning loop    | every steer writes an **intervention record**; the **Retro** station turns those into PRs against the factory's own skills + gate policies |
 | The goal             | a **metrics ledger** tracking the North Star: the one-shot ship rate (% shipped with no human rework), and at what cost                       |
 
-**Each station runs on a cost-appropriate model,** pinned in its subagent. The rule: spend intelligence where a miss propagates or ships, stay cheap everywhere else. So **Spec** (planning leverage — a bad spec taxes every station after it) and **Code-review** (the correctness/security backstop before the ship gate) run on **opus**; the workhorse **Triage / Implement / Verify** stay on **sonnet**; and **Retro**, which runs rarely but rewrites the factory itself, gets the top-tier **fable**. Any station's model is one line in `.claude/agents/factory-*.md` — see [docs/EXTENDING.md](docs/EXTENDING.md).
+**Each station runs on a cost-appropriate model,** pinned in its subagent. The rule: spend intelligence where a miss propagates or ships, stay cheap everywhere else. So **Spec** (planning leverage — a bad spec taxes every station after it), **Code-review** (the correctness/security backstop before the ship gate), and **Retro** (runs rarely, but rewrites the factory itself) run on **opus**; the workhorse **Triage / Implement / Verify** stay on **sonnet**. Any station's model is one line in `.claude/agents/factory-*.md` — see [docs/EXTENDING.md](docs/EXTENDING.md).
 
 
 ## Quickstart

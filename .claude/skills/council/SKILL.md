@@ -41,7 +41,7 @@ If the request is ambiguous, ask only the minimum clarification needed; otherwis
 
 The council's value comes from **angle diversity**. Every seat here is a Claude model, so varying the model buys far less than varying the perspective — two seats on the same model with genuinely different angles diverge; two models with the same prompt converge. **The seat's prompt — the angle, the framing, the specific concerns you tell it to chase — is the highest-leverage knob.** Invest your effort there.
 
-Run **every seat on the same model**, so differences between reports reflect the angles, not the substrate. `opus` is the default. Reach for `fable` when the question is the hardest kind on the table — dense with nuance and edge cases, where the strongest reasoning earns its cost (models that burn a lot of tokens should be treated as the exception, not a habit). `sonnet` is acceptable for a lighter council. Never `haiku` — it isn't strong enough for judgment work.
+Run **every seat on the same model**, so differences between reports reflect the angles, not the substrate. `opus` is the default and the ceiling — the strongest model available for judgment work like this. `sonnet` is acceptable for a lighter council. Never `haiku` — it isn't strong enough for judgment work.
 
 Derive the angles from the question: two or three genuinely non-overlapping seats beat five vague ones, and no seat should be askable as "review the architecture, generally." Useful angles include:
 - an architect/correctness seat — does it hold up? broken assumptions, boundary conditions, races, the cases the happy path ignores;

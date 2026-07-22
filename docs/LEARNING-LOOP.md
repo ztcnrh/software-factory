@@ -8,14 +8,14 @@ This is the part that makes it a *factory* and not just a pipeline. A pipeline r
 
 2. **Measure.** The **metrics ledger** (`.factory/metrics/`) tracks the North Star — the **one-shot ship rate**, the share of changes that shipped with **zero** human rework (no send-back, correction, or unblock) — plus *where* humans had to step in, ranked worst-first, and a cost-per-change proxy. `factory metrics` shows it. Note what this does *not* penalize: a human attending a gate and approving unchanged is the line working, not a miss. The "where humans step in" ranking is the factory's to-do list for itself.
 
-3. **Learn.** The **Retro station** (`factory-retro` skill, on the top-tier `fable` model) reads the interventions and the metrics, clusters them by *root cause* (not surface symptom), and for each recurring pattern picks the **smallest permanent lever**:
+3. **Learn.** The **Retro station** (`factory-retro` skill, on the `opus` model) reads the interventions and the metrics, clusters them by *root cause* (not surface symptom), and for each recurring pattern picks the **smallest permanent lever**:
    - the station keeps missing the same thing → **edit that station's skill**;
    - a gate approves the same category unchanged every time → **propose a dormant gate policy**;
    - specs keep omitting the same section → **edit the template**;
    - work is mis-routed → **adjust `line.yml`** (rare, conservative).
    It writes its findings and concrete proposals to `.factory/retro/<date>/`, records each one as a row in the **retro ledger** (`.factory/retro/LEDGER.md` — lever, evidence, and the *"how you'll know it worked"* signal to reconcile against later), and opens a PR titled `retro: <date>`.
 
-4. **Dispose.** You review the PR. Skill/template edits take effect when you merge. **Gate policies stay dormant until you sign them** — you activate a proposed rule by setting `approved_by:` on it in `policies.yml`. From then on, every matching work item clears that gate untouched; that slice ships without reaching you at all — one more class of change that lands one-shot. Your verdict is written back to the proposal's ledger row (`applied` when it lands — a policy reaches `applied` once you sign it — or `rejected` if you decline), and the next retro **opens by reconciling the open rows** — did each accepted change actually deliver its signal? — so the loop grades its own past decisions rather than being write-only.
+4. **Dispose.** You review the PR. Skill/template edits take effect when you merge. **Gate policies stay dormant until you sign them** — you activate a proposed rule by setting `approved_by:` on it in `policies.yml`. From then on, every matching work item clears that gate untouched; that slice ships without reaching you at all — one more class of change that lands one-shot. Your verdict is written back to the proposal's ledger row (`applied` when it lands — a policy reaches `applied` once you sign it — or `rejected` if you decline), and the next retro **opens by reconciling the open rows** — did each accepted change actually deliver its signal? — so the loop learns from what it already tried instead of only ever proposing more.
 
 The asymmetry is the whole point: you make a decision *once* (or a few times), the Retro station generalizes it, and the factory carries it forever. You propose nothing and dispose everything; the machine proposes and you dispose.
 
@@ -39,7 +39,7 @@ One intervention. One generalization. A gate that now clears itself for a whole 
 
 ## The economics (the "at what cost" half)
 
-The North Star has two halves: *more* shipped without rework, *and* at an acceptable cost. The ledger tracks a cost proxy per change so you can ask the economic question — "if I spend a dollar on automation, does it return more than a dollar?" Treat factory output as a variable cost you're trying to drive down per unit, not a fixed R&D line. The Retro station's job is to spend your scarce attention where it buys the most future autonomy: the worst gate, the most-repeated steer. Cheap stations stay cheap; the expensive station (Retro, on the top-tier `fable` model) runs rarely and earns its cost by removing recurring human rework.
+The North Star has two halves: *more* shipped without rework, *and* at an acceptable cost. The ledger tracks a cost proxy per change so you can ask the economic question — "if I spend a dollar on automation, does it return more than a dollar?" Treat factory output as a variable cost you're trying to drive down per unit, not a fixed R&D line. The Retro station's job is to spend your scarce attention where it buys the most future autonomy: the worst gate, the most-repeated steer. Cheap stations stay cheap; the expensive station (Retro, on `opus`) runs rarely and earns its cost by removing recurring human rework.
 
 ## What you do
 

@@ -41,7 +41,7 @@ Each station is a **skill** (the "how" — a focused `SKILL.md`) paired with a *
 | **implement** | implemented · blocked | sonnet | continues on the spec branch/PR; tests; never merges; keeps the spec true to what ships |
 | **code_review** | pass · changes_requested | opus | correctness/security backstop before the ship gate; convenes a `council` on high-risk or contested diffs |
 | **verify** | verified · failed | sonnet | exercises *behavior* (incl. browser), captures evidence |
-| **retro** | (proposes; opens a PR) | fable | the learning station, top-tier model — runs rarely, see LEARNING-LOOP.md |
+| **retro** | (proposes; opens a PR) | opus | the learning station — runs rarely but rewrites the factory itself, see LEARNING-LOOP.md |
 
 `deploy` is an **external** station (no agent) — it represents the post-merge CI/CD workflow, so the factory observes its outcome rather than running it. `monitor` (haiku; watches a shipped change and spawns a follow-up) is **deferred** in v1 — its skill/agent are parked under `deferred/` (the installer doesn't copy them) and it isn't a state on the line. See [OPTIMIZATION-AREAS.md](OPTIMIZATION-AREAS.md).
 
