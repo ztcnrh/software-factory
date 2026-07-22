@@ -3,9 +3,9 @@
 The retro *station* — a Claude skill — does the reasoning: clustering
 interventions, proposing edits to station skills, and proposing gate policies.
 This module just gathers the raw material — intervention records, metrics, and
-the automated-churn signal (items whose per-state ``attempts`` show an inner
-loop thrashing with no human present) — into one compact, structured document
-so the skill starts from signal, not noise.
+a churn signal (items whose per-state ``attempts`` show a station re-running
+well past once; the *why* lives in each item's history) — into one compact,
+structured document so the skill starts from signal, not noise.
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ from .ledger import Ledger
 from .metrics import Metrics
 from .store import Store
 
-# Station runs on one state before an item is flagged as internal thrash: 3 runs
-# of e.g. implement = 2 automated send-backs that no human ever saw.
+# Times a station may run on one state before the item is flagged for a look:
+# 3 runs = re-entered twice. The count flags; the item's history explains.
 CHURN_THRESHOLD = 3
 
 
@@ -68,17 +68,25 @@ def briefing(root: str | Path, churn_threshold: int = CHURN_THRESHOLD) -> str:
     if churn:
         lines += [
             "",
-            "## Automated churn (no human saw these)",
+            "## Items with repeated station runs (churn signal)",
             "",
-            f"Items where a station ran {churn_threshold}+ times. The inner loops "
-            "(e.g. code_review ↔ implement) are fully automated, so this thrash writes no "
-            "intervention record — read it as \"this class of work churns internally\" and "
-            "weigh sharpening the spec bar or the review bar even though no human stepped in.",
+            f"A station re-ran {churn_threshold}+ times on these items — real rework "
+            "(tokens, cycle time), often with no intervention record. The count flags "
+            "the item; it doesn't explain it. A state gets re-entered by an automated "
+            "`code_review ↔ implement` loop, a human `not_ready` at ship_review, a "
+            "deploy failure back into the code loop, or an unblock — indistinguishable "
+            "by count alone. Read each item's history (the `history` list in its "
+            "work-item JSON): the transitions (`from_state → to_state`, `verdict`, "
+            "`actor`) show which. Diagnose from that before you reach for a lever.",
             "",
         ]
         for _, item, hot in sorted(churn, key=lambda c: -c[0]):
             counts = ", ".join(f"`{s}`×{n}" for s, n in sorted(hot.items()))
-            lines.append(f"- **{item.id}** ({item.state}): {item.title} — {counts}")
+            lines.append(
+                f"- **{item.id}** (Item current state: {item.state}): {item.title}\n"
+                f"    Attempts by station: {counts}"
+            )
+
     lines += ["", "## Raw intervention records", ""]
     if not files:
         lines.append("_No interventions recorded yet — nothing to learn from._")

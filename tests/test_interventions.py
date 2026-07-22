@@ -61,10 +61,10 @@ def test_malformed_signal_lines_become_markers(tmp_path):
     assert "a steer was lost here" in briefing(tmp_path)
 
 
-def test_briefing_flags_automated_churn(tmp_path):
-    """The code_review ↔ implement loop writes no intervention however long it
-    ping-pongs — the briefing must surface items whose per-state attempts crossed
-    the churn threshold, or the retro stays blind to fully-automated rework."""
+def test_briefing_flags_repeated_station_runs(tmp_path):
+    """A station re-running past the threshold writes no intervention record, so
+    the briefing must surface it by attempt count — labeled enough to orient a
+    stateless agent, which then diagnoses the cause from the item's history."""
     from factory.retro import briefing
     from factory.store import Store
 
@@ -73,8 +73,9 @@ def test_briefing_flags_automated_churn(tmp_path):
     hot.attempts = {"implement": 4, "code_review": 3, "triage": 1}
     store.save(hot)
     text = briefing(tmp_path)
-    assert "## Automated churn" in text
+    assert "## Items with repeated station runs" in text
     assert "WI-0001" in text and "`implement`×4" in text and "`code_review`×3" in text
+    assert "Item current state: ship_review" in text  # labeled, not a bare dump
     assert "`triage`×1" not in text  # below threshold — noise stays out
 
 
@@ -87,7 +88,7 @@ def test_briefing_omits_churn_section_when_all_quiet(tmp_path):
     calm = WorkItem(id="WI-0001", title="clean feature", state="done")
     calm.attempts = {"implement": 1, "code_review": 1}
     Store(tmp_path).save(calm)
-    assert "## Automated churn" not in briefing(tmp_path)
+    assert "## Items with repeated station runs" not in briefing(tmp_path)
 
 
 def test_briefing_includes_chat_signals(tmp_path):
