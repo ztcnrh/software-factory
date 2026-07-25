@@ -60,13 +60,14 @@ class Event:
     item's whole journey down the line is auditable and replayable."""
 
     ts: str
-    kind: str  # created | station | gate | auto_gate | spawn | note | correction | revive
+    kind: str  # created | station | gate | auto_gate | gate_open | spawn | note | correction | ...
     from_state: str | None = None
     to_state: str | None = None
     verdict: str | None = None
     actor: str | None = None  # "triage" | "human:johndoe" | "driver:claude" | "policy:<id>" ...
     note: str | None = None
     cost: float = 0.0
+    ran: str | None = None  # how a station ran: inline | subagent | resumed | cloud
 
 
 @dataclass
@@ -130,6 +131,7 @@ class StationReport:
     notes: str = ""
     risk: str | None = None
     pr: str | None = None
+    ran: str = ""  # how the station ran (inline | subagent | resumed | cloud) — trace metadata
     labels: list[str] = field(default_factory=list)  # classifying labels to add (append-only)
     spawn: list[dict[str, Any]] = field(default_factory=list)  # new items → triage
 

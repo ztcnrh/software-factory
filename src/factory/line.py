@@ -54,6 +54,11 @@ class Line:
                         "a cap on a gate or terminal would never be consulted"
                     )
                 self._check_cap(spec["max_attempts"], f"state {name!r} max_attempts")
+            if spec.get("checking") and spec["kind"] != "station":
+                raise LineError(
+                    f"state {name!r}: checking only applies to stations — "
+                    "only a station can be a checker of other stations' work"
+                )
         for state, table in self.routing.items():
             if state not in self.states:
                 raise LineError(f"routing references unknown state {state!r}")
@@ -83,6 +88,11 @@ class Line:
 
     def is_external(self, state: str) -> bool:
         return bool(self.states[state].get("external"))
+
+    def is_checking(self, state: str) -> bool:
+        """A checker of other stations' work (line.yml `checking: true`) — the
+        driver keys isolation on this: fresh context, no chat steering."""
+        return bool(self.states[state].get("checking"))
 
     def ships_on(self, state: str) -> str | None:
         """The verdict from ``state`` that means "the change shipped" — the point

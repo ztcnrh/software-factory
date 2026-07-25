@@ -354,6 +354,34 @@ def test_cannot_advance_a_station_report_through_a_gate(factory_root: Path):
         _advance(d, item, "approved")
 
 
+def test_next_action_carries_attempt_checking_and_what_sent_it_back(factory_root: Path):
+    """The NEXT directive is the driver's whole world: a station run must know
+    which attempt it is, whether it's a checking station (isolation rules key on
+    this), and what routed the item here — without re-mining history."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("Feature", risk="low")
+    _advance(d, item, "automatable")
+    a = d.next_action(item)
+    assert (a.attempt, a.checking) == (1, False)
+    _advance(d, item, "implemented")
+    a = d.next_action(item)
+    assert a.state == "code_review" and a.checking is True  # declared in line.yml
+    _advance(d, item, "changes_requested", summary="tests missing")
+    a = d.next_action(item)
+    assert a.state == "implement" and a.attempt == 2
+    assert "changes_requested" in a.last_return and "tests missing" in a.last_return
+
+
+def test_station_ran_metadata_lands_on_the_history_event(factory_root: Path):
+    """--ran is trace metadata: HOW a run executed (fresh subagent vs inline vs
+    resumed) must survive into history, or the observability story has a hole."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("Feature", risk="low")
+    _advance(d, item, "automatable", ran="subagent")
+    ev = [e for e in item.history if e.kind == "station"][-1]
+    assert ev.ran == "subagent"
+
+
 def _set_cap(factory_root: Path, cap: int) -> None:
     """Rewrite the copied line.yml's attempt cap for a tight-loop test."""
     path = factory_root / "line.yml"

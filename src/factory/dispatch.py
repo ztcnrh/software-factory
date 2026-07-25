@@ -48,9 +48,15 @@ class Action:
     gate: str | None = None
     prompt: str = ""
     message: str = ""
+    # run_station context: which run this is (1-based), whether the station is a
+    # checker (drives the driver's isolation rules), and the event that routed
+    # the item here (a retry knows what sent it back without digging).
+    attempt: int | None = None
+    checking: bool = False
+    last_return: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {k: v for k, v in self.__dict__.items() if v not in (None, "")}
+        return {k: v for k, v in self.__dict__.items() if v not in (None, "", False)}
 
 
 class Dispatcher:
@@ -165,7 +171,23 @@ class Dispatcher:
             skill=self.line.skill_for(state),
             agent=self.line.agent_for(state),
             message=f"Run the {state!r} station.",
+            attempt=item.attempts.get(state, 0) + 1,
+            checking=self.line.is_checking(state),
+            last_return=self._last_return(item, state),
         )
+
+    @staticmethod
+    def _last_return(item: WorkItem, state: str) -> str | None:
+        """The event that routed the item into ``state`` — so a retry's brief can
+        say what sent it back (e.g. the review's headline) without the station
+        re-mining history."""
+        for ev in reversed(item.history):
+            if ev.to_state == state and ev.kind != "created":
+                who = ev.actor or ev.kind
+                verdict = f" ({ev.verdict})" if ev.verdict else ""
+                note = f": {ev.note}" if ev.note else ""
+                return f"{who}{verdict}{note}"
+        return None
 
     # --- act (mutating) -----------------------------------------------------
     def advance(self, item: WorkItem, report: StationReport) -> str:
@@ -224,6 +246,7 @@ class Dispatcher:
             actor=report.station,
             note=note,
             cost=report.cost,
+            ran=report.ran or None,
         )
         item.state = nxt
         self._note_park(item, state, nxt)

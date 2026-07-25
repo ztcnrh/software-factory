@@ -8,6 +8,7 @@ import pytest
 from factory.cli import _print_action, _resolve_actor, main
 from factory.dispatch import Action, Dispatcher
 from factory.line import Line
+from factory.model import StationReport
 
 
 def _gate_action(gate: str, state: str) -> Action:
@@ -75,6 +76,82 @@ def test_gate_produced_flags_are_mutually_exclusive(factory_root: Path, capsys):
         )
     assert exc.value.code == 2
     assert "not allowed with argument" in capsys.readouterr().err
+
+
+def test_brief_writes_the_run_packet_and_reuses_it(factory_root: Path, capsys):
+    """The driver→station handoff becomes a file on disk: brief writes
+    runs/<state>-<attempt>-brief.md once, and a re-run reuses it rather than
+    clobbering the session context the driver may have appended."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("Add CSV export", body="Users need CSV downloads.")
+    item.state = "implement"
+    d.store.save(item)
+    rc = main(["--root", str(factory_root), "brief", item.id])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "# Station brief" in out and "## Session context (driver-added)" in out
+    path = factory_root / ".factory" / "work-items" / item.id / "runs" / "implement-1-brief.md"
+    assert path.exists()
+
+    with open(path, "a") as f:
+        f.write("\nInterview: prefer streaming export.\n")
+    rc = main(["--root", str(factory_root), "brief", item.id])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "Interview: prefer streaming export." in captured.out  # reused, additions intact
+    assert "reused" in captured.err
+
+    rc = main(["--root", str(factory_root), "brief", item.id, "--force"])
+    assert rc == 0
+    assert "Interview" not in capsys.readouterr().out  # regenerated deterministically
+
+
+def test_brief_marks_a_checking_station_session_section_closed(factory_root: Path, capsys):
+    """A checking station's brief must say its session section is deliberately
+    empty — the steering-blindness of checkers is part of the packet contract,
+    not driver folklore."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("Change under review")
+    item.state = "code_review"
+    d.store.save(item)
+    rc = main(["--root", str(factory_root), "brief", item.id])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "deliberately empty" in out and "checking station" in out
+
+
+def test_brief_surfaces_retry_context_and_the_review_conversation(factory_root: Path, capsys):
+    """An implement retry's brief must carry what sent it back and point at the
+    latest review conversation file — the retry starts from the worklist, not
+    from archaeology."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("Feature")
+    item.state = "implement"
+    d.store.save(item)
+    item = d.store.load(item.id)
+    d.advance(item, StationReport(station="implement", verdict="implemented"))
+    review_dir = factory_root / ".factory" / "work-items" / item.id
+    review_dir.mkdir(parents=True, exist_ok=True)
+    (review_dir / "review-1.md").write_text("## Worklist\n1. add tests")
+    d.advance(
+        item, StationReport(station="code_review", verdict="changes_requested", summary="no tests")
+    )
+    rc = main(["--root", str(factory_root), "brief", item.id])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "(attempt 2" in out
+    assert "Routed here by:" in out and "no tests" in out
+    assert "review-1.md" in out
+
+
+def test_brief_refuses_a_gate_and_points_at_the_packet_flow(factory_root: Path, capsys):
+    """Briefs are for station runs; at a human gate the right artifact is the
+    review packet + gate --open — the error must teach the flow, not just fail."""
+    item_id = _item_at(factory_root, "ship_review")
+    rc = main(["--root", str(factory_root), "brief", item_id])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "review packet" in err and "--open" in err
 
 
 def test_gate_open_rejects_decision_only_flags(factory_root: Path, capsys):

@@ -24,6 +24,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from . import brief as brief_mod
 from .dispatch import Action, Dispatcher, GateDriftError
 from .ledger import CLOSED, STATUSES, Ledger
 from .line import Line
@@ -120,6 +121,14 @@ def _print_action(action: Action, line: Line) -> None:
         print(f"  {action.message}")
     if action.type == "run_station":
         print(f"  → run skill `{action.skill}` (subagent `{action.agent}`)")
+        if action.checking:
+            print("  → checking station: fresh context, no chat steering (see the brief)")
+        if action.attempt and action.attempt > 1:
+            rerun = f"  ↻ attempt {action.attempt}"
+            if action.last_return:
+                rerun += f" — routed back by: {action.last_return}"
+            print(rerun)
+        print(f"  → brief it: factory brief {action.item_id}")
         verdicts = " | ".join(line.valid_verdicts(action.state))
         print(f"  → then: factory advance {action.item_id} --verdict <{verdicts}>")
     elif action.type == "run_external":
@@ -191,6 +200,41 @@ def cmd_next(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- brief: the deterministic half of a station run's context ----------------
+
+
+def cmd_brief(args: argparse.Namespace) -> int:
+    d = _disp(args)
+    action = _resolve_next(d, args.id)
+    if action.type != "run_station":
+        hint = (
+            " At a human gate, render the review packet instead (templates/REVIEW-PACKET.md) "
+            "and bind it with `factory gate --open --packet <file>`."
+            if action.type == "human_gate"
+            else ""
+        )
+        print(
+            f"✗ {args.id} is at {action.state!r} ({action.type}) — a brief is for a station "
+            f"run.{hint}",
+            file=sys.stderr,
+        )
+        return 1
+    item = d.store.load(args.id)
+    path = brief_mod.brief_path(d.root, item.id, action.state, action.attempt or 1)
+    if path.exists() and not args.force:
+        # Reuse, never clobber: the driver may already have appended session
+        # context, and that half of the packet is not regenerable.
+        print(path.read_text(), end="")
+        print(f"→ existing brief reused: {path} (--force regenerates)", file=sys.stderr)
+        return 0
+    text = brief_mod.compose(d.root, d.line, item, action)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    print(text, end="")
+    print(f"→ brief written: {path}", file=sys.stderr)
+    return 0
+
+
 # --- advance: a station finished --------------------------------------------
 
 
@@ -219,6 +263,7 @@ def _inline_report_flags(args: argparse.Namespace) -> list[str]:
         "--human-reason": args.human_reason,
         "--spawn-title": args.spawn_title,
         "--spawn-body": args.spawn_body,
+        "--ran": args.ran,
     }
     return [flag for flag, value in given.items() if value is not None]
 
@@ -277,6 +322,7 @@ def cmd_advance(args: argparse.Namespace) -> int:
             human_reason=args.human_reason or "",
             notes=args.notes or "",
             spawn=spawn,
+            ran=args.ran or "",
         )
     new_state = d.advance(item, report)
     print(f"✓ {item.id}: {report.station} → {new_state}  (verdict: {report.verdict})")
@@ -503,10 +549,21 @@ def _render_item(d: Dispatcher, item_id: str) -> None:
         print(f"  artifacts: {', '.join(item.artifacts)}")
     if item.pr:
         print(f"  pr: {item.pr}")
+    # The run trace: what each station run was fed (briefs) and what each gate
+    # reviewed (packets) — the per-item observability files, listed so nobody
+    # has to remember the runs/ convention to find them.
+    traces = sorted((d.store.dir / item.id).glob("runs/*-brief.md")) + sorted(
+        (d.store.dir / item.id).glob("packet-*.md")
+    )
+    if traces:
+        print("  run traces:")
+        for t in traces:
+            print(f"    {t.relative_to(d.store.root)}")
     print("  history:")
     for ev in item.history:
         move = f"{ev.from_state}→{ev.to_state}" if ev.to_state else ev.kind
-        print(f"    {ev.ts}  [{ev.actor}] {move} {ev.verdict or ''} {ev.note or ''}".rstrip())
+        ran = f" [{ev.ran}]" if ev.ran else ""
+        print(f"    {ev.ts}  [{ev.actor}]{ran} {move} {ev.verdict or ''} {ev.note or ''}".rstrip())
     print()
 
 
@@ -787,11 +844,44 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--spawn-title", help="File a follow-up work item; it enters the line at triage")
     s.add_argument("--spawn-body", help="Body for the spawned item (requires --spawn-title)")
     s.add_argument(
+        "--ran",
+        choices=["inline", "subagent", "resumed", "cloud"],
+        help="How this station run executed (trace metadata on the history event): a fresh "
+        "subagent, inline in the driver session, a resumed subagent, or a cloud run",
+    )
+    s.add_argument(
         "--report",
         metavar="FILE",
         help="JSON file with a full StationReport; replaces ALL inline flags above",
     )
     s.set_defaults(func=cmd_advance)
+
+    # -- brief --
+    s = sub.add_parser(
+        "brief",
+        help="Write + print the deterministic context brief for an item's next station run",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  factory brief WI-0007\n"
+            "  factory brief WI-0007 --force\n"
+            "\n"
+            "Writes .factory/work-items/<id>/runs/<state>-<attempt>-brief.md — the engine-owned\n"
+            "half of the station's context packet (identity, risk, lineage, the request,\n"
+            "artifact pointers, what routed it here) — and prints it to stdout. The driver\n"
+            "appends session-only context under the marked section, then passes the file's\n"
+            "content to the station verbatim. An existing brief is reused, never overwritten\n"
+            "(--force regenerates, discarding driver additions), so what each worker was fed\n"
+            "stays on disk as the run's trace."
+        ),
+    )
+    s.add_argument("id", help="Work item id (WI-####)")
+    s.add_argument(
+        "--force",
+        action="store_true",
+        help="Regenerate even if this run's brief exists (discards any driver-added section)",
+    )
+    s.set_defaults(func=cmd_brief)
 
     # -- gate --
     s = sub.add_parser(
