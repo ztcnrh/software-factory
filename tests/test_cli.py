@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from factory.adapters import github
 from factory.cli import _print_action, _resolve_actor, main
 from factory.dispatch import Action, Dispatcher
 from factory.line import Line
@@ -262,6 +263,66 @@ def test_new_source_ref_defaults_source_to_github(factory_root: Path, capsys):
     assert (item.source, item.source_ref) == ("github", "42")
     main(["--root", str(factory_root), "status", item.id])
     assert "source: github 42" in capsys.readouterr().out
+
+
+def _capture_label_syncs(monkeypatch) -> list[tuple]:
+    """Record (issue, new_state, old_state) for every label sync, with gh present."""
+    calls: list[tuple] = []
+    monkeypatch.setattr(github, "available", lambda: True)
+    monkeypatch.setattr(
+        github,
+        "sync_label",
+        lambda issue, new_state, old_state=None, repo=None: (
+            calls.append((issue, new_state, old_state)) or (0, "")
+        ),
+    )
+    return calls
+
+
+def test_new_source_ref_stamps_the_issue_label(factory_root: Path, monkeypatch):
+    """Creating an item that mirrors an issue stamps factory:<start> on the issue at
+    birth (as intake does) — an externally-sourced item is visible on its issue from
+    the moment it joins the line."""
+    calls = _capture_label_syncs(monkeypatch)
+    main(["--root", str(factory_root), "new", "From issue", "--source-ref", "7"])
+    assert calls == [("7", "triage", None)]
+
+
+def test_advance_mirrors_new_state_onto_the_source_issue(factory_root: Path, monkeypatch):
+    """Every transition of a tracker-sourced item projects onto its issue label — old
+    state removed, new added — so the issue is a live state anchor, not a birth-only
+    stamp. Closes the gap where sync_label fired only at intake."""
+    calls = _capture_label_syncs(monkeypatch)
+    main(["--root", str(factory_root), "new", "From issue", "--source-ref", "7"])
+    calls.clear()
+    main(["--root", str(factory_root), "advance", "WI-0001", "--verdict", "needs_spec"])
+    assert calls == [("7", "spec", "triage")]
+
+
+def test_local_items_never_reach_for_github(factory_root: Path, monkeypatch):
+    """A factory driven with no tracker integration must never touch gh: the mirror
+    keys off an item's source, so a local item's transitions are side-effect-free —
+    the source check short-circuits before the adapter is even consulted."""
+    touched: list[str] = []
+    monkeypatch.setattr(github, "available", lambda: touched.append("available") or True)
+    monkeypatch.setattr(github, "sync_label", lambda *a, **k: touched.append("sync") or (0, ""))
+    main(["--root", str(factory_root), "new", "Local task"])
+    main(["--root", str(factory_root), "advance", "WI-0001", "--verdict", "needs_spec"])
+    assert touched == []
+
+
+def test_transition_label_sync_failure_warns_but_advances(
+    factory_root: Path, monkeypatch, capsys
+):
+    """A failed label sync on a transition is best-effort: it warns but never rolls
+    back or fails the advance — local state is the source of truth, the label only
+    projects it."""
+    monkeypatch.setattr(github, "available", lambda: True)
+    monkeypatch.setattr(github, "sync_label", lambda *a, **k: (1, "label not found"))
+    main(["--root", str(factory_root), "new", "From issue", "--source-ref", "7"])
+    rc = main(["--root", str(factory_root), "advance", "WI-0001", "--verdict", "needs_spec"])
+    assert rc == 0
+    assert "label sync failed" in capsys.readouterr().err
 
 
 def test_revive_via_cli_lands_back_in_the_loop(factory_root: Path, capsys):

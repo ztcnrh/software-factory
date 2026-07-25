@@ -98,6 +98,29 @@ def test_trend_has_no_prior_window_until_enough_ships(factory_root: Path):
     assert t["prior_one_shot_rate"] is None
 
 
+def test_events_are_sharded_one_file_per_item(factory_root: Path):
+    """Each item's events land in their own shard (metrics/events/<item>.jsonl) and
+    never in a shared log — that single-writer-per-file layout is what lets two
+    engineers drive different items without a metrics merge conflict."""
+    m = Metrics(factory_root)
+    m.emit(kind="created", item="WI-1")
+    m.emit(kind="created", item="WI-2")
+    shards = {p.name for p in (factory_root / ".factory" / "metrics" / "events").glob("*.jsonl")}
+    assert shards == {"WI-1.jsonl", "WI-2.jsonl"}
+    assert not (factory_root / ".factory" / "metrics" / "events.jsonl").exists()
+
+
+def test_events_reconstruct_across_shards_in_timestamp_order(factory_root: Path):
+    """events() reassembles the global log from every shard, ordered by ts — so a
+    reader (and the trend window) sees the true chronology regardless of which
+    item's file each event lives in."""
+    m = Metrics(factory_root)
+    m.emit(kind="a", item="WI-2")  # emitted first, but a later shard alphabetically
+    m.emit(kind="b", item="WI-1")
+    m.emit(kind="c", item="WI-2")
+    assert [e["kind"] for e in m.events()] == ["a", "b", "c"]
+
+
 def test_clean_approvals_do_not_register_as_steers(factory_root: Path):
     """A gate stop that required the human's presence but no change (changed=False)
     is not rework — it must not inflate human_steers or block a one-shot ship."""

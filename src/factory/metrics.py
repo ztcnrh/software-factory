@@ -1,15 +1,16 @@
-"""The North Star ledger: an append-only event log plus aggregate views.
+"""The North Star ledger: a per-item event log plus aggregate views.
 
 Headline metric: the **one-shot ship rate** — the share of shipped changes that
 needed no human rework anywhere on the line (no send-back, no correction, no
 unblock). The human still owns the ship decision and stays in the loop; this
 measures how often the line was good enough that review was a rubber-stamp, not
 how often the human was absent. Plus where humans had to step in (so the retro
-station knows where to aim) and a cost-per-change proxy.
+station knows where to aim) and a cost-per-change proxy. ``summary`` also windows
+a recent-vs-prior trend, so "is the factory improving?" has an answer.
 
-Events are timestamped at ``emit`` time, and ``summary`` includes a windowed
-trend (the last N ships vs the N before) alongside the lifetime aggregate — so
-"is the factory improving?" has an answer, not just a cumulative average.
+Storage shards one file per item (``metrics/events/<item>.jsonl``): single-writer,
+so parallel drivers never conflict. The views are set aggregations that don't need
+a global write order; the one that does (the trend) sorts on each event's ts.
 """
 
 from __future__ import annotations
@@ -21,32 +22,43 @@ from typing import Any
 
 
 def _now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    # Microsecond precision so ts is a faithful sort key when shards are reassembled.
+    t = time.time()
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + f".{int(t % 1 * 1_000_000):06d}Z"
 
 
 class Metrics:
     def __init__(self, root: str | Path):
-        self.path = Path(root) / ".factory" / "metrics" / "events.jsonl"
+        self.events_dir = Path(root) / ".factory" / "metrics" / "events"
 
     def emit(self, **event: Any) -> None:
-        # Every event is timestamped at the source — a caller-supplied ts wins, but
-        # no caller should need to pass one. Timestamps can't be backfilled onto
-        # events already written, so this happens here, not in any view.
+        # One shard per item (single-writer, conflict-free); ts stamped here since
+        # it can't be backfilled, but a caller-supplied ts wins.
         event.setdefault("ts", _now())
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.path, "a") as f:
+        shard = self.events_dir / f"{event.get('item') or '_misc'}.jsonl"
+        shard.parent.mkdir(parents=True, exist_ok=True)
+        with open(shard, "a") as f:
             f.write(json.dumps(event) + "\n")
 
-    def events(self) -> list[dict]:
-        if not self.path.exists():
-            return []
+    @staticmethod
+    def _read(path: Path) -> list[dict]:
         out = []
-        with open(self.path) as f:
+        with open(path) as f:
             for line in f:
                 line = line.strip()
                 if line:
                     out.append(json.loads(line))
         return out
+
+    def events(self) -> list[dict]:
+        # Reassemble the global log from the shards, ordered by ts — cross-shard
+        # write order carries no meaning.
+        rows: list[dict] = []
+        if self.events_dir.exists():
+            for shard in sorted(self.events_dir.glob("*.jsonl")):
+                rows += self._read(shard)
+        rows.sort(key=lambda e: e.get("ts", ""))
+        return rows
 
     def summary(self, window: int = 5) -> dict:
         events = self.events()
