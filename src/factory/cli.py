@@ -698,6 +698,82 @@ def cmd_policy(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Cross-check the factory's stores against each other and the config —
+    'is my factory consistent?' as one command. Read-only."""
+    from .interventions import Interventions
+    from .metrics import Metrics
+    from .policies import Policies, PolicyState
+    from .store import Store
+
+    root = _root(args)
+    errors: list[str] = []
+    warns: list[str] = []
+
+    line = None
+    try:
+        line = Line.load(root / "line.yml")
+        print("✓ line.yml loads and validates")
+    except Exception as e:  # noqa: BLE001 — a doctor reports, never crashes
+        errors.append(f"line.yml: {e}")
+    policies = None
+    try:
+        policies = Policies.load(root / "policies.yml")
+        print(f"✓ policies.yml loads and validates ({len(policies.rules)} rule(s))")
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"policies.yml: {e}")
+
+    store = Store(root)
+    items = {}
+    for iid in store.list_ids():
+        try:
+            items[iid] = store.load(iid)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"work item {iid}: unreadable ({e})")
+    print(f"✓ {len(items)} work item(s) parse")
+    for leftover in sorted(store.dir.glob("*.tmp")) if store.dir.exists() else []:
+        warns.append(f"leftover temp file in the store: {leftover.name} (crashed save?)")
+    for iid, item in items.items():
+        if line and item.state not in line.states:
+            errors.append(f"{iid}: state {item.state!r} is not on the line")
+        if item.parent and item.parent not in items:
+            warns.append(f"{iid}: parent {item.parent!r} does not exist (broken lineage)")
+        if item.metadata.get("gate_open") and line and not line.is_gate(item.state):
+            warns.append(
+                f"{iid}: has a gate_open binding but sits at {item.state!r} (not a gate) — "
+                "stale; the next gate decision at that gate would clear it"
+            )
+
+    if policies:
+        suspended = PolicyState(root).suspended()
+        for rid in suspended:
+            if not any(r.get("id") == rid for r in policies.rules):
+                warns.append(
+                    f"policy overlay: suspended rule {rid!r} no longer exists in policies.yml"
+                )
+
+    metrics = Metrics(root)
+    metrics.events()
+    warns += [f"metrics ledger: {w}" for w in metrics.warnings]
+    led = Ledger(root)
+    led.entries()
+    warns += [f"retro ledger: {w}" for w in led.warnings]
+    # Interventions dir readable (best-effort — records() already tolerates)
+    n_iv = len(Interventions(root).list())
+    print(f"✓ metrics/ledger read; {n_iv} intervention record(s)")
+
+    import shutil as _shutil
+
+    print(f"· gh CLI: {'found' if _shutil.which('gh') else 'not found (intake needs it)'}")
+
+    for w in warns:
+        print(f"⚠ {w}")
+    for e in errors:
+        print(f"✗ {e}", file=sys.stderr)
+    print(f"\n{len(errors)} error(s), {len(warns)} warning(s)")
+    return 1 if errors else 0
+
+
 def cmd_labels(args: argparse.Namespace) -> int:
     import shutil
     import subprocess
@@ -1234,6 +1310,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Who is reinstating; defaults to $FACTORY_USER or your git identity",
     )
     pr.set_defaults(func=cmd_policy)
+
+    # -- doctor --
+    s = sub.add_parser(
+        "doctor",
+        help="Cross-check config and stores for consistency (read-only; exit 1 on errors)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Checks: line.yml and policies.yml validate; every work item parses and sits on a\n"
+            "known state; lineage (parent) pointers resolve; no stale gate bindings, crashed-\n"
+            "save leftovers, or orphaned policy suspensions; metrics/ledger files are readable\n"
+            "(torn lines counted). Warnings inform; errors exit 1. Run it when something feels\n"
+            "off, after a crash, or before trusting a factory you've just moved or upgraded."
+        ),
+    )
+    s.set_defaults(func=cmd_doctor)
 
     s = sub.add_parser("labels", help="List the factory labels, or create them in a repo (gh)")
     s.add_argument("--github", action="store_true", help="Create the labels via the gh CLI")

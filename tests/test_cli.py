@@ -568,3 +568,52 @@ def test_help_renders_usage_examples(capsys):
             main([cmd, "-h"])
         assert exc.value.code == 0
         assert "Examples:" in capsys.readouterr().out
+
+
+def test_doctor_reports_healthy_on_a_clean_root(factory_root: Path, capsys):
+    """The baseline: a fresh, consistent factory must exit 0 with zero errors —
+    doctor's silence has to be trustworthy before its noise can be."""
+    d = Dispatcher(factory_root)
+    d.new_item("clean item")
+    rc = main(["--root", str(factory_root), "doctor"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "0 error(s)" in out
+
+
+def test_doctor_catches_a_corrupt_item_and_an_unknown_state(factory_root: Path, capsys):
+    """The two hard failures a crashed or hand-edited store can leave: an
+    unparseable item JSON and an item stranded on a state the line doesn't
+    know. Both must be errors (exit 1), not warnings."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("will be corrupted")
+    stranded = d.new_item("off the line")
+    stranded.state = "no_such_state"
+    d.store.save(stranded)
+    (factory_root / ".factory" / "work-items" / f"{item.id}.json").write_text("{TORN")
+    rc = main(["--root", str(factory_root), "doctor"])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert item.id in captured.err
+    assert "no_such_state" in captured.err
+
+
+def test_doctor_warns_on_lineage_bindings_and_overlay_drift(factory_root: Path, capsys):
+    """The soft inconsistencies that rot silently: a dangling parent pointer, a
+    stale gate binding on a non-gate state, and a suspension for a rule that
+    left policies.yml — surfaced as warnings, exit 0."""
+    from factory.policies import PolicyState
+
+    d = Dispatcher(factory_root)
+    item = d.new_item("orphan child")
+    item.parent = "WI-9999"
+    item.metadata["gate_open"] = {"gate": "spec_review"}
+    d.store.save(item)  # at triage (not a gate) with a binding + missing parent
+    PolicyState(factory_root).suspend("ghost-rule", "WI-0001", "steer")
+    rc = main(["--root", str(factory_root), "doctor"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "WI-9999" in out
+    assert "gate_open" in out
+    assert "ghost-rule" in out
+    assert "3 warning(s)" in out
