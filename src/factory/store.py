@@ -6,6 +6,7 @@ friendly (``WI-0001``)."""
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from .model import WorkItem
@@ -23,9 +24,21 @@ class Store:
         self.dir.mkdir(parents=True, exist_ok=True)
 
     def save(self, item: WorkItem) -> None:
+        # Atomic: write a sibling temp file, fsync, then rename over the real one.
+        # A crash mid-write must never leave a half-written (corrupt) item — the
+        # store is the source of truth, so the old version stays intact until the
+        # new one is fully on disk.
         self.ensure()
-        with open(self._path(item.id), "w") as f:
-            json.dump(item.to_dict(), f, indent=2)
+        path = self._path(item.id)
+        tmp = path.with_name(path.name + ".tmp")
+        try:
+            with open(tmp, "w") as f:
+                json.dump(item.to_dict(), f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
 
     def load(self, item_id: str) -> WorkItem:
         with open(self._path(item_id)) as f:

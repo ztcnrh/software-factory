@@ -27,6 +27,7 @@ def _now() -> str:
 class Metrics:
     def __init__(self, root: str | Path):
         self.path = Path(root) / ".factory" / "metrics" / "events.jsonl"
+        self.warnings: list[str] = []  # malformed lines noticed on the last read
 
     def emit(self, **event: Any) -> None:
         # Every event is timestamped at the source — a caller-supplied ts wins, but
@@ -38,14 +39,22 @@ class Metrics:
             f.write(json.dumps(event) + "\n")
 
     def events(self) -> list[dict]:
+        """Read the ledger, tolerating a torn line (e.g. a crash mid-append).
+        One bad line must not take down every view forever — it's skipped and
+        reported via ``self.warnings``, mirroring the retro ledger's discipline."""
+        self.warnings = []
         if not self.path.exists():
             return []
         out = []
         with open(self.path) as f:
-            for line in f:
+            for i, line in enumerate(f, 1):
                 line = line.strip()
-                if line:
+                if not line:
+                    continue
+                try:
                     out.append(json.loads(line))
+                except json.JSONDecodeError:
+                    self.warnings.append(f"line {i}: unreadable (not JSON) — event skipped")
         return out
 
     def summary(self, window: int = 5) -> dict:
@@ -76,7 +85,10 @@ class Metrics:
             key = f"{b.get('station', '?')} (blocked)"
             by_stage[key] = by_stage.get(key, 0) + 1
         total = len(shipped)
-        cost = sum(e.get("cost", 0.0) for e in events)
+        # Cost is counted once, at the station events that spent it. A `shipped`
+        # event repeats the item's *cumulative* cost (useful per-ship context);
+        # summing it here again would double-count every shipped item's spend.
+        cost = sum(e.get("cost", 0.0) for e in events if e.get("kind") == "station")
         # Trend: the last `window` ships vs the `window` before them, in ledger
         # (append) order — so the North Star can be seen moving, not just its
         # lifetime average, which weights the factory's earliest runs forever.
