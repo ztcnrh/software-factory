@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -16,6 +17,41 @@ from typing import Any
 
 def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+# One shared ordering for risk comparisons ("unknown" ranks riskiest — it hasn't
+# been judged yet, so nothing may treat it as safe). Policies and the risk floor
+# both consume this; one home so the two can never disagree.
+RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "unknown": 3}
+
+# Deterministic risk floor: work whose text touches these concerns cannot enter
+# the line below `high` unless a human explicitly says so, and a station may
+# raise its risk but never lower it back past the floor. A dumb, word-bounded
+# backstop against an under-triaged auth/payments/migration change skipping a
+# gate — the model's judgment can only make such an item *more* guarded.
+# Word-bounded alternation, not substrings: `auth` must not fire on `author`,
+# `token` must not fire on `tokenizer`.
+RISK_FLOOR = "high"
+_RISK_FLOOR_TERMS = (
+    "auth", "authn", "authz", "authentication", "authorization",
+    "authenticate", "authenticates", "authenticated", "authorize", "authorized",
+    "login", "password", "passwords", "token", "tokens", "secret", "secrets",
+    "credential", "credentials", "payment", "payments", "billing",
+    "migration", "migrations", "encrypt", "encrypts", "encrypted", "encryption",
+    "permission", "permissions",
+)
+_RISK_FLOOR_RE = re.compile(r"\b(" + "|".join(_RISK_FLOOR_TERMS) + r")\b", re.IGNORECASE)
+
+
+def risk_floor_matches(text: str) -> list[str]:
+    """Distinct floor-triggering terms found in ``text``, lowercased, first-seen
+    order — recorded on the item so every later clamp can say *why*."""
+    seen: list[str] = []
+    for m in _RISK_FLOOR_RE.findall(text or ""):
+        w = m.lower()
+        if w not in seen:
+            seen.append(w)
+    return seen
 
 
 @dataclass

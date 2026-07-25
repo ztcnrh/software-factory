@@ -397,6 +397,50 @@ def test_a_human_touch_opens_a_fresh_attempt_budget(factory_root: Path):
     assert item.attempts["implement"] == 1  # lifetime churn history is untouched
 
 
+def test_sensitive_text_floors_risk_at_intake(factory_root: Path):
+    """The deterministic backstop: an item touching auth/payments/etc. enters at
+    high risk unless a human explicitly said otherwise — an under-triaged
+    sensitive change must not be able to skip a gate via a low risk rating."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("Rotate the API token signing secret")
+    assert item.risk == "high"
+    assert item.metadata["risk_floor"] == "high"
+    assert "token" in item.metadata["risk_floor_matches"]
+    assert any("risk floored" in (e.note or "") for e in item.history)
+
+
+def test_explicit_human_risk_bypasses_the_floor_but_is_recorded(factory_root: Path):
+    """Human authority wins at creation: an explicit --risk low on floor-matching
+    text is respected — but the bypass lands in history so the audit trail says
+    why a sensitive-sounding item ran low-risk."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("Fix typo in the auth README", risk="low")
+    assert item.risk == "low"
+    assert "risk_floor" not in item.metadata
+    assert any("risk floor bypassed" in (e.note or "") for e in item.history)
+
+
+def test_a_station_cannot_lower_risk_below_the_floor(factory_root: Path):
+    """Stations may raise risk, never lower it past the intake floor — a model
+    must not be able to quietly de-escalate a sensitive item back below the bar
+    that keeps its gates human."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("Handle password reset flow")
+    assert item.risk == "high"
+    _advance(d, item, "needs_spec", risk="low")  # triage tries to de-escalate
+    assert item.risk == "high"
+    assert any("risk floor: kept high" in (e.note or "") for e in item.history)
+
+
+def test_risk_floor_matches_words_not_substrings(factory_root: Path):
+    """`auth` must not fire on `author`, `token` not on `tokenizer` — substring
+    matching would tax everyday items with gates they don't deserve."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("Credit the author in the tokenizer docs")
+    assert item.risk == "unknown"
+    assert "risk_floor" not in item.metadata
+
+
 def test_line_rejects_malformed_attempt_caps(factory_root: Path):
     """A cap that isn't a positive integer, or a cap on a non-station, is a
     config typo that must fail at load — not silently run uncapped."""

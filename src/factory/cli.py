@@ -172,6 +172,12 @@ def cmd_new(args: argparse.Namespace) -> int:
         source_ref=args.source_ref,
     )
     print(f"✓ created {item.id}: {item.title}")
+    if item.metadata.get("risk_floor"):
+        matched = ", ".join(item.metadata.get("risk_floor_matches", []))
+        print(
+            f"  ⚠ risk floored to {item.risk} — touches {matched} "
+            "(pass --risk explicitly to override at creation)"
+        )
     _print_action(_resolve_next(d, item.id), d.line)
     return 0
 

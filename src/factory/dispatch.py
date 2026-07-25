@@ -18,7 +18,14 @@ from typing import Any
 from .interventions import Interventions
 from .line import Line, LineError
 from .metrics import Metrics
-from .model import GateDecision, StationReport, WorkItem
+from .model import (
+    RISK_FLOOR,
+    RISK_ORDER,
+    GateDecision,
+    StationReport,
+    WorkItem,
+    risk_floor_matches,
+)
 from .policies import Policies
 from .store import Store
 
@@ -72,6 +79,29 @@ class Dispatcher:
             source_ref=source_ref,
         )
         item.log(kind="created", to_state=item.state, actor="factory")
+        # Deterministic risk floor: sensitive-sounding work enters at `high`
+        # unless a human explicitly set a risk at creation (their call wins —
+        # recorded either way, so the audit trail says why).
+        matches = risk_floor_matches(f"{title}\n{body}")
+        if matches:
+            if risk == "unknown":
+                item.risk = RISK_FLOOR
+                item.metadata["risk_floor"] = RISK_FLOOR
+                item.metadata["risk_floor_matches"] = matches
+                item.log(
+                    kind="note",
+                    actor="factory",
+                    note=f"risk floored to {RISK_FLOOR}: touches {', '.join(matches)} "
+                    "(stations may raise it, never lower it; an explicit risk at "
+                    "creation overrides)",
+                )
+            elif RISK_ORDER.get(risk, 3) < RISK_ORDER[RISK_FLOOR]:
+                item.log(
+                    kind="note",
+                    actor="factory",
+                    note=f"risk floor bypassed by explicit risk={risk} "
+                    f"(matched: {', '.join(matches)})",
+                )
         self.store.save(item)
         self.metrics.emit(kind="created", item=item.id)
         return item
@@ -140,6 +170,18 @@ class Dispatcher:
         item.attempts[state] = item.attempts.get(state, 0) + 1
         item.cost += report.cost
         self._absorb(item, report)
+        # The floor set at intake holds against stations: risk may be raised by
+        # a report, never lowered back below the floor (a model can only make a
+        # sensitive item MORE guarded, not quietly de-escalate it past a gate).
+        floor = item.metadata.get("risk_floor")
+        if floor and report.risk and RISK_ORDER.get(report.risk, 3) < RISK_ORDER.get(floor, 0):
+            item.risk = floor
+            item.log(
+                kind="note",
+                actor="factory",
+                note=f"risk floor: kept {floor} (station proposed {report.risk}; floored at "
+                f"intake on: {', '.join(item.metadata.get('risk_floor_matches', []))})",
+            )
 
         if report.human_required:
             # The escape hatch: any station can bypass the routing table and land

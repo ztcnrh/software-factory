@@ -14,9 +14,9 @@ from typing import Any
 
 import yaml
 
+from .model import RISK_ORDER as _RISK_ORDER
 from .model import WorkItem
 
-_RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "unknown": 3}
 _WHEN_KEYS = {"labels_any", "labels_all", "max_risk"}  # the ONLY valid condition keys
 
 
