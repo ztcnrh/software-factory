@@ -25,14 +25,14 @@ A gate policy is a small rule: *if a work item reaching gate G matches these con
 
 This is how "raise the one-shot ship rate" becomes a *consequence* of the learning loop rather than a setting you flip. You don't tell the factory to skip gates; you teach it — sharper stations so work needs no rework, plus the occasional signed policy for a proven-safe slice — and the metric follows.
 
-## Worked example (the demo)
+## A worked example
 
-The demo repo shows the full cycle on one real feature ("let visitors submit a quote"):
+The feature that first proved the loop ran the full cycle on one real change ("let visitors submit a quote"):
 
 1. The Spec station wrote a happy-path spec for `POST /quotes` — **no input validation**.
 2. At `spec_review`, the human sent it back: *"public write endpoints must always specify input validation and rejection behavior."* That steer became `.factory/interventions/WI-0001-spec_review-...md`, category `missing-edge-case`.
 3. The spec was revised, approved, implemented (with validation + four regression tests), reviewed, verified (valid → 201, invalid → 422), and shipped. Metrics: one-shot ship rate 0% (the one change needed a spec send-back), and the ledger pointed at `spec_review` as where the human had to step in.
-4. The **Retro station** read that intervention and produced `.factory/retro/2026-06-27/`: it **edited the spec station's skill and the PRODUCT template** to require a validation section for any input-accepting endpoint (so the omission can't recur), and **proposed a dormant gate policy** to auto-approve `spec_review` for low-risk, read-only changes — explicitly flagged as needing more evidence before activation.
+4. The **Retro station** read that intervention and produced a retro batch under `.factory/retro/<date>/`: it **edited the spec station's skill and the spec template** to require a validation section for any input-accepting endpoint (so the omission can't recur), and **proposed a dormant gate policy** to auto-approve `spec_review` for low-risk, read-only changes — explicitly flagged as needing more evidence before activation.
 5. Once that policy was signed and live, a new **read-only** item (WI-0002) ran `triage → spec → spec_review → implement` and the spec gate was cleared by `[policy:auto-approve-readonly-spec]` with **human touches: 0**.
 
 One intervention. One generalization. A gate that now clears itself for a whole class of work. That's the loop closing.
