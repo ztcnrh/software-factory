@@ -32,17 +32,19 @@ def available() -> bool:
     return shutil.which("gh") is not None
 
 
-def _run2(args: list[str]) -> tuple[int, str, str]:
-    """Run gh keeping stdout and stderr apart — stdout must stay clean for the
-    ``--json`` callers."""
+def _run(args: list[str]) -> tuple[int, str, str]:
+    """Run gh, keeping stdout and stderr apart — stdout must stay clean for the
+    ``--json`` callers that parse it."""
     if not available():
         return 127, "", "gh not installed"
     p = subprocess.run(["gh", *args], capture_output=True, text=True)
     return p.returncode, p.stdout, p.stderr
 
 
-def _run(args: list[str]) -> tuple[int, str]:
-    rc, out, err = _run2(args)
+def _run_msg(args: list[str]) -> tuple[int, str]:
+    """Run gh and flatten to (code, one message) for callers that just want a
+    status line rather than the streams apart."""
+    rc, out, err = _run(args)
     return rc, (out + err).strip()
 
 
@@ -58,14 +60,14 @@ def sync_label(
         args += ["--remove-label", old]
     if repo:
         args += ["--repo", repo]
-    return _run(args)
+    return _run_msg(args)
 
 
 def comment(issue: str, body: str, repo: str | None = None) -> tuple[int, str]:
     args = ["issue", "comment", issue, "--body", body]
     if repo:
         args += ["--repo", repo]
-    return _run(args)
+    return _run_msg(args)
 
 
 def list_issues(
@@ -87,7 +89,7 @@ def list_issues(
     ]
     if repo:
         args += ["--repo", repo]
-    rc, out, err = _run2(args)
+    rc, out, err = _run(args)
     if rc != 0:
         return rc, [], (err.strip() or out.strip())
     try:

@@ -23,8 +23,8 @@ def gh_ok(monkeypatch):
     """A healthy gh: two open intake issues, label sync succeeds and is recorded."""
     synced = []
 
-    def fake_sync(issue, state, repo=None):
-        synced.append((issue, state))
+    def fake_sync(issue, new_state, old_state=None, repo=None):
+        synced.append((issue, new_state))
         return 0, ""
 
     monkeypatch.setattr(github, "available", lambda: True)
@@ -36,7 +36,9 @@ def gh_ok(monkeypatch):
 def test_intake_files_labeled_issues_as_work_items(factory_root: Path, gh_ok, capsys):
     """Each labeled issue becomes a work item at the start of the line with the
     mirror recorded (source/source_ref, URL in the body) and the conveyor label
-    applied to the issue — GitHub issues as the factory's inbox."""
+    applied to the issue — GitHub issues as the factory's inbox. The item itself
+    carries no classifier label; the mirror is its provenance, and triage assigns
+    any labels."""
     rc = main(["--root", str(factory_root), "intake"])
     assert rc == 0
     d = Dispatcher(factory_root)
@@ -46,7 +48,7 @@ def test_intake_files_labeled_issues_as_work_items(factory_root: Path, gh_ok, ca
         ("Add health endpoint", "github", "9", "triage"),
     ]
     assert "Mirrors: https://github.com/o/r/issues/7" in items[0].body
-    assert "intake" in items[0].labels
+    assert items[0].labels == []
     assert gh_ok == [("7", "triage"), ("9", "triage")]
     assert "2 ingested, 0 already on the line" in capsys.readouterr().out
 
@@ -102,7 +104,9 @@ def test_intake_keeps_the_item_when_label_sync_fails(factory_root: Path, monkeyp
         github, "list_issues", lambda label, repo=None, limit=50: (0, ISSUES[:1], "")
     )
     monkeypatch.setattr(
-        github, "sync_label", lambda issue, state, repo=None: (1, "label not found")
+        github,
+        "sync_label",
+        lambda issue, new_state, old_state=None, repo=None: (1, "label not found"),
     )
     rc = main(["--root", str(factory_root), "intake"])
     assert rc == 0
@@ -116,11 +120,11 @@ def test_list_issues_builds_the_gh_query_and_parses_json(monkeypatch):
     can't corrupt the parse."""
     calls = []
 
-    def fake_run2(args):
+    def fake_run(args):
         calls.append(args)
         return 0, '[{"number": 3, "title": "t", "body": "b", "url": "u"}]', "warning: noise"
 
-    monkeypatch.setattr(github, "_run2", fake_run2)
+    monkeypatch.setattr(github, "_run", fake_run)
     rc, issues, err = github.list_issues("intake", repo="o/r", limit=10)
     assert rc == 0 and err == ""
     assert issues == [{"number": 3, "title": "t", "body": "b", "url": "u"}]

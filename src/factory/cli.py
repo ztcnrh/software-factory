@@ -112,6 +112,23 @@ def _resolve_next(d: Dispatcher, item_id: str) -> Action:
         d.apply_auto_gate(item, action.gate, rule)
 
 
+def _mirror_issue_state(d: Dispatcher, item_id: str, prev_state: str | None) -> None:
+    """Best-effort projection of the item's state onto its source issue's
+    ``factory:<state>`` label. No-ops for local items and unchanged state (a fully
+    local factory never touches ``gh``); a failed sync warns, never blocks the
+    transition. ``prev_state`` is the label to replace — None for a new item."""
+    item = d.store.load(item_id)
+    if item.source != "github" or not item.source_ref or item.state == prev_state:
+        return
+    from .adapters import github
+
+    if not github.available():
+        return
+    rc, msg = github.sync_label(item.source_ref, new_state=item.state, old_state=prev_state)
+    if rc != 0:
+        print(f"  ⚠ issue #{item.source_ref} label sync failed: {msg}", file=sys.stderr)
+
+
 def _print_action(action: Action, line: Line) -> None:
     # Distinct glyph for the blocked gate: it means a station blocked itself (via its
     # routed `blocked` verdict or the human_required escape hatch — something only a
@@ -188,7 +205,9 @@ def cmd_new(args: argparse.Namespace) -> int:
             f"  ⚠ risk floored to {item.risk} — touches {matched} "
             "(pass --risk explicitly to override at creation)"
         )
-    _print_action(_resolve_next(d, item.id), d.line)
+    action = _resolve_next(d, item.id)
+    _mirror_issue_state(d, item.id, None)
+    _print_action(action, d.line)
     return 0
 
 
@@ -197,7 +216,10 @@ def cmd_new(args: argparse.Namespace) -> int:
 
 def cmd_next(args: argparse.Namespace) -> int:
     d = _disp(args)
-    _print_action(_resolve_next(d, args.id), d.line)
+    prev = d.store.load(args.id).state
+    action = _resolve_next(d, args.id)
+    _mirror_issue_state(d, args.id, prev)
+    _print_action(action, d.line)
     return 0
 
 
@@ -272,6 +294,7 @@ def _inline_report_flags(args: argparse.Namespace) -> list[str]:
 def cmd_advance(args: argparse.Namespace) -> int:
     d = _disp(args)
     item = d.store.load(args.id)
+    prev = item.state
     if args.report:
         clashing = _inline_report_flags(args)
         if clashing:
@@ -327,7 +350,9 @@ def cmd_advance(args: argparse.Namespace) -> int:
         )
     new_state = d.advance(item, report)
     print(f"✓ {item.id}: {report.station} → {new_state}  (verdict: {report.verdict})")
-    _print_action(_resolve_next(d, item.id), d.line)
+    action = _resolve_next(d, item.id)
+    _mirror_issue_state(d, item.id, prev)
+    _print_action(action, d.line)
     return 0
 
 
@@ -337,6 +362,7 @@ def cmd_advance(args: argparse.Namespace) -> int:
 def cmd_gate(args: argparse.Namespace) -> int:
     d = _disp(args)
     item = d.store.load(args.id)
+    prev = item.state
     gate = d.line.gate_name(item.state) or item.state
     if args.open:
         # --open binds; every decision-only flag is meaningless here — reject
@@ -424,7 +450,9 @@ def cmd_gate(args: argparse.Namespace) -> int:
         )
         return 1
     print(f"✓ {item.id}: gate {gate} → {new_state}  (decision: {args.decision})")
-    _print_action(_resolve_next(d, item.id), d.line)
+    action = _resolve_next(d, item.id)
+    _mirror_issue_state(d, item.id, prev)
+    _print_action(action, d.line)
     return 0
 
 
@@ -465,12 +493,11 @@ def cmd_intake(args: argparse.Namespace) -> int:
         item = d.new_item(
             iss["title"],
             body=body,
-            labels=[args.label],
             source="github",
             source_ref=str(iss["number"]),
         )
         line = f"✓ ingested #{iss['number']} → {item.id}: {item.title}"
-        lrc, msg = github.sync_label(str(iss["number"]), item.state, repo=args.repo)
+        lrc, msg = github.sync_label(str(iss["number"]), new_state=item.state, repo=args.repo)
         if lrc != 0:
             # Best-effort mirror: the work item exists regardless; only the
             # issue-side breadcrumb failed, and silence would hide that.
@@ -486,12 +513,15 @@ def cmd_intake(args: argparse.Namespace) -> int:
 def cmd_revive(args: argparse.Namespace) -> int:
     d = _disp(args)
     item = d.store.load(args.id)
+    prev = item.state
     new_state = d.revive(
         item, by=_resolve_actor(args), resume=args.resume, notes=args.notes or ""
     )
     how = "resumed at" if args.resume else "re-entered at"
     print(f"✓ {item.id}: revived — {how} {new_state}")
-    _print_action(_resolve_next(d, item.id), d.line)
+    action = _resolve_next(d, item.id)
+    _mirror_issue_state(d, item.id, prev)
+    _print_action(action, d.line)
     return 0
 
 
@@ -504,7 +534,9 @@ def cmd_correct(args: argparse.Namespace) -> int:
     old = item.state
     new_state = d.correct(item, args.state, by=_resolve_actor(args), reason=args.reason)
     print(f"✓ {item.id}: corrected {old} → {new_state}  (audited; the mistaken event stays)")
-    _print_action(_resolve_next(d, item.id), d.line)
+    action = _resolve_next(d, item.id)
+    _mirror_issue_state(d, item.id, old)
+    _print_action(action, d.line)
     return 0
 
 

@@ -4,7 +4,7 @@ A personal, self-improving **software factory** — an agentic delivery line tha
 
 It's the working prototype of the "factory engineering" idea: you stop hand-building each feature and instead operate (and continuously improve) a machine that builds features for you. The job shifts from writing code to raising one number — the **one-shot ship rate**, *the share of changes that ship with no human rework (no send-back, correction, or unblock), at an acceptable cost*. You stay in the loop and own the ship decision; the aim isn't to remove your review but to make the line good enough that review becomes a rubber-stamp — and to drive that share up over time.
 
-This repo is the **factory** (the reusable machinery). It operates *on* your project repos. A worked example lives next door in `[../software-factory-demo](../software-factory-demo)`.
+This repo is the **factory** (the reusable machinery). It operates *on* your project repos.
 
 ## The loop
 
@@ -62,13 +62,13 @@ You don't need any cloud accounts to start — it's fully local. Wire up [cloud 
 - **[FACTORY-MANUAL.md](FACTORY-MANUAL.md)** — start here. What *you* do: setup, driving the line day to day, the gate playbook, and the homework checklist (accounts/secrets).
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — how it all fits: the stations, the dispatcher/state machine, the conveyor, the triggers.
 - **[docs/CODE-TOUR.md](docs/CODE-TOUR.md)** — want to peek under the hood? The code-reading path: which files first, and the handful of functions that make everything else click.
-- **[docs/LEARNING-LOOP.md](docs/LEARNING-LOOP.md)** — the crown jewel: interventions → retro → self-improvement, with the demo as a worked example.
+- **[docs/LEARNING-LOOP.md](docs/LEARNING-LOOP.md)** — the crown jewel: interventions → retro → self-improvement, with a worked example.
 - **[docs/CLOUD-AUTONOMY.md](docs/CLOUD-AUTONOMY.md)** — enabling the unattended GitHub Actions layer (opt-in).
 - **[docs/EXTENDING.md](docs/EXTENDING.md)** — adding stations, language/tracker adapters, and a candid take on what's still hard.
 - **[docs/OPTIMIZATION-AREAS.md](docs/OPTIMIZATION-AREAS.md)** — a living log of deliberate v1 tradeoffs and the ideas for improving them later.
 
 ## Status
 
-v1, built and proven end-to-end on the demo repo (a full feature shipped through the whole line, one human intervention captured, and the Retro station then auto-cleared that class of work — note the demo predates the tail reshape to a single `deploy` station). The engine has unit tests (`uv run pytest`); the cloud layer is the least-exercised part and ships disabled. It is meant to be used, stress-tested on real projects, and improved — by you, and increasingly by itself.
+v1, built and proven end-to-end — a full feature driven through the whole line, one human intervention captured, and the Retro station then auto-cleared that class of work. The engine has unit tests (`uv run pytest`); the cloud layer is the least-exercised part and ships disabled. It is meant to be used, stress-tested on real projects, and improved — by you, and increasingly by itself.
 
 *Inspired by Zach Lloyd's "factory engineering" thesis and the patterns in [warpdotdev/common-skills](https://github.com/warpdotdev/common-skills) (the council and cross-critique review patterns, spec-driven implementation).*

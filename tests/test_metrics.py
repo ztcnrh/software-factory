@@ -111,17 +111,52 @@ def test_cost_is_counted_once_at_station_events_not_re_added_at_ship(factory_roo
     assert s["cost_per_shipped"] == 0.5
 
 
-def test_a_torn_ledger_line_is_skipped_with_a_warning_not_fatal(factory_root: Path):
+def test_a_torn_shard_line_is_skipped_with_a_warning_not_fatal(factory_root: Path):
     """A crash mid-append can leave one torn line; that must not take down every
     future metrics read — the line is skipped and reported, mirroring the retro
     ledger's malformed-line discipline."""
     m = Metrics(factory_root)
     m.emit(kind="shipped", item="WI-1", steers=0, cost=1.0)
-    with open(m.path, "a") as f:
-        f.write('{"kind": "shipped", "item": "WI-2", TORN\n')
+    with open(m.events_dir / "WI-1.jsonl", "a") as f:
+        f.write('{"kind": "shipped", "item": "WI-1", TORN\n')
     s = m.summary()
     assert s["shipped"] == 1  # the good event still counts
     assert len(m.warnings) == 1 and "unreadable" in m.warnings[0]
+
+
+def test_a_torn_shard_does_not_hide_other_items_events(factory_root: Path):
+    """Sharding must not turn one item's torn line into another item's data loss —
+    the damage stays scoped to the shard that holds it."""
+    m = Metrics(factory_root)
+    m.emit(kind="shipped", item="WI-1", steers=0, cost=1.0)
+    m.emit(kind="shipped", item="WI-2", steers=0, cost=1.0)
+    with open(m.events_dir / "WI-1.jsonl", "a") as f:
+        f.write("{TORN\n")
+    assert m.summary()["shipped"] == 2  # both good events survive
+    assert "WI-1.jsonl" in m.warnings[0]  # the warning names the damaged shard
+
+
+def test_events_are_sharded_one_file_per_item(factory_root: Path):
+    """Each item's events land in their own shard (metrics/events/<item>.jsonl) and
+    never in a shared log — that single-writer-per-file layout is what lets two
+    engineers drive different items without a metrics merge conflict."""
+    m = Metrics(factory_root)
+    m.emit(kind="created", item="WI-1")
+    m.emit(kind="created", item="WI-2")
+    shards = {p.name for p in (factory_root / ".factory" / "metrics" / "events").glob("*.jsonl")}
+    assert shards == {"WI-1.jsonl", "WI-2.jsonl"}
+    assert not (factory_root / ".factory" / "metrics" / "events.jsonl").exists()
+
+
+def test_events_reconstruct_across_shards_in_timestamp_order(factory_root: Path):
+    """events() reassembles the global log from every shard, ordered by ts — so a
+    reader (and the trend window) sees the true chronology regardless of which
+    item's file each event lives in."""
+    m = Metrics(factory_root)
+    m.emit(kind="a", item="WI-2")  # emitted first, but a later shard alphabetically
+    m.emit(kind="b", item="WI-1")
+    m.emit(kind="c", item="WI-2")
+    assert [e["kind"] for e in m.events()] == ["a", "b", "c"]
 
 
 def test_clean_approvals_do_not_register_as_steers(factory_root: Path):
