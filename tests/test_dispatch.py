@@ -397,6 +397,86 @@ def test_a_human_touch_opens_a_fresh_attempt_budget(factory_root: Path):
     assert item.attempts["implement"] == 1  # lifetime churn history is untouched
 
 
+def _to_spec_review(d: Dispatcher, artifacts: list[str] | None = None) -> WorkItem:
+    """Drive a fresh item to the spec_review gate, optionally with artifacts."""
+    item = d.new_item("Feature")
+    _advance(d, item, "needs_spec")
+    _advance(d, item, "ready_for_review", artifacts=artifacts or [])
+    return item
+
+
+def test_open_gate_binds_and_a_clean_decision_consumes_the_binding(factory_root: Path):
+    """The TOCTOU guard's happy path: open snapshots the reviewed content, an
+    unchanged decision passes, and the binding is consumed (not left to haunt
+    a later gate)."""
+    spec = factory_root / "spec.md"
+    spec.write_text("v1")
+    d = Dispatcher(factory_root)
+    item = _to_spec_review(d, artifacts=["spec.md"])
+    d.open_gate(item, by="alice", packet=None)
+    assert item.metadata["gate_open"]["gate"] == "spec_review"
+    d.gate(item, GateDecision(gate="spec_review", decision="approved", by="alice"))
+    assert item.state == "implement"
+    assert "gate_open" not in item.metadata
+
+
+def test_gate_refuses_a_decision_when_reviewed_content_moved(factory_root: Path):
+    """What the human approves must be what the human saw: an artifact edited
+    between --open and --decision refuses the decision, naming the file."""
+    from factory.dispatch import GateDriftError
+
+    spec = factory_root / "spec.md"
+    spec.write_text("v1")
+    d = Dispatcher(factory_root)
+    item = _to_spec_review(d, artifacts=["spec.md"])
+    d.open_gate(item, by="alice")
+    spec.write_text("v2 — silently changed after review")
+    with pytest.raises(GateDriftError, match="spec.md"):
+        d.gate(item, GateDecision(gate="spec_review", decision="approved", by="alice"))
+    assert item.state == "spec_review"  # nothing routed, nothing saved half-way
+
+
+def test_accept_drift_records_the_decision_and_logs_what_moved(factory_root: Path):
+    """The human can consciously approve past drift — but the drift lands in
+    history, so the audit trail never shows a clean approval that wasn't."""
+    spec = factory_root / "spec.md"
+    spec.write_text("v1")
+    d = Dispatcher(factory_root)
+    item = _to_spec_review(d, artifacts=["spec.md"])
+    d.open_gate(item, by="alice")
+    spec.write_text("v2")
+    d.gate(
+        item,
+        GateDecision(gate="spec_review", decision="approved", by="alice"),
+        accept_drift=True,
+    )
+    assert item.state == "implement"
+    assert any("despite drift" in (e.note or "") for e in item.history)
+
+
+def test_history_growth_after_open_counts_as_drift(factory_root: Path):
+    """Any event landing on the item after --open means the reviewed state moved
+    — the binding covers the item's journey, not just its files."""
+    from factory.dispatch import GateDriftError
+
+    d = Dispatcher(factory_root)
+    item = _to_spec_review(d)
+    d.open_gate(item, by="alice")
+    item.log(kind="note", actor="factory", note="something happened mid-review")
+    with pytest.raises(GateDriftError, match="history advanced"):
+        d.gate(item, GateDecision(gate="spec_review", decision="approved", by="alice"))
+
+
+def test_an_unbound_gate_decision_still_works(factory_root: Path):
+    """Compatibility pin: cloud flows and quick local decisions may skip --open;
+    the decision must proceed (just without the drift check), not hard-require
+    a binding."""
+    d = Dispatcher(factory_root)
+    item = _to_spec_review(d)
+    d.gate(item, GateDecision(gate="spec_review", decision="approved", by="alice"))
+    assert item.state == "implement"
+
+
 def test_sensitive_text_floors_risk_at_intake(factory_root: Path):
     """The deterministic backstop: an item touching auth/payments/etc. enters at
     high risk unless a human explicitly said otherwise — an under-triaged

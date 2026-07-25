@@ -77,6 +77,71 @@ def test_gate_produced_flags_are_mutually_exclusive(factory_root: Path, capsys):
     assert "not allowed with argument" in capsys.readouterr().err
 
 
+def test_gate_open_rejects_decision_only_flags(factory_root: Path, capsys):
+    """--open binds a review; decision flags riding along would be silently
+    meaningless — reject them loudly instead of half-doing two verbs."""
+    item_id = _item_at(factory_root, "spec_review")
+    rc = main(
+        ["--root", str(factory_root), "gate", item_id, "--open", "--decision", "approved"]
+    )
+    assert rc == 1
+    assert "--open only binds" in capsys.readouterr().err
+
+
+def test_gate_requires_a_decision_or_an_open(factory_root: Path, capsys):
+    """A bare `factory gate <id>` does nothing recordable — demand one of the
+    two verbs rather than exiting silently successful."""
+    item_id = _item_at(factory_root, "spec_review")
+    rc = main(["--root", str(factory_root), "gate", item_id])
+    assert rc == 1
+    assert "--decision is required" in capsys.readouterr().err
+
+
+def test_gate_packet_flag_requires_open(factory_root: Path, capsys):
+    """--packet outside --open would be silently dropped; the caller meant to
+    bind a review, so say so."""
+    item_id = _item_at(factory_root, "spec_review")
+    rc = main(
+        ["--root", str(factory_root), "gate", item_id, "--decision", "approved",
+         "--packet", "nowhere.md"]
+    )
+    assert rc == 1
+    assert "--packet only means something with --open" in capsys.readouterr().err
+
+
+def test_gate_open_decide_drift_flow_end_to_end(factory_root: Path, capsys):
+    """The full CLI arc: open binds (with a packet file), a post-review edit is
+    refused with the culprit named, and --accept-drift records it — the codex
+    TOCTOU guard as an operator actually drives it."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("gated work")
+    item.state = "ship_review"
+    item.artifacts = ["evidence.md"]
+    d.store.save(item)
+    (factory_root / "evidence.md").write_text("all tests green")
+    packet = factory_root / "packet.md"
+    packet.write_text("# Review packet\nAll good.")
+
+    rc = main(
+        ["--root", str(factory_root), "gate", item.id, "--open", "--packet", str(packet)]
+    )
+    assert rc == 0
+    assert "gate opened" in capsys.readouterr().out
+
+    (factory_root / "evidence.md").write_text("actually, one test was skipped")
+    rc = main(["--root", str(factory_root), "gate", item.id, "--decision", "approved"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "evidence.md" in err and "--accept-drift" in err
+
+    rc = main(
+        ["--root", str(factory_root), "gate", item.id, "--decision", "approved",
+         "--accept-drift"]
+    )
+    assert rc == 0
+    assert d.store.load(item.id).state == "deploy"
+
+
 def test_gate_steering_without_notes_warns_but_records(factory_root: Path, capsys):
     """A send-back with no --notes still goes through (never block a human at a
     gate), but warns loudly: an intervention record without a why is a learning-loop

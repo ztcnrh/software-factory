@@ -11,6 +11,7 @@ module only decides WHAT should happen next and records WHAT happened.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,11 @@ from .model import (
 )
 from .policies import Policies
 from .store import Store
+
+
+class GateDriftError(Exception):
+    """A gate decision arrived after the reviewed content moved — the approval
+    would bind to something the human never saw. Caught at the CLI boundary."""
 
 
 @dataclass
@@ -265,13 +271,65 @@ class Dispatcher:
         )
         return item.state
 
-    def gate(self, item: WorkItem, decision: GateDecision, produced: str = "") -> str:
+    def open_gate(self, item: WorkItem, by: str, packet: str | None = None) -> dict:
+        """Bind the upcoming human decision to what is on disk right now.
+
+        Snapshots the review packet, the item's artifact files, and the PR
+        pointer (content hashes, local files only — stays offline), so ``gate``
+        can refuse a decision if any of it moved between review and approval.
+        What the human approves is what the human saw."""
+        state = item.state
+        if not self.line.is_gate(state):
+            raise LineError(f"{item.id} is at {state!r}, not a human gate — nothing to open")
+        gate_name = self.line.gate_name(state) or state
+        snap = self._gate_snapshot(item, packet)
+        item.log(
+            kind="gate_open",
+            from_state=state,
+            actor=by,
+            note=(f"review packet {packet}" if packet else "no packet file")
+            + f"; decision bound over pr + {len(snap['artifacts'])} artifact(s)",
+        )
+        snap["gate"] = gate_name
+        # Recorded after the open event: ANY later history growth is drift.
+        snap["history_len"] = len(item.history)
+        item.metadata["gate_open"] = snap
+        self.store.save(item)
+        return snap
+
+    def gate(
+        self,
+        item: WorkItem,
+        decision: GateDecision,
+        produced: str = "",
+        accept_drift: bool = False,
+    ) -> str:
         """Record a human's decision at a gate; capture an intervention if the
-        human steered (revision / not-ready / park / explicit change)."""
+        human steered (revision / not-ready / park / explicit change). If the
+        gate was opened (``open_gate``), the decision is checked against the
+        bound snapshot and refused on drift unless ``accept_drift``."""
         state = item.state
         if not self.line.is_gate(state):
             raise LineError(f"{item.id} is at {state!r}, not a human gate")
         gate_name = self.line.gate_name(state) or state
+        bound = item.metadata.get("gate_open")
+        if bound and bound.get("gate") == gate_name:
+            drift = self._gate_drift(item, bound)
+            if drift and not accept_drift:
+                raise GateDriftError(
+                    f"{item.id}: the content reviewed at {gate_name} moved since the gate "
+                    "opened:\n  - " + "\n  - ".join(drift)
+                )
+            if drift:
+                item.log(
+                    kind="note",
+                    actor="factory",
+                    note="gate decision recorded despite drift: " + "; ".join(drift),
+                )
+            item.metadata.pop("gate_open", None)
+        elif bound:
+            # A leftover binding from some other gate state — stale, not load-bearing.
+            item.metadata.pop("gate_open", None)
         nxt = self.line.route(state, decision.decision)
         item.human_touches += 1
         item.log(
@@ -406,6 +464,43 @@ class Dispatcher:
         return nxt
 
     # --- internals ----------------------------------------------------------
+    def _hash_file(self, rel: str) -> str:
+        """Content hash of a root-relative file, or "missing" — so an artifact
+        that vanishes between open and decide reads as drift, not an error."""
+        p = self.root / rel
+        if not p.is_file():
+            return "missing"
+        return hashlib.sha256(p.read_bytes()).hexdigest()
+
+    def _gate_snapshot(self, item: WorkItem, packet: str | None) -> dict:
+        return {
+            "packet": packet,
+            "packet_hash": self._hash_file(packet) if packet else None,
+            "pr": item.pr,
+            "artifacts": {a: self._hash_file(a) for a in sorted(item.artifacts)},
+        }
+
+    def _gate_drift(self, item: WorkItem, bound: dict) -> list[str]:
+        """Everything that moved since ``open_gate`` — named, so the refusal
+        tells the human exactly what to re-review."""
+        drift: list[str] = []
+        grew = len(item.history) - int(bound.get("history_len", 0))
+        if grew:
+            drift.append(f"item history advanced by {grew} event(s) since the gate opened")
+        if item.pr != bound.get("pr"):
+            drift.append(f"pr changed: {bound.get('pr')!r} → {item.pr!r}")
+        if bound.get("packet") and self._hash_file(bound["packet"]) != bound.get("packet_hash"):
+            drift.append(f"review packet changed: {bound['packet']}")
+        old = bound.get("artifacts", {})
+        now = {a: self._hash_file(a) for a in sorted(item.artifacts)}
+        for a, h in now.items():
+            if a not in old:
+                drift.append(f"artifact added since open: {a}")
+            elif h != old[a]:
+                drift.append(f"artifact changed since open: {a}")
+        drift += [f"artifact removed since open: {a}" for a in old if a not in now]
+        return drift
+
     @staticmethod
     def _runs_this_epoch(item: WorkItem, state: str) -> int:
         """Completed runs of ``state`` since the last human touch (gate, correct,
