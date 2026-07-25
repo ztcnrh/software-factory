@@ -98,6 +98,32 @@ def test_trend_has_no_prior_window_until_enough_ships(factory_root: Path):
     assert t["prior_one_shot_rate"] is None
 
 
+def test_cost_is_counted_once_at_station_events_not_re_added_at_ship(factory_root: Path):
+    """A `shipped` event repeats the item's cumulative cost for per-ship context;
+    the total must sum station spend once, not re-add that cumulative on top —
+    the double-count an external grading actually caught in the wild."""
+    m = Metrics(factory_root)
+    m.emit(kind="station", item="WI-1", station="implement", verdict="implemented", cost=0.3)
+    m.emit(kind="station", item="WI-1", station="verify", verdict="verified", cost=0.2)
+    m.emit(kind="shipped", item="WI-1", steers=0, cost=0.5)  # cumulative, not new spend
+    s = m.summary()
+    assert s["total_cost"] == 0.5
+    assert s["cost_per_shipped"] == 0.5
+
+
+def test_a_torn_ledger_line_is_skipped_with_a_warning_not_fatal(factory_root: Path):
+    """A crash mid-append can leave one torn line; that must not take down every
+    future metrics read — the line is skipped and reported, mirroring the retro
+    ledger's malformed-line discipline."""
+    m = Metrics(factory_root)
+    m.emit(kind="shipped", item="WI-1", steers=0, cost=1.0)
+    with open(m.path, "a") as f:
+        f.write('{"kind": "shipped", "item": "WI-2", TORN\n')
+    s = m.summary()
+    assert s["shipped"] == 1  # the good event still counts
+    assert len(m.warnings) == 1 and "unreadable" in m.warnings[0]
+
+
 def test_clean_approvals_do_not_register_as_steers(factory_root: Path):
     """A gate stop that required the human's presence but no change (changed=False)
     is not rework — it must not inflate human_steers or block a one-shot ship."""

@@ -460,7 +460,10 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_metrics(args: argparse.Namespace) -> int:
-    s = _disp(args).metrics.summary()
+    m = _disp(args).metrics
+    s = m.summary()
+    for w in m.warnings:
+        print(f"⚠ metrics ledger: {w}", file=sys.stderr)
     print("\n📈 Factory metrics — North Star: one-shot ship rate\n")
     print(
         f"  one-shot ship rate: {s['one_shot_ship_rate']:.0%}  "
