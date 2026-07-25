@@ -27,7 +27,7 @@ from .model import (
     WorkItem,
     risk_floor_matches,
 )
-from .policies import Policies
+from .policies import Policies, PolicyState
 from .store import Store
 
 
@@ -64,9 +64,16 @@ class Dispatcher:
         self.root = Path(root)
         self.line = Line.load(self.root / "line.yml")
         self.policies = Policies.load(self.root / "policies.yml")
+        self.policy_state = PolicyState(self.root)
         self.store = Store(self.root)
         self.metrics = Metrics(self.root)
         self.interventions = Interventions(self.root)
+
+    def active_auto_rule(self, gate: str, item: WorkItem) -> dict | None:
+        """The one lookup every auto-clear goes through: policies.yml rules
+        filtered by the suspension overlay, so a demoted rule can't fire."""
+        suspended = frozenset(self.policy_state.suspended())
+        return self.policies.auto_decision(gate, item, suspended=suspended)
 
     # --- creation -----------------------------------------------------------
     def new_item(
@@ -140,7 +147,7 @@ class Dispatcher:
             )
         if self.line.is_gate(state):
             gate = self.line.gate_name(state) or state
-            rule = self.policies.auto_decision(gate, item)
+            rule = self.active_auto_rule(gate, item)
             if rule:
                 return Action(
                     type="auto_gate",
@@ -256,6 +263,7 @@ class Dispatcher:
             # at this station. Count it as a human step-in, or the one-shot ship
             # rate would lie.
             item.steers += 1
+            self._suspend_clearing_rules(item, f"blocked at {state} ({note})")
         if cap_note:
             item.log(kind="note", actor="factory", note=cap_note)
         if report.notes:
@@ -377,6 +385,9 @@ class Dispatcher:
                 actor="factory",
                 note=f"intervention recorded at {path.relative_to(self.root)}",
             )
+            self._suspend_clearing_rules(
+                item, f"human steer at {gate_name} ({decision.decision})"
+            )
         self.store.save(item)
         self.metrics.emit(
             kind="gate",
@@ -474,6 +485,12 @@ class Dispatcher:
         )
         item.state = nxt
         self._note_park(item, state, nxt)
+        # Remember who vouched for this item: if it later needs human rework,
+        # every rule that auto-cleared it gets suspended (the demotion half of
+        # the autonomy ratchet — promotion stays human, in policies.yml).
+        cleared_by = item.metadata.setdefault("auto_cleared_by", [])
+        if rule["id"] not in cleared_by:
+            cleared_by.append(rule["id"])
         self.store.save(item)
         self.metrics.emit(
             kind="gate",
@@ -487,6 +504,24 @@ class Dispatcher:
         return nxt
 
     # --- internals ----------------------------------------------------------
+    def _suspend_clearing_rules(self, item: WorkItem, why: str) -> None:
+        """The demotion half of the autonomy ratchet: an item needing human
+        rework suspends every policy rule that auto-cleared it. Conservative on
+        purpose — the gate returns to the human, who reviews and reinstates
+        (``factory policy reinstate``) if the rule wasn't at fault."""
+        for rule_id in item.metadata.get("auto_cleared_by", []):
+            if self.policy_state.suspend(rule_id, item.id, why):
+                item.log(
+                    kind="note",
+                    actor="factory",
+                    note=f"policy {rule_id!r} suspended: it auto-cleared this item, which "
+                    f"then needed a human ({why}). Reinstate after review: "
+                    f"factory policy reinstate {rule_id}",
+                )
+                self.metrics.emit(
+                    kind="policy_suspended", rule=rule_id, item=item.id, why=why
+                )
+
     def _hash_file(self, rel: str) -> str:
         """Content hash of a root-relative file, or "missing" — so an artifact
         that vanishes between open and decide reads as drift, not an error."""

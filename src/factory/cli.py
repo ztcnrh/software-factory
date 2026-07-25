@@ -29,6 +29,7 @@ from .dispatch import Action, Dispatcher, GateDriftError
 from .ledger import CLOSED, STATUSES, Ledger
 from .line import Line
 from .model import GateDecision, StationReport, WorkItem
+from .policies import PolicyError
 from .retro import briefing
 
 # Keyed by Action.type. The `blocked` gate is not an action type — it surfaces as
@@ -107,7 +108,7 @@ def _resolve_next(d: Dispatcher, item_id: str) -> Action:
         action = d.next_action(item)
         if action.type != "auto_gate":
             return action
-        rule = d.policies.auto_decision(action.gate, item)
+        rule = d.active_auto_rule(action.gate, item)
         d.apply_auto_gate(item, action.gate, rule)
 
 
@@ -661,6 +662,41 @@ def cmd_ledger(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_policy(args: argparse.Namespace) -> int:
+    d = _disp(args)
+    if args.policy_cmd == "list":
+        suspended = d.policy_state.suspended()
+        if not d.policies.rules and not suspended:
+            print("(no gate policies defined — policies.yml has no rules)")
+            return 0
+        for rule in d.policies.rules:
+            rid = rule["id"]
+            if rid in suspended:
+                s = suspended[rid]
+                status = f"SUSPENDED since {s['ts']} — {s['item']}: {s['why']}"
+            elif rule.get("approved_by"):
+                status = f"active (signed by {rule['approved_by']})"
+            else:
+                status = "dormant (unsigned)"
+            print(f"  {rid}  [{status}]")
+            print(f"        gate: {rule['gate']}  decision: {rule['decision']}")
+        # A suspension whose rule vanished from policies.yml would otherwise be
+        # invisible — surface it rather than let the overlay rot silently.
+        for rid in suspended:
+            if not any(r.get("id") == rid for r in d.policies.rules):
+                print(f"  {rid}  [SUSPENDED, but no longer in policies.yml — stale overlay "
+                      f"entry; reinstate to clear it]")
+        return 0
+    # reinstate
+    try:
+        d.policy_state.reinstate(args.rule_id, by=_resolve_actor(args), notes=args.notes or "")
+    except PolicyError as e:
+        print(f"✗ {e}", file=sys.stderr)
+        return 1
+    print(f"✓ policy {args.rule_id!r} reinstated — it may auto-clear its gate again")
+    return 0
+
+
 def cmd_labels(args: argparse.Namespace) -> int:
     import shutil
     import subprocess
@@ -1160,6 +1196,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Only rows currently at this status",
     )
     ll.set_defaults(func=cmd_ledger)
+
+    # -- policy --
+    s = sub.add_parser(
+        "policy",
+        help="Inspect gate policies (incl. suspensions) or reinstate a suspended rule",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  factory policy list\n"
+            '  factory policy reinstate low-risk-docs --notes "rule was fine; the steer was\n'
+            '      about wording, not the gate"\n'
+            "\n"
+            "Autonomy is an asymmetric ratchet. Promotion is human: a rule fires only once\n"
+            "someone signs approved_by in policies.yml. Demotion is automatic: when an item a\n"
+            "rule auto-cleared later needs human rework (a gate steer or a block), the rule is\n"
+            "suspended — its gate goes back to the human — until a human reviews what happened\n"
+            "and reinstates it here. Suspensions live in .factory/policy-state.json (engine-\n"
+            "owned overlay); policies.yml stays yours alone to edit."
+        ),
+    )
+    psub = s.add_subparsers(dest="policy_cmd", required=True)
+    pl = psub.add_parser("list", help="Every rule with its live status (active/dormant/suspended)")
+    pl.set_defaults(func=cmd_policy)
+    pr = psub.add_parser("reinstate", help="Re-arm a suspended rule after reviewing its failure")
+    pr.add_argument("rule_id", help="The rule id from policies.yml")
+    pr.add_argument("--notes", help="Why it's safe to re-arm (kept in the overlay's history)")
+    pr.add_argument(
+        "--by",
+        help="Who is reinstating; defaults to $FACTORY_USER or your git identity",
+    )
+    pr.set_defaults(func=cmd_policy)
 
     s = sub.add_parser("labels", help="List the factory labels, or create them in a repo (gh)")
     s.add_argument("--github", action="store_true", help="Create the labels via the gh CLI")

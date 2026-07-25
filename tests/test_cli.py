@@ -78,6 +78,44 @@ def test_gate_produced_flags_are_mutually_exclusive(factory_root: Path, capsys):
     assert "not allowed with argument" in capsys.readouterr().err
 
 
+def test_policy_list_and_reinstate_flow(factory_root: Path, capsys):
+    """The operator's view of the ratchet: list shows live status per rule
+    (active/dormant/suspended with the why), reinstate re-arms, and a second
+    reinstate fails loudly instead of pretending."""
+    import yaml
+
+    from factory.policies import PolicyState
+
+    (factory_root / "policies.yml").write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "rules": [
+                    {"id": "r-docs", "gate": "spec_review", "decision": "approved",
+                     "when": {"labels_any": ["docs"]}, "approved_by": "johndoe"},
+                    {"id": "r-dormant", "gate": "ship_review", "decision": "approved",
+                     "when": "all", "approved_by": None},
+                ],
+            }
+        )
+    )
+    PolicyState(factory_root).suspend("r-docs", "WI-0009", "steer at ship_review")
+    rc = main(["--root", str(factory_root), "policy", "list"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "SUSPENDED" in out and "WI-0009" in out
+    assert "dormant" in out
+
+    rc = main(["--root", str(factory_root), "policy", "reinstate", "r-docs",
+               "--by", "johndoe", "--notes", "reviewed"])
+    assert rc == 0
+    rc = main(["--root", str(factory_root), "policy", "list"])
+    assert "SUSPENDED" not in capsys.readouterr().out.replace("reinstate", "")
+    rc = main(["--root", str(factory_root), "policy", "reinstate", "r-docs"])
+    assert rc == 1
+    assert "not suspended" in capsys.readouterr().err
+
+
 def test_brief_writes_the_run_packet_and_reuses_it(factory_root: Path, capsys):
     """The driver→station handoff becomes a file on disk: brief writes
     runs/<state>-<attempt>-brief.md once, and a re-run reuses it rather than

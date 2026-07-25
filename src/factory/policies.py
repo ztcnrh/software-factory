@@ -5,10 +5,21 @@ proposes new rules (written elsewhere for you to review); a rule only takes
 effect once you set ``approved_by`` on it in ``policies.yml``. Each approved rule
 permanently removes a class of work from your plate — this is the lever that
 raises the "shipped without human intervention" metric over time.
+
+Autonomy here is an asymmetric ratchet: **promotion is human** (``approved_by``
+in policies.yml — config the operator owns), **demotion is automatic**. When an
+item a rule auto-cleared later needs human rework (a steer, a block), the
+dispatcher suspends that rule in the engine-owned overlay (``PolicyState``,
+``.factory/policy-state.json``) — the gate returns to the human until someone
+reviews and reinstates. The yaml stays the human's intent; the overlay is the
+observed-outcome record the engine may write.
 """
 
 from __future__ import annotations
 
+import json
+import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -39,13 +50,19 @@ class Policies:
         with open(p) as f:
             return cls(yaml.safe_load(f) or {}, p)
 
-    def auto_decision(self, gate: str, item: WorkItem) -> dict | None:
-        """Return an *active* (approved) rule that clears this gate for this item,
-        or ``None`` if a human is still required."""
+    def auto_decision(
+        self, gate: str, item: WorkItem, suspended: frozenset[str] | set[str] = frozenset()
+    ) -> dict | None:
+        """Return an *active* (approved, not suspended) rule that clears this
+        gate for this item, or ``None`` if a human is still required. The caller
+        (the dispatcher) supplies the suspended set from ``PolicyState`` — this
+        module stays pure config evaluation."""
         for rule in self.rules:
             if rule.get("gate") != gate:
                 continue
             if not rule.get("approved_by"):  # dormant until a human signs it
+                continue
+            if rule.get("id") in suspended:  # demoted by an observed failure
                 continue
             if self._matches(rule.get("when", {}), item):
                 return rule
@@ -102,3 +119,58 @@ class Policies:
             if _RISK_ORDER.get(item.risk, 3) > limit:
                 return False
         return True
+
+
+def _now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+class PolicyState:
+    """The engine-owned overlay on ``policies.yml``: which signed rules are
+    currently *suspended* by an observed failure, plus the suspend/reinstate
+    audit trail. Kept apart from the yaml on purpose — the yaml is the human's
+    intent and only humans edit it; this file is what the engine observed."""
+
+    def __init__(self, root: str | Path):
+        self.path = Path(root) / ".factory" / "policy-state.json"
+
+    def _load(self) -> dict:
+        if not self.path.exists():
+            return {"suspended": {}, "history": []}
+        data = json.loads(self.path.read_text())
+        data.setdefault("suspended", {})
+        data.setdefault("history", [])
+        return data
+
+    def _save(self, data: dict) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_name(self.path.name + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2))
+        os.replace(tmp, self.path)
+
+    def suspended(self) -> dict[str, dict]:
+        """rule id → {ts, item, why} for every currently-suspended rule."""
+        return self._load()["suspended"]
+
+    def suspend(self, rule_id: str, item_id: str, why: str) -> bool:
+        """Suspend a rule (idempotent). Returns True if this call suspended it."""
+        data = self._load()
+        if rule_id in data["suspended"]:
+            return False
+        entry = {"ts": _now(), "item": item_id, "why": why}
+        data["suspended"][rule_id] = entry
+        data["history"].append({"event": "suspended", "rule": rule_id, **entry})
+        self._save(data)
+        return True
+
+    def reinstate(self, rule_id: str, by: str, notes: str = "") -> None:
+        """A human re-arms a suspended rule after review."""
+        data = self._load()
+        if rule_id not in data["suspended"]:
+            known = ", ".join(sorted(data["suspended"])) or "(none)"
+            raise PolicyError(f"{rule_id!r} is not suspended; suspended rules: {known}")
+        del data["suspended"][rule_id]
+        data["history"].append(
+            {"event": "reinstated", "rule": rule_id, "ts": _now(), "by": by, "notes": notes}
+        )
+        self._save(data)

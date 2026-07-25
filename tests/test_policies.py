@@ -4,8 +4,9 @@ import pytest
 import yaml
 
 from factory.dispatch import Dispatcher
-from factory.model import StationReport, WorkItem
-from factory.policies import Policies, PolicyError
+from factory.model import GateDecision, StationReport, WorkItem
+from factory.policies import Policies, PolicyError, PolicyState
+from factory.retro import briefing
 
 
 def _item(**kw) -> WorkItem:
@@ -79,6 +80,109 @@ def test_approved_policy_clears_gate_with_no_human_touch(factory_root: Path):
     d.apply_auto_gate(item, "spec_review", d.policies.auto_decision("spec_review", item))
     assert item.state == "implement"
     assert item.human_touches == 0
+
+
+# --- the autonomy ratchet: promotion is human, demotion is automatic ---
+
+
+def _write_docs_rule(factory_root: Path) -> None:
+    (factory_root / "policies.yml").write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "default": "require_human",
+                "rules": [
+                    {
+                        "id": "auto-docs-spec",
+                        "gate": "spec_review",
+                        "decision": "approved",
+                        "when": {"labels_any": ["docs"], "max_risk": "low"},
+                        "approved_by": "johndoe",
+                    }
+                ],
+            }
+        )
+    )
+
+
+def _auto_clear_to_implement(d: Dispatcher) -> WorkItem:
+    item = d.new_item("Docs change", labels=["docs"], risk="low")
+    d.advance(item, StationReport(station="triage", verdict="needs_spec"))
+    d.advance(item, StationReport(station="spec", verdict="ready_for_review"))
+    rule = d.active_auto_rule("spec_review", item)
+    d.apply_auto_gate(item, "spec_review", rule)
+    assert item.state == "implement"
+    return item
+
+
+def test_a_steer_on_an_auto_cleared_item_suspends_the_rule(factory_root: Path):
+    """The demotion half of the ratchet: a rule that vouched for an item which
+    later needed human rework is suspended — its gate returns to the human —
+    and the next matching item must NOT auto-clear."""
+    _write_docs_rule(factory_root)
+    d = Dispatcher(factory_root)
+    item = _auto_clear_to_implement(d)
+    d.advance(item, StationReport(station="implement", verdict="implemented"))
+    d.advance(item, StationReport(station="code_review", verdict="pass"))
+    d.advance(item, StationReport(station="verify", verdict="verified"))
+    d.gate(item, GateDecision(gate="ship_review", decision="not_ready", notes="broken UX"))
+    assert "auto-docs-spec" in d.policy_state.suspended()
+    assert any("suspended" in (e.note or "") for e in item.history)
+
+    second = d.new_item("Another docs change", labels=["docs"], risk="low")
+    d.advance(second, StationReport(station="triage", verdict="needs_spec"))
+    d.advance(second, StationReport(station="spec", verdict="ready_for_review"))
+    assert d.next_action(second).type == "human_gate"  # the gate is human again
+
+
+def test_a_block_on_an_auto_cleared_item_also_suspends(factory_root: Path):
+    """Autonomy breaking at a station (blocked) is the same failure signal as a
+    gate steer — the rules that vouched for the item are suspended either way."""
+    _write_docs_rule(factory_root)
+    d = Dispatcher(factory_root)
+    item = _auto_clear_to_implement(d)
+    d.advance(
+        item,
+        StationReport(
+            station="implement", verdict="", human_required=True, human_reason="stuck"
+        ),
+    )
+    assert item.state == "blocked"
+    assert "auto-docs-spec" in d.policy_state.suspended()
+
+
+def test_reinstate_rearms_a_suspended_rule(factory_root: Path):
+    """Reinstatement is the human's half of the ratchet: after review, the rule
+    fires again — and reinstating something never suspended fails loudly."""
+    _write_docs_rule(factory_root)
+    d = Dispatcher(factory_root)
+    d.policy_state.suspend("auto-docs-spec", "WI-0001", "steer at ship_review")
+    item = d.new_item("Docs change", labels=["docs"], risk="low")
+    d.advance(item, StationReport(station="triage", verdict="needs_spec"))
+    d.advance(item, StationReport(station="spec", verdict="ready_for_review"))
+    assert d.next_action(item).type == "human_gate"
+    d.policy_state.reinstate("auto-docs-spec", by="johndoe", notes="rule wasn't at fault")
+    assert d.next_action(item).type == "auto_gate"
+    with pytest.raises(PolicyError, match="not suspended"):
+        d.policy_state.reinstate("never-suspended", by="johndoe")
+
+
+def test_a_suspended_rule_does_not_shadow_a_later_matching_rule(factory_root: Path):
+    """Suspension removes ONE rule from consideration; another signed rule that
+    also matches must still fire — the overlay filters, it doesn't veto the gate."""
+    r1 = {"id": "r1", "gate": "g", "decision": "approved", "when": "all", "approved_by": "a"}
+    r2 = {"id": "r2", "gate": "g", "decision": "approved", "when": "all", "approved_by": "a"}
+    pol = Policies({"rules": [r1, r2]})
+    assert pol.auto_decision("g", _item(), suspended={"r1"}) == r2
+
+
+def test_briefing_surfaces_suspended_policies(factory_root: Path):
+    """A suspension the retro never hears about stays in limbo forever — the
+    briefing must list each suspended rule with its why, as retro input."""
+    PolicyState(factory_root).suspend("auto-docs-spec", "WI-0002", "steer at ship_review")
+    text = briefing(factory_root)
+    assert "Suspended gate policies" in text
+    assert "auto-docs-spec" in text and "WI-0002" in text
 
 
 # --- load-time validation: a malformed rule must fail loud, never silently widen ---
