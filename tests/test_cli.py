@@ -185,23 +185,23 @@ def test_brief_surfaces_retry_context_and_the_review_conversation(factory_root: 
 
 def test_brief_refuses_a_gate_and_points_at_the_packet_flow(factory_root: Path, capsys):
     """Briefs are for station runs; at a human gate the right artifact is the
-    review packet + gate --open — the error must teach the flow, not just fail."""
+    review packet + gate --bind — the error must teach the flow, not just fail."""
     item_id = _item_at(factory_root, "ship_review")
     rc = main(["--root", str(factory_root), "brief", item_id])
     err = capsys.readouterr().err
     assert rc == 1
-    assert "review packet" in err and "--open" in err
+    assert "review packet" in err and "--bind" in err
 
 
-def test_gate_open_rejects_decision_only_flags(factory_root: Path, capsys):
-    """--open binds a review; decision flags riding along would be silently
+def test_gate_bind_rejects_decision_only_flags(factory_root: Path, capsys):
+    """--bind binds a review; decision flags riding along would be silently
     meaningless — reject them loudly instead of half-doing two verbs."""
     item_id = _item_at(factory_root, "spec_review")
     rc = main(
-        ["--root", str(factory_root), "gate", item_id, "--open", "--decision", "approved"]
+        ["--root", str(factory_root), "gate", item_id, "--bind", "--decision", "approved"]
     )
     assert rc == 1
-    assert "--open only binds" in capsys.readouterr().err
+    assert "belong to the follow-up --decision call" in capsys.readouterr().err
 
 
 def test_gate_requires_a_decision_or_an_open(factory_root: Path, capsys):
@@ -214,7 +214,7 @@ def test_gate_requires_a_decision_or_an_open(factory_root: Path, capsys):
 
 
 def test_gate_packet_flag_requires_open(factory_root: Path, capsys):
-    """--packet outside --open would be silently dropped; the caller meant to
+    """--packet outside --bind would be silently dropped; the caller meant to
     bind a review, so say so."""
     item_id = _item_at(factory_root, "spec_review")
     rc = main(
@@ -222,10 +222,10 @@ def test_gate_packet_flag_requires_open(factory_root: Path, capsys):
          "--packet", "nowhere.md"]
     )
     assert rc == 1
-    assert "--packet only means something with --open" in capsys.readouterr().err
+    assert "--packet only means something with --bind" in capsys.readouterr().err
 
 
-def test_gate_open_decide_drift_flow_end_to_end(factory_root: Path, capsys):
+def test_gate_bind_decide_drift_flow_end_to_end(factory_root: Path, capsys):
     """The full CLI arc: open binds (with a packet file), a post-review edit is
     refused with the culprit named, and --accept-drift records it — the codex
     TOCTOU guard as an operator actually drives it."""
@@ -239,10 +239,10 @@ def test_gate_open_decide_drift_flow_end_to_end(factory_root: Path, capsys):
     packet.write_text("# Review packet\nAll good.")
 
     rc = main(
-        ["--root", str(factory_root), "gate", item.id, "--open", "--packet", str(packet)]
+        ["--root", str(factory_root), "gate", item.id, "--bind", "--packet", str(packet)]
     )
     assert rc == 0
-    assert "gate opened" in capsys.readouterr().out
+    assert "still waits on the human" in capsys.readouterr().out
 
     (factory_root / "evidence.md").write_text("actually, one test was skipped")
     rc = main(["--root", str(factory_root), "gate", item.id, "--decision", "approved"])
@@ -668,13 +668,13 @@ def test_doctor_warns_on_lineage_bindings_and_overlay_drift(factory_root: Path, 
     d = Dispatcher(factory_root)
     item = d.new_item("orphan child")
     item.parent = "WI-9999"
-    item.metadata["gate_open"] = {"gate": "spec_review"}
+    item.metadata["gate_binding"] = {"gate": "spec_review"}
     d.store.save(item)  # at triage (not a gate) with a binding + missing parent
     PolicyState(factory_root).suspend("ghost-rule", "WI-0001", "steer")
     rc = main(["--root", str(factory_root), "doctor"])
     out = capsys.readouterr().out
     assert rc == 0
     assert "WI-9999" in out
-    assert "gate_open" in out
+    assert "gate binding" in out
     assert "ghost-rule" in out
     assert "3 warning(s)" in out

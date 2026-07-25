@@ -232,7 +232,7 @@ def cmd_brief(args: argparse.Namespace) -> int:
     if action.type != "run_station":
         hint = (
             " At a human gate, render the review packet instead (templates/REVIEW-PACKET.md) "
-            "and bind it with `factory gate --open --packet <file>`."
+            "and bind it with `factory gate --bind --packet <file>`."
             if action.type == "human_gate"
             else ""
         )
@@ -364,8 +364,8 @@ def cmd_gate(args: argparse.Namespace) -> int:
     item = d.store.load(args.id)
     prev = item.state
     gate = d.line.gate_name(item.state) or item.state
-    if args.open:
-        # --open binds; every decision-only flag is meaningless here — reject
+    if args.bind:
+        # --bind only binds; every decision-only flag is meaningless here — reject
         # rather than silently drop (the caller thought it did something).
         clashing = [
             flag
@@ -383,17 +383,17 @@ def cmd_gate(args: argparse.Namespace) -> int:
         ]
         if clashing:
             print(
-                f"✗ --open only binds the review (with an optional --packet); "
-                f"drop {', '.join(clashing)} and pass them with --decision",
+                f"✗ --bind only records what is being reviewed (with an optional "
+                f"--packet); {', '.join(clashing)} belong to the follow-up --decision call",
                 file=sys.stderr,
             )
             return 1
         if args.packet and not Path(args.packet).is_file():
             print(f"✗ packet file not found: {args.packet}", file=sys.stderr)
             return 1
-        snap = d.open_gate(item, by=_resolve_actor(args), packet=args.packet)
+        snap = d.bind_gate(item, by=_resolve_actor(args), packet=args.packet)
         print(
-            f"✓ {item.id}: {snap['gate']} gate opened — the decision is now bound to "
+            f"✓ {item.id}: {snap['gate']} still waits on the human — the decision is now bound to "
             f"the reviewed content ({len(snap['artifacts'])} artifact(s)"
             + (", packet saved" if args.packet else "")
             + ")"
@@ -402,12 +402,12 @@ def cmd_gate(args: argparse.Namespace) -> int:
         return 0
     if not args.decision:
         print(
-            "✗ --decision is required (or --open to bind the review before deciding)",
+            "✗ --decision is required (or --bind to bind the review before deciding)",
             file=sys.stderr,
         )
         return 1
     if args.packet:
-        print("✗ --packet only means something with --open", file=sys.stderr)
+        print("✗ --packet only means something with --bind", file=sys.stderr)
         return 1
     decision = GateDecision(
         gate=gate,
@@ -444,7 +444,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
     except GateDriftError as e:
         print(f"✗ {e}", file=sys.stderr)
         print(
-            "  Re-review the changed content and re-open (factory gate --open ...), or pass "
+            "  Re-review the changed content and re-bind (factory gate --bind ...), or pass "
             "--accept-drift to record the decision anyway (the drift is logged).",
             file=sys.stderr,
         )
@@ -770,9 +770,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             errors.append(f"{iid}: state {item.state!r} is not on the line")
         if item.parent and item.parent not in items:
             warns.append(f"{iid}: parent {item.parent!r} does not exist (broken lineage)")
-        if item.metadata.get("gate_open") and line and not line.is_gate(item.state):
+        if item.metadata.get("gate_binding") and line and not line.is_gate(item.state):
             warns.append(
-                f"{iid}: has a gate_open binding but sits at {item.state!r} (not a gate) — "
+                f"{iid}: has a gate binding but sits at {item.state!r} (not a gate) — "
                 "stale; the next gate decision at that gate would clear it"
             )
 
@@ -1035,7 +1035,7 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  factory gate WI-0007 --open \\\n"
+            "  factory gate WI-0007 --bind \\\n"
             "      --packet .factory/work-items/WI-0007/packet-ship_review-1.md\n"
             "  factory gate WI-0007 --decision approved\n"
             "  factory gate WI-0007 --decision needs_revision --category missing-edge-case \\\n"
@@ -1044,11 +1044,15 @@ def build_parser() -> argparse.ArgumentParser:
             '  factory gate WI-0007 --decision approved --changed --notes "tightened rollout"\n'
             "\n"
             "Valid decisions depend on the gate — `factory next <id>` prints them.\n"
-            "--open first binds the decision to what's being reviewed (the packet file, the\n"
-            "item's artifact files, the PR pointer — content-hashed). If any of it changes\n"
-            "before --decision, the decision is refused with a list of what moved; re-review\n"
-            "and re-open, or --accept-drift to record anyway (logged). A decision without a\n"
-            "prior --open still works — it just isn't drift-checked.\n"
+            "Binding and deciding are two separate calls, in that order. --bind (with the\n"
+            "--packet the human is reading, and optionally --by) records what is being\n"
+            "reviewed — the packet file, the item's artifact files, the PR pointer,\n"
+            "content-hashed — and changes nothing about the gate: it still waits on the\n"
+            "human. The human's answer then comes back as a second call, --decision. If\n"
+            "any bound content changed in between, that decision is refused with a list of\n"
+            "what moved; re-review and re-bind, or --accept-drift to record anyway (logged,\n"
+            "and the human's call to make). A decision with no prior --bind still works —\n"
+            "it just isn't drift-checked.\n"
             "A steering decision (needs_revision / not_ready / park) or --changed writes an\n"
             "intervention record: give it a generalizable --notes — that's what the retro\n"
             "station learns from."
@@ -1056,14 +1060,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     s.add_argument("id", help="Work item id (WI-####)")
     s.add_argument(
-        "--open",
+        "--bind",
         action="store_true",
         help="Bind the upcoming decision to the reviewed content (hash packet/artifacts/pr) "
-        "instead of deciding now",
+        "instead of deciding now; pair it with --packet",
     )
     s.add_argument(
         "--packet",
-        help="With --open: the rendered review-packet file the human is looking at "
+        help="With --bind: the rendered review-packet file the human is looking at "
         "(saved under .factory/work-items/<id>/)",
     )
     s.add_argument(
@@ -1073,7 +1077,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument(
         "--accept-drift",
         action="store_true",
-        help="Record the decision even though bound content changed since --open "
+        help="Record the decision even though bound content changed since --bind "
         "(the drift is logged in the item history)",
     )
     s.add_argument(

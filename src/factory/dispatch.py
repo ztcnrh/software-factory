@@ -98,7 +98,7 @@ class Dispatcher:
             source_ref=source_ref,
         )
         item.log(kind="created", to_state=item.state, actor="factory")
-        # Deterministic risk floor: sensitive-sounding work enters at `high`
+        # Deterministic risk floor: sensitive-sounding work enters at RISK_FLOOR
         # unless a human explicitly set a risk at creation (their call wins —
         # recorded either way, so the audit trail says why).
         matches = risk_floor_matches(f"{title}\n{body}")
@@ -302,29 +302,30 @@ class Dispatcher:
         )
         return item.state
 
-    def open_gate(self, item: WorkItem, by: str, packet: str | None = None) -> dict:
+    def bind_gate(self, item: WorkItem, by: str, packet: str | None = None) -> dict:
         """Bind the upcoming human decision to what is on disk right now.
 
         Snapshots the review packet, the item's artifact files, and the PR
         pointer (content hashes, local files only — stays offline), so ``gate``
         can refuse a decision if any of it moved between review and approval.
-        What the human approves is what the human saw."""
+        What the human approves is what the human saw. Binding says nothing
+        about the outcome — the gate still waits on the human."""
         state = item.state
         if not self.line.is_gate(state):
-            raise LineError(f"{item.id} is at {state!r}, not a human gate — nothing to open")
+            raise LineError(f"{item.id} is at {state!r}, not a human gate — nothing to bind")
         gate_name = self.line.gate_name(state) or state
         snap = self._gate_snapshot(item, packet)
         item.log(
-            kind="gate_open",
+            kind="gate_bound",
             from_state=state,
             actor=by,
-            note=(f"review packet {packet}" if packet else "no packet file")
-            + f"; decision bound over pr + {len(snap['artifacts'])} artifact(s)",
+            note=f"decision bound to {f'packet {packet}' if packet else 'no packet file'}"
+            f" + pr + {len(snap['artifacts'])} artifact(s)",
         )
         snap["gate"] = gate_name
-        # Recorded after the open event: ANY later history growth is drift.
+        # Recorded after the bind event: ANY later history growth is drift.
         snap["history_len"] = len(item.history)
-        item.metadata["gate_open"] = snap
+        item.metadata["gate_binding"] = snap
         self.store.save(item)
         return snap
 
@@ -337,19 +338,19 @@ class Dispatcher:
     ) -> str:
         """Record a human's decision at a gate; capture an intervention if the
         human steered (revision / not-ready / park / explicit change). If the
-        gate was opened (``open_gate``), the decision is checked against the
+        gate was bound (``bind_gate``), the decision is checked against the
         bound snapshot and refused on drift unless ``accept_drift``."""
         state = item.state
         if not self.line.is_gate(state):
             raise LineError(f"{item.id} is at {state!r}, not a human gate")
         gate_name = self.line.gate_name(state) or state
-        bound = item.metadata.get("gate_open")
+        bound = item.metadata.get("gate_binding")
         if bound and bound.get("gate") == gate_name:
             drift = self._gate_drift(item, bound)
             if drift and not accept_drift:
                 raise GateDriftError(
-                    f"{item.id}: the content reviewed at {gate_name} moved since the gate "
-                    "opened:\n  - " + "\n  - ".join(drift)
+                    f"{item.id}: the content reviewed at {gate_name} moved since it was "
+                    "bound:\n  - " + "\n  - ".join(drift)
                 )
             if drift:
                 item.log(
@@ -357,10 +358,10 @@ class Dispatcher:
                     actor="factory",
                     note="gate decision recorded despite drift: " + "; ".join(drift),
                 )
-            item.metadata.pop("gate_open", None)
+            item.metadata.pop("gate_binding", None)
         elif bound:
             # A leftover binding from some other gate state — stale, not load-bearing.
-            item.metadata.pop("gate_open", None)
+            item.metadata.pop("gate_binding", None)
         nxt = self.line.route(state, decision.decision)
         item.human_touches += 1
         item.log(
@@ -539,12 +540,12 @@ class Dispatcher:
         }
 
     def _gate_drift(self, item: WorkItem, bound: dict) -> list[str]:
-        """Everything that moved since ``open_gate`` — named, so the refusal
+        """Everything that moved since ``bind_gate`` — named, so the refusal
         tells the human exactly what to re-review."""
         drift: list[str] = []
         grew = len(item.history) - int(bound.get("history_len", 0))
         if grew:
-            drift.append(f"item history advanced by {grew} event(s) since the gate opened")
+            drift.append(f"item history advanced by {grew} event(s) since the gate was bound")
         if item.pr != bound.get("pr"):
             drift.append(f"pr changed: {bound.get('pr')!r} → {item.pr!r}")
         if bound.get("packet") and self._hash_file(bound["packet"]) != bound.get("packet_hash"):
@@ -553,10 +554,10 @@ class Dispatcher:
         now = {a: self._hash_file(a) for a in sorted(item.artifacts)}
         for a, h in now.items():
             if a not in old:
-                drift.append(f"artifact added since open: {a}")
+                drift.append(f"artifact added since bind: {a}")
             elif h != old[a]:
-                drift.append(f"artifact changed since open: {a}")
-        drift += [f"artifact removed since open: {a}" for a in old if a not in now]
+                drift.append(f"artifact changed since bind: {a}")
+        drift += [f"artifact removed since bind: {a}" for a in old if a not in now]
         return drift
 
     @staticmethod

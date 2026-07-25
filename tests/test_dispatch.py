@@ -4,7 +4,7 @@ import pytest
 
 from factory.dispatch import Dispatcher
 from factory.line import LineError
-from factory.model import GateDecision, StationReport, WorkItem
+from factory.model import RISK_FLOOR, GateDecision, StationReport, WorkItem
 
 
 def _advance(d: Dispatcher, item: WorkItem, verdict: str, **kw) -> str:
@@ -382,12 +382,15 @@ def test_station_ran_metadata_lands_on_the_history_event(factory_root: Path):
     assert ev.ran == "subagent"
 
 
+_SHIPPED_CAP = "max_attempts: 3"  # the shipped default these helpers override
+
+
 def _set_cap(factory_root: Path, cap: int) -> None:
     """Rewrite the copied line.yml's attempt cap for a tight-loop test."""
     path = factory_root / "line.yml"
     text = path.read_text()
-    assert "max_attempts: 4" in text  # the shipped default this helper overrides
-    path.write_text(text.replace("max_attempts: 4", f"max_attempts: {cap}"))
+    assert _SHIPPED_CAP in text
+    path.write_text(text.replace(_SHIPPED_CAP, f"max_attempts: {cap}"))
 
 
 def test_attempt_cap_stops_an_automated_loop_at_blocked(factory_root: Path):
@@ -433,7 +436,7 @@ def _to_spec_review(d: Dispatcher, artifacts: list[str] | None = None) -> WorkIt
     return item
 
 
-def test_open_gate_binds_and_a_clean_decision_consumes_the_binding(factory_root: Path):
+def test_binding_a_gate_and_a_clean_decision_consumes_the_binding(factory_root: Path):
     """The TOCTOU guard's happy path: open snapshots the reviewed content, an
     unchanged decision passes, and the binding is consumed (not left to haunt
     a later gate)."""
@@ -441,23 +444,23 @@ def test_open_gate_binds_and_a_clean_decision_consumes_the_binding(factory_root:
     spec.write_text("v1")
     d = Dispatcher(factory_root)
     item = _to_spec_review(d, artifacts=["spec.md"])
-    d.open_gate(item, by="alice", packet=None)
-    assert item.metadata["gate_open"]["gate"] == "spec_review"
+    d.bind_gate(item, by="alice", packet=None)
+    assert item.metadata["gate_binding"]["gate"] == "spec_review"
     d.gate(item, GateDecision(gate="spec_review", decision="approved", by="alice"))
     assert item.state == "implement"
-    assert "gate_open" not in item.metadata
+    assert "gate_binding" not in item.metadata
 
 
 def test_gate_refuses_a_decision_when_reviewed_content_moved(factory_root: Path):
     """What the human approves must be what the human saw: an artifact edited
-    between --open and --decision refuses the decision, naming the file."""
+    between --bind and --decision refuses the decision, naming the file."""
     from factory.dispatch import GateDriftError
 
     spec = factory_root / "spec.md"
     spec.write_text("v1")
     d = Dispatcher(factory_root)
     item = _to_spec_review(d, artifacts=["spec.md"])
-    d.open_gate(item, by="alice")
+    d.bind_gate(item, by="alice")
     spec.write_text("v2 — silently changed after review")
     with pytest.raises(GateDriftError, match="spec.md"):
         d.gate(item, GateDecision(gate="spec_review", decision="approved", by="alice"))
@@ -471,7 +474,7 @@ def test_accept_drift_records_the_decision_and_logs_what_moved(factory_root: Pat
     spec.write_text("v1")
     d = Dispatcher(factory_root)
     item = _to_spec_review(d, artifacts=["spec.md"])
-    d.open_gate(item, by="alice")
+    d.bind_gate(item, by="alice")
     spec.write_text("v2")
     d.gate(
         item,
@@ -483,20 +486,20 @@ def test_accept_drift_records_the_decision_and_logs_what_moved(factory_root: Pat
 
 
 def test_history_growth_after_open_counts_as_drift(factory_root: Path):
-    """Any event landing on the item after --open means the reviewed state moved
+    """Any event landing on the item after --bind means the reviewed state moved
     — the binding covers the item's journey, not just its files."""
     from factory.dispatch import GateDriftError
 
     d = Dispatcher(factory_root)
     item = _to_spec_review(d)
-    d.open_gate(item, by="alice")
+    d.bind_gate(item, by="alice")
     item.log(kind="note", actor="factory", note="something happened mid-review")
     with pytest.raises(GateDriftError, match="history advanced"):
         d.gate(item, GateDecision(gate="spec_review", decision="approved", by="alice"))
 
 
 def test_an_unbound_gate_decision_still_works(factory_root: Path):
-    """Compatibility pin: cloud flows and quick local decisions may skip --open;
+    """Compatibility pin: cloud flows and quick local decisions may skip --bind;
     the decision must proceed (just without the drift check), not hard-require
     a binding."""
     d = Dispatcher(factory_root)
@@ -506,15 +509,30 @@ def test_an_unbound_gate_decision_still_works(factory_root: Path):
 
 
 def test_sensitive_text_floors_risk_at_intake(factory_root: Path):
-    """The deterministic backstop: an item touching auth/payments/etc. enters at
-    high risk unless a human explicitly said otherwise — an under-triaged
-    sensitive change must not be able to skip a gate via a low risk rating."""
+    """The deterministic backstop: an item touching auth/payments/etc. cannot
+    enter below the floor unless a human explicitly said otherwise — an
+    under-triaged sensitive change must not skip a gate on a low risk rating."""
     d = Dispatcher(factory_root)
     item = d.new_item("Rotate the API token signing secret")
-    assert item.risk == "high"
-    assert item.metadata["risk_floor"] == "high"
+    assert item.risk == RISK_FLOOR
+    assert item.metadata["risk_floor"] == RISK_FLOOR
     assert "token" in item.metadata["risk_floor_matches"]
     assert any("risk floored" in (e.note or "") for e in item.history)
+
+
+def test_risk_floor_covers_whole_term_families(factory_root: Path):
+    """Inflections ride prefix patterns, not an enumerated conjugation list —
+    `authorizing`/`encrypting`/`migrate` must floor like their stems, since a
+    hand-listed variant set silently leaks the ones nobody thought to add."""
+    d = Dispatcher(factory_root)
+    for text, expected in [
+        ("Stop authorizing stale sessions", "authorizing"),
+        ("Start encrypting the export bundle", "encrypting"),
+        ("Migrate the accounts table", "migrate"),
+    ]:
+        item = d.new_item(text)
+        assert item.risk == RISK_FLOOR, text
+        assert expected in item.metadata["risk_floor_matches"], text
 
 
 def test_explicit_human_risk_bypasses_the_floor_but_is_recorded(factory_root: Path):
@@ -534,10 +552,19 @@ def test_a_station_cannot_lower_risk_below_the_floor(factory_root: Path):
     that keeps its gates human."""
     d = Dispatcher(factory_root)
     item = d.new_item("Handle password reset flow")
-    assert item.risk == "high"
+    assert item.risk == RISK_FLOOR
     _advance(d, item, "needs_spec", risk="low")  # triage tries to de-escalate
+    assert item.risk == RISK_FLOOR
+    assert any(f"risk floor: kept {RISK_FLOOR}" in (e.note or "") for e in item.history)
+
+
+def test_a_station_may_raise_risk_above_the_floor(factory_root: Path):
+    """The floor is a floor, not a pin: triage judging a floored item `high`
+    must stick, or the deterministic backstop would cap the model's judgment."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("Handle password reset flow")
+    _advance(d, item, "needs_spec", risk="high")
     assert item.risk == "high"
-    assert any("risk floor: kept high" in (e.note or "") for e in item.history)
 
 
 def test_risk_floor_matches_words_not_substrings(factory_root: Path):
@@ -555,7 +582,7 @@ def test_line_rejects_malformed_attempt_caps(factory_root: Path):
     from factory.line import Line
 
     base = (factory_root / "line.yml").read_text()
-    (factory_root / "line.yml").write_text(base.replace("max_attempts: 4", "max_attempts: 0"))
+    (factory_root / "line.yml").write_text(base.replace(_SHIPPED_CAP, "max_attempts: 0"))
     with pytest.raises(LineError):
         Line.load(factory_root / "line.yml")
     (factory_root / "line.yml").write_text(

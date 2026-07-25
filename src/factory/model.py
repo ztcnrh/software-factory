@@ -25,20 +25,28 @@ def _now() -> str:
 RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "unknown": 3}
 
 # Deterministic risk floor: work whose text touches these concerns cannot enter
-# the line below `high` unless a human explicitly says so, and a station may
-# raise its risk but never lower it back past the floor. A dumb, word-bounded
-# backstop against an under-triaged auth/payments/migration change skipping a
-# gate — the model's judgment can only make such an item *more* guarded.
+# the line below `medium` unless a human explicitly says so, and a station may
+# raise its risk but never lower it back past the floor. A keyword hit is a dumb
+# signal, so it makes the weak claim ("not trivial — don't auto-clear its gates")
+# and leaves `high` to judgment: triage, or code-review's own auth/payments
+# council trigger, which reads the text rather than a rating.
 # Word-bounded alternation, not substrings: `auth` must not fire on `author`,
-# `token` must not fire on `tokenizer`.
-RISK_FLOOR = "high"
+# `token` must not fire on `tokenizer`. Families are prefix patterns
+# (`authoriz\w*`) so a new inflection can't slip the net the way an enumerated
+# list of conjugations does.
+RISK_FLOOR = "medium"
 _RISK_FLOOR_TERMS = (
-    "auth", "authn", "authz", "authentication", "authorization",
-    "authenticate", "authenticates", "authenticated", "authorize", "authorized",
-    "login", "password", "passwords", "token", "tokens", "secret", "secrets",
-    "credential", "credentials", "payment", "payments", "billing",
-    "migration", "migrations", "encrypt", "encrypts", "encrypted", "encryption",
-    "permission", "permissions",
+    # identity & access
+    r"auth", r"authn", r"authz", r"authenticat\w*", r"authoriz\w*",
+    r"oauth", r"sso", r"jwt", r"login", r"password\w*", r"token", r"tokens",
+    r"cookie", r"cookies", r"permission\w*", r"privilege\w*", r"rbac", r"acl",
+    # secrets & crypto
+    r"secret", r"secrets", r"credential\w*", r"encrypt\w*", r"decrypt\w*",
+    r"csrf", r"xss",
+    # money
+    r"payment\w*", r"billing", r"refund\w*",
+    # data at risk
+    r"migrat\w*", r"backfill\w*", r"pii", r"gdpr",
 )
 _RISK_FLOOR_RE = re.compile(r"\b(" + "|".join(_RISK_FLOOR_TERMS) + r")\b", re.IGNORECASE)
 
@@ -60,7 +68,7 @@ class Event:
     item's whole journey down the line is auditable and replayable."""
 
     ts: str
-    kind: str  # created | station | gate | auto_gate | gate_open | spawn | note | correction | ...
+    kind: str  # created | station | gate | auto_gate | gate_bound | spawn | note | correction | ...
     from_state: str | None = None
     to_state: str | None = None
     verdict: str | None = None
