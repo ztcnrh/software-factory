@@ -122,3 +122,51 @@ def test_briefing_stays_quiet_with_no_open_rows(tmp_path):
     from factory.retro import briefing
 
     assert "Reconcile past proposals" not in briefing(tmp_path)
+
+
+def _intervention_file(root, ts_name: str, category: str) -> None:
+    d = root / ".factory" / "interventions"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"WI-0001-spec_review-{ts_name}.md").write_text(
+        "# Intervention — WI-0001 @ spec_review\n\n---\n"
+        f'```yaml\nitem: WI-0001\ngate: spec_review\ncategory: "{category}"\n```\n'
+    )
+
+
+def test_recurrence_check_flags_an_applied_row_whose_category_came_back(tmp_path):
+    """The falsifiability join: an applied proposal claims its intervention
+    category stops recurring — a later matching intervention must be flagged
+    mechanically, not left to a future retro's memory."""
+    from factory.retro import briefing
+
+    led = Ledger(tmp_path)
+    row = _add(led, category="missing-edge-case")
+    led.update(row["id"], status="applied")
+    # An intervention BEFORE the apply date is the evidence the proposal answered,
+    # not a recurrence — the check must scope to interventions since.
+    _intervention_file(tmp_path, "1999-01-01T00-00-00Z", "missing-edge-case")
+    assert "Recurrence check" not in briefing(tmp_path)
+    _intervention_file(tmp_path, "2999-01-01T00-00-00Z", "missing-edge-case")
+    text = briefing(tmp_path)
+    assert "Recurrence check" in text
+    assert row["id"] in text and "missing-edge-case" in text
+
+
+def test_recurrence_check_ignores_other_categories_and_unapplied_rows(tmp_path):
+    """Only an APPLIED row's own category counts: a proposed row, or a
+    different category recurring, must not manufacture a false alarm."""
+    from factory.retro import briefing
+
+    led = Ledger(tmp_path)
+    _add(led, category="missing-edge-case")  # proposed, never applied
+    _intervention_file(tmp_path, "2999-01-01T00-00-00Z", "wrong-scope")
+    assert "Recurrence check" not in briefing(tmp_path)
+
+
+def test_category_lands_on_the_row_and_renders(tmp_path):
+    """--category is the recurrence check's key — it must persist through the
+    append-only log and show in LEDGER.md, or the join silently dies."""
+    led = Ledger(tmp_path)
+    e = _add(led, category="missing-edge-case")
+    assert e["category"] == "missing-edge-case"
+    assert "**Category:** missing-edge-case" in led.render()

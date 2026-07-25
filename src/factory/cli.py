@@ -640,6 +640,7 @@ def cmd_ledger(args: argparse.Namespace) -> int:
             answers=args.answers or [],
             pr=args.pr or "",
             status=args.status,
+            category=args.category or "",
         )
         print(f"✓ recorded {e['id']}: {e['title']}")
         print(f"  rendered: {led.view}")
@@ -1160,6 +1161,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="proposed",
         choices=sorted(STATUSES),
         help="Initial status (default: %(default)s)",
+    )
+    a.add_argument(
+        "--category",
+        help="The intervention category this proposal answers (e.g. missing-edge-case). "
+        "Once the row is `applied`, the retro briefing mechanically flags any later "
+        "intervention of the same category as a recurrence — the fix didn't hold",
     )
     a.set_defaults(func=cmd_ledger)
     u = lsub.add_parser(

@@ -90,6 +90,25 @@ class Interventions:
             return []
         return sorted(self.dir.glob("*.md"))
 
+    def records(self) -> list[dict]:
+        """Structured view of the records: item, gate, category, and an ISO
+        timestamp (recovered from the filename), for mechanical joins like the
+        ledger's recurrence check. Best-effort — a file that doesn't parse just
+        contributes what it can."""
+        out = []
+        for path in self.list():
+            rec: dict = {"path": path}
+            m = re.search(r"(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})Z\.md$", path.name)
+            if m:
+                rec["ts"] = f"{m.group(1)}T{m.group(2)}:{m.group(3)}:{m.group(4)}Z"
+            text = path.read_text()
+            for key in ("item", "gate", "category"):
+                km = re.search(rf'^{key}: "?([^"\n]*)"?$', text, re.M)
+                if km:
+                    rec[key] = km.group(1)
+            out.append(rec)
+        return out
+
     def signals(self) -> list[dict]:
         """Chat steering captured by the UserPromptSubmit hook (_signals.jsonl).
         Best-effort by design: the hook appends blindly, so an unparseable line
