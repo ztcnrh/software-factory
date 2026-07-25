@@ -152,6 +152,22 @@ class Dispatcher:
             nxt = self.line.route(state, report.verdict)
             verdict = report.verdict
             note = report.summary
+        # Attempt cap: an automated route into a station that already ran its
+        # budget this epoch lands at `blocked` instead of looping again — the
+        # live circuit-breaker for implement↔code_review-style ping-pong. Human
+        # decisions are never capped (gate/correct/revive open a fresh epoch).
+        cap_note = None
+        if nxt != "blocked" and self.line.is_station(nxt):
+            cap = self.line.max_attempts(nxt)
+            if cap is not None:
+                runs = self._runs_this_epoch(item, nxt)
+                if runs >= cap:
+                    cap_note = (
+                        f"attempt cap: {nxt} already ran {runs}× since the last human "
+                        f"touch (max_attempts {cap}) — loop stopped instead of re-entering; "
+                        "a human unblock opens a fresh budget"
+                    )
+                    nxt = "blocked"
         item.log(
             kind="station",
             from_state=state,
@@ -164,10 +180,13 @@ class Dispatcher:
         item.state = nxt
         self._note_park(item, state, nxt)
         if nxt == "blocked":
-            # However it arrived — the routed `blocked` verdict or the escape hatch —
-            # landing at the blocked gate means autonomy broke at this station. Count
-            # it as a human step-in, or the one-shot ship rate would lie.
+            # However it arrived — the routed `blocked` verdict, the escape hatch,
+            # or the attempt cap — landing at the blocked gate means autonomy broke
+            # at this station. Count it as a human step-in, or the one-shot ship
+            # rate would lie.
             item.steers += 1
+        if cap_note:
+            item.log(kind="note", actor="factory", note=cap_note)
         if report.notes:
             # Station notes are context for whoever reads the item next — the human
             # at the gate (via status / the review packet) and the next station.
@@ -223,6 +242,10 @@ class Dispatcher:
         )
         item.state = nxt
         self._note_park(item, state, nxt)
+        # A human decision opens a fresh attempt epoch: new guidance deserves a
+        # fresh loop budget, and the lifetime `attempts` map keeps the full churn
+        # history for the retro regardless.
+        item.metadata["epoch_len"] = len(item.history)
         if decision.is_steer:
             item.steers += 1  # a send-back / correction / park is human rework
             path = self.interventions.record(item, decision, state, produced)
@@ -276,6 +299,7 @@ class Dispatcher:
             note=notes or ("resumed where it left off" if resume else ""),
         )
         item.state = nxt
+        item.metadata["epoch_len"] = len(item.history)  # human act: fresh attempt epoch
         self.store.save(item)
         self.metrics.emit(kind="revive", item=item.id, to_state=nxt, resumed=resume, by=by)
         return item.state
@@ -304,6 +328,7 @@ class Dispatcher:
             note=reason,
         )
         item.state = state
+        item.metadata["epoch_len"] = len(item.history)  # human act: fresh attempt epoch
         self.store.save(item)
         self.metrics.emit(
             kind="correction", item=item.id, from_state=old, to_state=state, by=by
@@ -339,6 +364,17 @@ class Dispatcher:
         return nxt
 
     # --- internals ----------------------------------------------------------
+    @staticmethod
+    def _runs_this_epoch(item: WorkItem, state: str) -> int:
+        """Completed runs of ``state`` since the last human touch (gate, correct,
+        or revive stamps ``metadata.epoch_len``). The lifetime ``attempts`` map is
+        deliberately untouched history — the retro's churn signal — while the cap
+        judges only the current fully-automated stretch."""
+        epoch = item.metadata.get("epoch_len", 0)
+        return sum(
+            1 for ev in item.history[epoch:] if ev.kind == "station" and ev.from_state == state
+        )
+
     def _note_park(self, item: WorkItem, from_state: str, nxt: str) -> None:
         """Remember where a park came from (any route into a revivable terminal),
         so ``revive --resume`` can re-enter there instead of the top of the line."""

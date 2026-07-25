@@ -352,3 +352,65 @@ def test_cannot_advance_a_station_report_through_a_gate(factory_root: Path):
     _advance(d, item, "ready_for_review")  # now at the spec_review gate
     with pytest.raises(LineError):
         _advance(d, item, "approved")
+
+
+def _set_cap(factory_root: Path, cap: int) -> None:
+    """Rewrite the copied line.yml's attempt cap for a tight-loop test."""
+    path = factory_root / "line.yml"
+    text = path.read_text()
+    assert "max_attempts: 4" in text  # the shipped default this helper overrides
+    path.write_text(text.replace("max_attempts: 4", f"max_attempts: {cap}"))
+
+
+def test_attempt_cap_stops_an_automated_loop_at_blocked(factory_root: Path):
+    """The live circuit-breaker: an automated route back into a station that
+    already ran its per-epoch budget lands at `blocked` (counted as a steer)
+    instead of looping again — churn stops burning tokens without a human."""
+    _set_cap(factory_root, 2)
+    d = Dispatcher(factory_root)
+    item = d.new_item("Loopy change", risk="low")
+    _advance(d, item, "automatable")
+    _advance(d, item, "implemented")  # implement ran 1×
+    _advance(d, item, "changes_requested")  # re-entry ok: 1 < 2
+    _advance(d, item, "implemented")  # implement ran 2×
+    _advance(d, item, "changes_requested")  # re-entry would be run 3 — capped
+    assert item.state == "blocked"
+    assert item.steers == 1
+    assert any("attempt cap" in (e.note or "") for e in item.history)
+
+
+def test_a_human_touch_opens_a_fresh_attempt_budget(factory_root: Path):
+    """A human decision (here: unblock) starts a new epoch — new guidance
+    deserves a fresh loop budget, so the cap must count only automated runs
+    since the last human touch, never lifetime attempts."""
+    _set_cap(factory_root, 1)
+    d = Dispatcher(factory_root)
+    item = d.new_item("Tight cap", risk="low")
+    _advance(d, item, "automatable")
+    _advance(d, item, "implemented")  # implement ran 1× this epoch
+    _advance(d, item, "changes_requested")  # re-entry hits cap 1 → blocked
+    assert item.state == "blocked"
+    d.gate(item, GateDecision(gate="blocked", decision="unblocked", notes="try again"))
+    assert item.state == "triage"
+    _advance(d, item, "automatable")  # routes into implement again
+    assert item.state == "implement"  # fresh epoch: the cap no longer bites
+    assert item.attempts["implement"] == 1  # lifetime churn history is untouched
+
+
+def test_line_rejects_malformed_attempt_caps(factory_root: Path):
+    """A cap that isn't a positive integer, or a cap on a non-station, is a
+    config typo that must fail at load — not silently run uncapped."""
+    from factory.line import Line
+
+    base = (factory_root / "line.yml").read_text()
+    (factory_root / "line.yml").write_text(base.replace("max_attempts: 4", "max_attempts: 0"))
+    with pytest.raises(LineError):
+        Line.load(factory_root / "line.yml")
+    (factory_root / "line.yml").write_text(
+        base.replace(
+            "parked:       {kind: terminal,   revivable: true}",
+            "parked:       {kind: terminal,   revivable: true, max_attempts: 3}",
+        )
+    )
+    with pytest.raises(LineError):
+        Line.load(factory_root / "line.yml")

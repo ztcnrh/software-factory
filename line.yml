@@ -64,6 +64,16 @@ states:
 
 start: triage
 
+# The live loop circuit-breaker: a station may complete this many runs within one
+# "human epoch" — the stretch since the last human gate decision, correction, or
+# revive. The next *automated* route back into it lands the item at the blocked
+# gate instead of looping again, so an implement↔code_review ping-pong stops
+# burning tokens and gets a human decision. A human send-back opens a fresh epoch
+# (new guidance deserves a fresh budget), and lifetime attempts stay on the item
+# for the retro's churn signal. Override per station with `max_attempts` on its
+# entry; delete this key to run uncapped.
+max_attempts: 4
+
 # Routing: for each state, verdict -> next state.
 # Station verdicts come from the StationReport the agent emits; human-gate
 # verdicts are the human's decision. Keep this aligned with the diagram.

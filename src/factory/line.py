@@ -27,6 +27,7 @@ class Line:
         self.states: dict[str, dict] = data["states"]
         self.start: str = data["start"]
         self.routing: dict[str, dict[str, str]] = data["routing"]
+        self.max_attempts_default = data.get("max_attempts")
         self._validate()
 
     @classmethod
@@ -37,6 +38,7 @@ class Line:
     def _validate(self) -> None:
         if self.start not in self.states:
             raise LineError(f"start state {self.start!r} is not a defined state")
+        self._check_cap(self.max_attempts_default, "line-level max_attempts")
         for name, spec in self.states.items():
             # A typo'd kind would otherwise fall through the dispatcher's checks
             # and be treated as a station — reject it at the boundary instead.
@@ -45,12 +47,26 @@ class Line:
                     f"state {name!r} has unknown kind {spec.get('kind')!r}; "
                     f"valid: {', '.join(sorted(_KINDS))}"
                 )
+            if "max_attempts" in spec:
+                if spec["kind"] != "station":
+                    raise LineError(
+                        f"state {name!r}: max_attempts only applies to stations — "
+                        "a cap on a gate or terminal would never be consulted"
+                    )
+                self._check_cap(spec["max_attempts"], f"state {name!r} max_attempts")
         for state, table in self.routing.items():
             if state not in self.states:
                 raise LineError(f"routing references unknown state {state!r}")
             for verdict, dest in table.items():
                 if dest not in self.states:
                     raise LineError(f"routing {state}/{verdict} -> unknown state {dest!r}")
+
+    @staticmethod
+    def _check_cap(value: Any, where: str) -> None:
+        # bool is an int subclass — `max_attempts: true` must not sneak through.
+        bad = isinstance(value, bool) or not isinstance(value, int) or value < 1
+        if value is not None and bad:
+            raise LineError(f"{where}: must be a positive integer, got {value!r}")
 
     # --- topology -----------------------------------------------------------
     def kind(self, state: str) -> str:
@@ -88,6 +104,15 @@ class Line:
 
     def valid_verdicts(self, state: str) -> list[str]:
         return list(self.routing.get(state, {}).keys())
+
+    def max_attempts(self, state: str) -> int | None:
+        """Cap on completed runs of a station within one human epoch (``None`` =
+        uncapped). Per-state ``max_attempts`` overrides the line-level default;
+        only stations are ever capped."""
+        spec = self.states.get(state, {})
+        if spec.get("kind") != "station":
+            return None
+        return spec.get("max_attempts", self.max_attempts_default)
 
     # --- routing ------------------------------------------------------------
     def route(self, state: str, verdict: str) -> str:
