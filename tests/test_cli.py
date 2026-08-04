@@ -278,6 +278,35 @@ def test_gate_plain_approval_does_not_warn(factory_root: Path, capsys):
     assert "no --notes" not in capsys.readouterr().err
 
 
+def test_gate_surfaces_the_category_vocabulary_on_a_new_word(factory_root: Path, capsys):
+    """The recurrence check joins ledger rows to interventions on an exact string,
+    so a near-miss spelling breaks it silently. Nothing can validate a free-form
+    vocabulary — so the CLI teaches it at the one moment someone picks a word."""
+    first = _item_at(factory_root, "spec_review")
+    main(["--root", str(factory_root), "gate", first, "--decision", "needs_revision",
+          "--notes", "w", "--category", "missing-edge-case"])
+    capsys.readouterr()
+    second = _item_at(factory_root, "spec_review")
+    main(["--root", str(factory_root), "gate", second, "--decision", "needs_revision",
+          "--notes", "w", "--category", "missing_edge_case"])
+    err = capsys.readouterr().err
+    assert "new category 'missing_edge_case'" in err
+    assert "missing-edge-case" in err  # the word they probably meant, shown to them
+
+
+def test_gate_stays_quiet_when_the_category_is_already_in_use(factory_root: Path, capsys):
+    """The nudge exists to flag divergence; firing on every reuse would train the
+    reader to ignore it, which is how a warning stops being one."""
+    first = _item_at(factory_root, "spec_review")
+    main(["--root", str(factory_root), "gate", first, "--decision", "needs_revision",
+          "--notes", "w", "--category", "wrong-scope"])
+    capsys.readouterr()
+    second = _item_at(factory_root, "spec_review")
+    main(["--root", str(factory_root), "gate", second, "--decision", "needs_revision",
+          "--notes", "w", "--category", "wrong-scope"])
+    assert "new category" not in capsys.readouterr().err
+
+
 def test_gate_warns_when_intervention_fields_ride_a_non_steer(factory_root: Path, capsys):
     """--expected/--category/--produced only land in an intervention record, which a
     plain approval never writes — they used to vanish silently; now the human is told

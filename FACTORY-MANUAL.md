@@ -92,6 +92,8 @@ Triage couldn't proceed without a product/priority call only you can make. Answe
 ### The one habit that matters
 **When you steer, say *why* — generalizably.** A send-back or `park` counts as a steer on its own; add `--changed` only when you *approve* but fixed the work at the gate yourself (by hand or by directing your agent), so that steer gets recorded too. Either way, `--notes "..." --category ...` is what turns a one-off correction into a permanent fix. "Public write endpoints always need input validation" teaches the factory; "fix this" doesn't. Thirty seconds of *why* now buys you fewer gates later. (Steering in chat while an item waits at a gate is also captured automatically by a hook — but an explicit `gate --notes` is richer.)
 
+**Keep `--category` a small, reused vocabulary.** Name the *failure mode*, not the fix (`missing-edge-case`, not `add-validation`), in kebab-case, and reuse a word you've used before wherever it fits. The retro's recurrence check joins ledger rows to interventions on that exact string, so `missing_edge_case` and `missing-edge-case` are two unrelated categories and the join quietly finds nothing. Nothing validates the vocabulary — it's yours to grow — but the CLI prints the categories already in use whenever you introduce a new one, so a typo is visible at the moment you make it.
+
 ---
 
 ## 4. Making the factory learn

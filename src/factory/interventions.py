@@ -14,7 +14,15 @@ import re
 import time
 from pathlib import Path
 
+import yaml
+
 from .model import GateDecision, WorkItem
+
+# The record's machine surface. Writer and reader share this constant so the
+# fence a record ships can never drift from the fence `records()` looks for.
+_MACHINE_MARKER = "<!-- machine-readable: the retro station parses this block -->"
+_MACHINE_BLOCK = re.compile(r"```yaml\n(.*?)\n```", re.S)
+_FILENAME_TS = re.compile(r"(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})Z(?:-\d+)?\.md$")
 
 _TEMPLATE = """\
 # Intervention — {item_id} @ {gate}
@@ -36,7 +44,7 @@ _TEMPLATE = """\
 {notes}
 
 ---
-<!-- machine-readable: the retro station parses this block -->
+{marker}
 ```yaml
 item: {item_id}
 gate: {gate}
@@ -46,6 +54,32 @@ changed: {changed}
 state_before: {state_before}
 ```
 """
+
+
+def _machine_fields(text: str) -> dict | None:
+    """Parse a record's machine block, or None if it has none.
+
+    Anchored on ``_MACHINE_MARKER`` rather than scanning the whole file: the
+    sections above it embed a station's artifact and the human's free text, and
+    either can contain its own yaml fence — including an unterminated one, which
+    would otherwise swallow the real block's opening fence. A record without the
+    marker (hand-written, or pre-dating it) falls back to the last fence, which
+    is still the machine block in every shape the template has ever emitted.
+    """
+    _, marked, tail = text.rpartition(_MACHINE_MARKER)
+    if marked:
+        m = _MACHINE_BLOCK.search(tail)
+        block = m.group(1) if m else None
+    else:
+        blocks = _MACHINE_BLOCK.findall(text)
+        block = blocks[-1] if blocks else None
+    if not block:
+        return None
+    try:
+        data = yaml.safe_load(block)
+    except yaml.YAMLError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _fence(text: str) -> str:
@@ -67,6 +101,13 @@ class Interventions:
         self.dir.mkdir(parents=True, exist_ok=True)
         ts = time.strftime("%Y-%m-%dT%H-%M-%SZ", time.gmtime())
         path = self.dir / f"{item.id}-{decision.gate}-{ts}.md"
+        # Second resolution collides when one gate is steered twice inside a
+        # second (a scripted driver, a tight loop) — and an overwrite would drop
+        # a steer the retro can never recover. Suffix instead.
+        n = 2
+        while path.exists():
+            path = self.dir / f"{item.id}-{decision.gate}-{ts}-{n}.md"
+            n += 1
         path.write_text(
             _TEMPLATE.format(
                 item_id=item.id,
@@ -81,6 +122,7 @@ class Interventions:
                 changed=str(decision.changed).lower(),
                 state_before=state_before,
                 ts=ts,
+                marker=_MACHINE_MARKER,
             )
         )
         return path
@@ -91,21 +133,26 @@ class Interventions:
         return sorted(self.dir.glob("*.md"))
 
     def records(self) -> list[dict]:
-        """Structured view of the records: item, gate, category, and an ISO
-        timestamp (recovered from the filename), for mechanical joins like the
-        ledger's recurrence check. Best-effort — a file that doesn't parse just
-        contributes what it can."""
+        """Structured view of the records — every field of the machine block
+        (item, gate, decision, category, changed, state_before) plus an ISO
+        timestamp recovered from the filename, for mechanical joins like the
+        ledger's recurrence check. Best-effort: a file that doesn't parse still
+        contributes its path and timestamp."""
         out = []
         for path in self.list():
-            rec: dict = {"path": path}
-            m = re.search(r"(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})Z\.md$", path.name)
+            rec: dict = {}
+            data = _machine_fields(path.read_text())
+            if data:
+                rec.update(data)
+            # After the block, so a malformed record can't shadow the two fields
+            # every caller relies on.
+            rec["path"] = path
+            m = _FILENAME_TS.search(path.name)
             if m:
+                # Filenames can't carry colons; the ledger's `status_since` is
+                # colon-form ISO, and the recurrence join compares the two as
+                # strings — so restore the colons or every comparison skews.
                 rec["ts"] = f"{m.group(1)}T{m.group(2)}:{m.group(3)}:{m.group(4)}Z"
-            text = path.read_text()
-            for key in ("item", "gate", "category"):
-                km = re.search(rf'^{key}: "?([^"\n]*)"?$', text, re.M)
-                if km:
-                    rec[key] = km.group(1)
             out.append(rec)
         return out
 

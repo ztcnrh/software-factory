@@ -439,6 +439,16 @@ def cmd_gate(args: argparse.Namespace) -> int:
             f"{decision.decision!r} doesn't write one — add --changed if you steered the work.",
             file=sys.stderr,
         )
+    # Read the vocabulary in use BEFORE the decision writes its own record, but
+    # only report it after the gate actually took — a failed call shouldn't teach
+    # anyone anything.
+    known_categories: set[str] = set()
+    if decision.is_steer and decision.category:
+        known_categories = {
+            c
+            for r in d.interventions.records()
+            if (c := r.get("category")) and c != "uncategorized"
+        }
     try:
         new_state = d.gate(item, decision, produced=produced, accept_drift=args.accept_drift)
     except GateDriftError as e:
@@ -450,6 +460,16 @@ def cmd_gate(args: argparse.Namespace) -> int:
         )
         return 1
     print(f"✓ {item.id}: gate {gate} → {new_state}  (decision: {args.decision})")
+    if decision.category and decision.category not in known_categories:
+        # The retro's recurrence check joins ledger rows to interventions on an
+        # exact string, so a near-miss spelling breaks it silently. The vocabulary
+        # is free-form on purpose — nothing to validate against — so surface what
+        # is already in use at the one moment someone is choosing a word.
+        print(
+            f"ⓘ new category {decision.category!r} — already in use: "
+            f"{', '.join(sorted(known_categories)) or '(none yet)'}",
+            file=sys.stderr,
+        )
     action = _resolve_next(d, item.id)
     _mirror_issue_state(d, item.id, prev)
     _print_action(action, d.line)
