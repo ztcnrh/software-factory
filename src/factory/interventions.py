@@ -137,13 +137,16 @@ class Interventions:
         (item, gate, decision, category, changed, state_before) plus an ISO
         timestamp recovered from the filename, for mechanical joins like the
         ledger's recurrence check. Best-effort: a file that doesn't parse still
-        contributes its path and timestamp."""
+        contributes its path and timestamp, flagged ``malformed`` like a bad
+        ``signals()`` line so ``factory doctor`` can report the loss."""
         out = []
         for path in self.list():
             rec: dict = {}
             data = _machine_fields(path.read_text())
             if data:
                 rec.update(data)
+            else:
+                rec["malformed"] = True
             # After the block, so a malformed record can't shadow the two fields
             # every caller relies on.
             rec["path"] = path

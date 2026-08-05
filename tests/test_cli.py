@@ -8,6 +8,7 @@ import pytest
 from factory.adapters import github
 from factory.cli import _print_action, _resolve_actor, main
 from factory.dispatch import Action, Dispatcher
+from factory.ledger import Ledger
 from factory.line import Line
 from factory.model import StationReport
 
@@ -707,3 +708,89 @@ def test_doctor_warns_on_lineage_bindings_and_overlay_drift(factory_root: Path, 
     assert "gate binding" in out
     assert "ghost-rule" in out
     assert "3 warning(s)" in out
+
+
+def test_doctor_does_not_blame_children_of_an_unreadable_parent(factory_root: Path, capsys):
+    """One corrupt item is one cause; it must not also produce a 'broken lineage'
+    warning on every innocent child pointing at it. Lineage resolves against the
+    ids on disk (what Store.load uses), not against the ids that happened to parse."""
+    d = Dispatcher(factory_root)
+    parent = d.new_item("will be corrupted")
+    child = d.new_item("innocent child")
+    child.parent = parent.id
+    d.store.save(child)
+    (factory_root / ".factory" / "work-items" / f"{parent.id}.json").write_text("{TORN")
+    rc = main(["--root", str(factory_root), "doctor"])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "unreadable" in captured.err
+    assert "broken lineage" not in captured.out
+
+
+def test_doctor_flags_an_artifact_that_does_not_exist(factory_root: Path, capsys):
+    """The line's main pull channel fails silently everywhere else: a station told
+    to read a missing path gets nothing, and a gate binding hashes it to the
+    literal "missing" so it matches itself at decide time and reports no drift."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("has a ghost spec")
+    item.artifacts = ["docs/specs/WI-0001-spec.md"]
+    d.store.save(item)
+    rc = main(["--root", str(factory_root), "doctor"])
+    out = capsys.readouterr().out
+    assert rc == 0  # a warning, not an error — the item is still workable
+    assert "docs/specs/WI-0001-spec.md" in out and "does not exist" in out
+
+
+def test_doctor_catches_an_id_that_disagrees_with_its_filename(factory_root: Path, capsys):
+    """list_ids() keys off the filename but load() returns the embedded id, so a
+    mismatch means every save writes to a different file than it read — silent
+    divergence of the source of truth, hence an error rather than a warning."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("mislabeled")
+    path = factory_root / ".factory" / "work-items" / f"{item.id}.json"
+    data = json.loads(path.read_text())
+    data["id"] = "WI-4242"
+    path.write_text(json.dumps(data))
+    rc = main(["--root", str(factory_root), "doctor"])
+    assert rc == 1
+    assert "filename and id disagree" in capsys.readouterr().err
+
+
+def test_doctor_flags_a_ledger_category_no_intervention_uses(factory_root: Path, capsys):
+    """The recurrence join is exact string equality, so a near-miss spelling makes
+    it find nothing forever. `factory gate` nudges the steer side; nothing nudges
+    the ledger side, which is what an agent types while writing up a proposal."""
+    from factory.interventions import Interventions
+    from factory.model import GateDecision, WorkItem
+
+    Interventions(factory_root).record(
+        WorkItem(id="WI-0001", title="t", state="spec_review"),
+        GateDecision(gate="spec_review", decision="needs_revision", category="missing-edge-case"),
+        "spec_review",
+    )
+    Ledger(factory_root).add(
+        title="tighten the spec skill",
+        lever="skill",
+        files=["x"],
+        answers=["y"],
+        signal="s",
+        category="missing_edge_case",  # underscores — silently joins nothing
+    )
+    rc = main(["--root", str(factory_root), "doctor"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "matches no intervention record" in out
+    assert "did you mean 'missing-edge-case'?" in out
+
+
+def test_doctor_flags_an_intervention_with_no_machine_block(factory_root: Path, capsys):
+    """records() is best-effort by design, so a record whose machine block is gone
+    still counts as a steer but drops out of every category join — best-effort has
+    to be visible somewhere or it is just silent loss with better manners."""
+    d = factory_root / ".factory" / "interventions"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "WI-0001-spec_review-2026-08-04T10-00-00Z.md").write_text("# hand-written notes\n")
+    rc = main(["--root", str(factory_root), "doctor"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "no readable machine block" in out

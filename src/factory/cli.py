@@ -17,6 +17,7 @@ agent can parse the directive unambiguously.
 from __future__ import annotations
 
 import argparse
+import difflib
 import getpass
 import json
 import os
@@ -762,11 +763,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     errors: list[str] = []
     warns: list[str] = []
 
+    # The broad excepts below buy continuation, not survival — main() already
+    # catches at the boundary. One broken store must not hide the other checks.
     line = None
     try:
         line = Line.load(root / "line.yml")
         print("✓ line.yml loads and validates")
-    except Exception as e:  # noqa: BLE001 — a doctor reports, never crashes
+    except Exception as e:  # noqa: BLE001
         errors.append(f"line.yml: {e}")
     policies = None
     try:
@@ -776,8 +779,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         errors.append(f"policies.yml: {e}")
 
     store = Store(root)
+    # Lineage resolves against what's on disk, not what parsed — an unreadable
+    # item is one error, not also a "broken lineage" warning on every child.
+    known_ids = set(store.list_ids())
     items = {}
-    for iid in store.list_ids():
+    for iid in known_ids:
         try:
             items[iid] = store.load(iid)
         except Exception as e:  # noqa: BLE001
@@ -785,16 +791,28 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     print(f"✓ {len(items)} work item(s) parse")
     for leftover in sorted(store.dir.glob("*.tmp")) if store.dir.exists() else []:
         warns.append(f"leftover temp file in the store: {leftover.name} (crashed save?)")
-    for iid, item in items.items():
+    for iid, item in sorted(items.items()):
+        if item.id != iid:
+            # Every save would write to a different file than the one it read.
+            errors.append(f"{iid}: file holds id {item.id!r} — filename and id disagree")
         if line and item.state not in line.states:
             errors.append(f"{iid}: state {item.state!r} is not on the line")
-        if item.parent and item.parent not in items:
+        if item.parent and item.parent not in known_ids:
             warns.append(f"{iid}: parent {item.parent!r} does not exist (broken lineage)")
         if item.metadata.get("gate_binding") and line and not line.is_gate(item.state):
             warns.append(
                 f"{iid}: has a gate binding but sits at {item.state!r} (not a gate) — "
                 "stale; the next gate decision at that gate would clear it"
             )
+        for art in item.artifacts:
+            # Nothing else catches this: _hash_file maps a missing file to the
+            # string "missing", which then matches itself between bind and decide.
+            if not (root / art).is_file():
+                warns.append(
+                    f"{iid}: artifact {art!r} does not exist (state {item.state}) — "
+                    "a station told to read it gets nothing, and a gate binding "
+                    "over it detects no drift"
+                )
 
     if policies:
         suspended = PolicyState(root).suspended()
@@ -808,10 +826,29 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     metrics.events()
     warns += [f"metrics ledger: {w}" for w in metrics.warnings]
     led = Ledger(root)
-    led.entries()
+    entries = led.entries()
     warns += [f"retro ledger: {w}" for w in led.warnings]
-    # Interventions dir readable (best-effort — records() already tolerates)
-    n_iv = len(Interventions(root).list())
+    interventions = Interventions(root)
+    records = interventions.records()
+    n_iv = len(records)
+    # `factory gate` nudges when a steer coins a new category; nothing nudges the
+    # ledger side, so a near-miss spelling only ever surfaces here.
+    in_use = {c for r in records if (c := r.get("category")) and c != "uncategorized"}
+    for e in entries:
+        cat = e.get("category")
+        if cat and cat not in in_use:
+            near = difflib.get_close_matches(cat, sorted(in_use), n=1)
+            warns.append(
+                f"retro ledger: {e['id']} category {cat!r} matches no intervention record"
+                + (f" — did you mean {near[0]!r}?" if near else "")
+                + " (the recurrence check joins on this exact string)"
+            )
+    lost = [r for r in records if r.get("malformed")]
+    for r in lost:
+        warns.append(
+            f"intervention {r['path'].name}: no readable machine block — it still "
+            "counts as a steer, but drops out of every category join"
+        )
     print(f"✓ metrics/ledger read; {n_iv} intervention record(s)")
 
     import shutil as _shutil
@@ -1373,11 +1410,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Cross-check config and stores for consistency (read-only; exit 1 on errors)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Checks: line.yml and policies.yml validate; every work item parses and sits on a\n"
-            "known state; lineage (parent) pointers resolve; no stale gate bindings, crashed-\n"
-            "save leftovers, or orphaned policy suspensions; metrics/ledger files are readable\n"
-            "(torn lines counted). Warnings inform; errors exit 1. Run it when something feels\n"
-            "off, after a crash, or before trusting a factory you've just moved or upgraded."
+            "Checks: line.yml and policies.yml validate; every work item parses, sits on a\n"
+            "known state, and matches its filename; every artifact path still exists; lineage\n"
+            "(parent) pointers resolve; no stale gate bindings, crashed-save leftovers, or\n"
+            "orphaned policy suspensions; metrics/ledger files are readable (torn lines\n"
+            "counted); every ledger category matches an intervention record, and every\n"
+            "intervention still has a readable machine block — the two halves of the retro's\n"
+            "recurrence join, which fails silently when either drifts.\n"
+            "\n"
+            "Warnings inform; errors exit 1. Run it when something feels off, after a crash,\n"
+            "or before trusting a factory you've just moved or upgraded."
         ),
     )
     s.set_defaults(func=cmd_doctor)
