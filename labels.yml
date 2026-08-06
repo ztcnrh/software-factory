@@ -14,7 +14,7 @@ labels:
   - {name: "factory:spec",        color: "c5def5", description: "At the spec station"}
   - {name: "factory:spec-review", color: "fbca04", description: "Human gate: spec review"}
   - {name: "factory:implement",   color: "1d76db", description: "At the implementation station"}
-  - {name: "factory:code-review", color: "0e8a16", description: "At the code-review station"}
+  - {name: "factory:code-review", color: "0052cc", description: "At the code-review station"}
   - {name: "factory:verify",      color: "5319e7", description: "At the verification station"}
   - {name: "factory:ship-review", color: "fbca04", description: "Human gate: ready to ship?"}
   - {name: "factory:deploy",      color: "bfdadc", description: "Post-merge CI/CD deploy"}
