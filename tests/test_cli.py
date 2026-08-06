@@ -226,6 +226,28 @@ def test_gate_packet_flag_requires_open(factory_root: Path, capsys):
     assert "--packet only means something with --bind" in capsys.readouterr().err
 
 
+def test_labels_repo_without_github_is_rejected(factory_root: Path, capsys):
+    """--repo is only ever forwarded to `gh label create`, so without --github it
+    would be silently dropped while the command still exited 0 — the caller asked
+    to touch a specific repo and must not be told nothing happened."""
+    rc = main(["--root", str(factory_root), "labels", "--repo", "owner/name"])
+    assert rc == 1
+    assert "--repo only means something with --github" in capsys.readouterr().err
+
+
+def test_labels_lists_without_touching_github(factory_root: Path, capsys):
+    """A bare `factory labels` stays a read-only inspect (the CLI's convention for
+    status/metrics/doctor) — it prints the set and points at --github to create."""
+    (factory_root / "labels.yml").write_text(
+        "labels:\n  - name: factory:triage\n    color: ededed\n    description: In triage\n"
+    )
+    rc = main(["--root", str(factory_root), "labels"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "factory:triage" in out
+    assert "--github" in out
+
+
 def test_gate_bind_decide_drift_flow_end_to_end(factory_root: Path, capsys):
     """The full CLI arc: open binds (with a packet file), a post-review edit is
     refused with the culprit named, and --accept-drift records it — the codex

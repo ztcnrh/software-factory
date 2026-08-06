@@ -869,6 +869,12 @@ def cmd_labels(args: argparse.Namespace) -> int:
 
     import yaml
 
+    # Reject a silently-dropped flag before doing any work: --repo only ever
+    # reaches `gh label create`, which never runs without --github.
+    if args.repo and not args.github:
+        print("✗ --repo only means something with --github", file=sys.stderr)
+        return 1
+
     path = _root(args) / "labels.yml"
     if not path.exists():
         print(f"✗ no labels.yml at {path.parent}", file=sys.stderr)
