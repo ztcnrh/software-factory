@@ -11,6 +11,7 @@ module only decides WHAT should happen next and records WHAT happened.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,9 +19,21 @@ from typing import Any
 from .interventions import Interventions
 from .line import Line, LineError
 from .metrics import Metrics
-from .model import GateDecision, StationReport, WorkItem
-from .policies import Policies
+from .model import (
+    RISK_FLOOR,
+    RISK_ORDER,
+    GateDecision,
+    StationReport,
+    WorkItem,
+    risk_floor_matches,
+)
+from .policies import Policies, PolicyState
 from .store import Store
+
+
+class GateDriftError(Exception):
+    """A gate decision arrived after the reviewed content moved — the approval
+    would bind to something the human never saw. Caught at the CLI boundary."""
 
 
 @dataclass
@@ -35,9 +48,15 @@ class Action:
     gate: str | None = None
     prompt: str = ""
     message: str = ""
+    # run_station context: which run this is (1-based), whether the station is a
+    # checker (drives the driver's isolation rules), and the event that routed
+    # the item here (a retry knows what sent it back without digging).
+    attempt: int | None = None
+    checking: bool = False
+    last_return: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {k: v for k, v in self.__dict__.items() if v not in (None, "")}
+        return {k: v for k, v in self.__dict__.items() if v not in (None, "", False)}
 
 
 class Dispatcher:
@@ -45,9 +64,16 @@ class Dispatcher:
         self.root = Path(root)
         self.line = Line.load(self.root / "line.yml")
         self.policies = Policies.load(self.root / "policies.yml")
+        self.policy_state = PolicyState(self.root)
         self.store = Store(self.root)
         self.metrics = Metrics(self.root)
         self.interventions = Interventions(self.root)
+
+    def active_auto_rule(self, gate: str, item: WorkItem) -> dict | None:
+        """The one lookup every auto-clear goes through: policies.yml rules
+        filtered by the suspension overlay, so a demoted rule can't fire."""
+        suspended = frozenset(self.policy_state.suspended())
+        return self.policies.auto_decision(gate, item, suspended=suspended)
 
     # --- creation -----------------------------------------------------------
     def new_item(
@@ -72,6 +98,29 @@ class Dispatcher:
             source_ref=source_ref,
         )
         item.log(kind="created", to_state=item.state, actor="factory")
+        # Deterministic risk floor: sensitive-sounding work enters at RISK_FLOOR
+        # unless a human explicitly set a risk at creation (their call wins —
+        # recorded either way, so the audit trail says why).
+        matches = risk_floor_matches(f"{title}\n{body}")
+        if matches:
+            if risk == "unknown":
+                item.risk = RISK_FLOOR
+                item.metadata["risk_floor"] = RISK_FLOOR
+                item.metadata["risk_floor_matches"] = matches
+                item.log(
+                    kind="note",
+                    actor="factory",
+                    note=f"risk floored to {RISK_FLOOR}: touches {', '.join(matches)} "
+                    "(stations may raise it, never lower it; an explicit risk at "
+                    "creation overrides)",
+                )
+            elif RISK_ORDER.get(risk, 3) < RISK_ORDER[RISK_FLOOR]:
+                item.log(
+                    kind="note",
+                    actor="factory",
+                    note=f"risk floor bypassed by explicit risk={risk} "
+                    f"(matched: {', '.join(matches)})",
+                )
         self.store.save(item)
         self.metrics.emit(kind="created", item=item.id)
         return item
@@ -98,7 +147,7 @@ class Dispatcher:
             )
         if self.line.is_gate(state):
             gate = self.line.gate_name(state) or state
-            rule = self.policies.auto_decision(gate, item)
+            rule = self.active_auto_rule(gate, item)
             if rule:
                 return Action(
                     type="auto_gate",
@@ -129,7 +178,23 @@ class Dispatcher:
             skill=self.line.skill_for(state),
             agent=self.line.agent_for(state),
             message=f"Run the {state!r} station.",
+            attempt=item.attempts.get(state, 0) + 1,
+            checking=self.line.is_checking(state),
+            last_return=self._last_return(item, state),
         )
+
+    @staticmethod
+    def _last_return(item: WorkItem, state: str) -> str | None:
+        """The event that routed the item into ``state`` — so a retry's brief can
+        say what sent it back (e.g. the review's headline) without the station
+        re-mining history."""
+        for ev in reversed(item.history):
+            if ev.to_state == state and ev.kind != "created":
+                who = ev.actor or ev.kind
+                verdict = f" ({ev.verdict})" if ev.verdict else ""
+                note = f": {ev.note}" if ev.note else ""
+                return f"{who}{verdict}{note}"
+        return None
 
     # --- act (mutating) -----------------------------------------------------
     def advance(self, item: WorkItem, report: StationReport) -> str:
@@ -140,6 +205,18 @@ class Dispatcher:
         item.attempts[state] = item.attempts.get(state, 0) + 1
         item.cost += report.cost
         self._absorb(item, report)
+        # The floor set at intake holds against stations: risk may be raised by
+        # a report, never lowered back below the floor (a model can only make a
+        # sensitive item MORE guarded, not quietly de-escalate it past a gate).
+        floor = item.metadata.get("risk_floor")
+        if floor and report.risk and RISK_ORDER.get(report.risk, 3) < RISK_ORDER.get(floor, 0):
+            item.risk = floor
+            item.log(
+                kind="note",
+                actor="factory",
+                note=f"risk floor: kept {floor} (station proposed {report.risk}; floored at "
+                f"intake on: {', '.join(item.metadata.get('risk_floor_matches', []))})",
+            )
 
         if report.human_required:
             # The escape hatch: any station can bypass the routing table and land
@@ -152,6 +229,22 @@ class Dispatcher:
             nxt = self.line.route(state, report.verdict)
             verdict = report.verdict
             note = report.summary
+        # Attempt cap: an automated route into a station that already ran its
+        # budget this epoch lands at `blocked` instead of looping again — the
+        # live circuit-breaker for implement↔code_review-style ping-pong. Human
+        # decisions are never capped (gate/correct/revive open a fresh epoch).
+        cap_note = None
+        if nxt != "blocked" and self.line.is_station(nxt):
+            cap = self.line.max_attempts(nxt)
+            if cap is not None:
+                runs = self._runs_this_epoch(item, nxt)
+                if runs >= cap:
+                    cap_note = (
+                        f"attempt cap: {nxt} already ran {runs}× since the last human "
+                        f"touch (max_attempts {cap}) — loop stopped instead of re-entering; "
+                        "a human unblock opens a fresh budget"
+                    )
+                    nxt = "blocked"
         item.log(
             kind="station",
             from_state=state,
@@ -160,14 +253,19 @@ class Dispatcher:
             actor=report.station,
             note=note,
             cost=report.cost,
+            ran=report.ran or None,
         )
         item.state = nxt
         self._note_park(item, state, nxt)
         if nxt == "blocked":
-            # However it arrived — the routed `blocked` verdict or the escape hatch —
-            # landing at the blocked gate means autonomy broke at this station. Count
-            # it as a human step-in, or the one-shot ship rate would lie.
+            # However it arrived — the routed `blocked` verdict, the escape hatch,
+            # or the attempt cap — landing at the blocked gate means autonomy broke
+            # at this station. Count it as a human step-in, or the one-shot ship
+            # rate would lie.
             item.steers += 1
+            self._suspend_clearing_rules(item, f"blocked at {state} ({note})")
+        if cap_note:
+            item.log(kind="note", actor="factory", note=cap_note)
         if report.notes:
             # Station notes are context for whoever reads the item next — the human
             # at the gate (via status / the review packet) and the next station.
@@ -204,13 +302,66 @@ class Dispatcher:
         )
         return item.state
 
-    def gate(self, item: WorkItem, decision: GateDecision, produced: str = "") -> str:
+    def bind_gate(self, item: WorkItem, by: str, packet: str | None = None) -> dict:
+        """Bind the upcoming human decision to what is on disk right now.
+
+        Snapshots the review packet, the item's artifact files, and the PR
+        pointer (content hashes, local files only — stays offline), so ``gate``
+        can refuse a decision if any of it moved between review and approval.
+        What the human approves is what the human saw. Binding says nothing
+        about the outcome — the gate still waits on the human."""
+        state = item.state
+        if not self.line.is_gate(state):
+            raise LineError(f"{item.id} is at {state!r}, not a human gate — nothing to bind")
+        gate_name = self.line.gate_name(state) or state
+        snap = self._gate_snapshot(item, packet)
+        item.log(
+            kind="gate_bound",
+            from_state=state,
+            actor=by,
+            note=f"decision bound to {f'packet {packet}' if packet else 'no packet file'}"
+            f" + pr + {len(snap['artifacts'])} artifact(s)",
+        )
+        snap["gate"] = gate_name
+        # Recorded after the bind event: ANY later history growth is drift.
+        snap["history_len"] = len(item.history)
+        item.metadata["gate_binding"] = snap
+        self.store.save(item)
+        return snap
+
+    def gate(
+        self,
+        item: WorkItem,
+        decision: GateDecision,
+        produced: str = "",
+        accept_drift: bool = False,
+    ) -> str:
         """Record a human's decision at a gate; capture an intervention if the
-        human steered (revision / not-ready / park / explicit change)."""
+        human steered (revision / not-ready / park / explicit change). If the
+        gate was bound (``bind_gate``), the decision is checked against the
+        bound snapshot and refused on drift unless ``accept_drift``."""
         state = item.state
         if not self.line.is_gate(state):
             raise LineError(f"{item.id} is at {state!r}, not a human gate")
         gate_name = self.line.gate_name(state) or state
+        bound = item.metadata.get("gate_binding")
+        if bound and bound.get("gate") == gate_name:
+            drift = self._gate_drift(item, bound)
+            if drift and not accept_drift:
+                raise GateDriftError(
+                    f"{item.id}: the content reviewed at {gate_name} moved since it was "
+                    "bound:\n  - " + "\n  - ".join(drift)
+                )
+            if drift:
+                item.log(
+                    kind="note",
+                    actor="factory",
+                    note="gate decision recorded despite drift: " + "; ".join(drift),
+                )
+            item.metadata.pop("gate_binding", None)
+        elif bound:
+            # A leftover binding from some other gate state — stale, not load-bearing.
+            item.metadata.pop("gate_binding", None)
         nxt = self.line.route(state, decision.decision)
         item.human_touches += 1
         item.log(
@@ -223,6 +374,10 @@ class Dispatcher:
         )
         item.state = nxt
         self._note_park(item, state, nxt)
+        # A human decision opens a fresh attempt epoch: new guidance deserves a
+        # fresh loop budget, and the lifetime `attempts` map keeps the full churn
+        # history for the retro regardless.
+        item.metadata["epoch_len"] = len(item.history)
         if decision.is_steer:
             item.steers += 1  # a send-back / correction / park is human rework
             path = self.interventions.record(item, decision, state, produced)
@@ -230,6 +385,9 @@ class Dispatcher:
                 kind="note",
                 actor="factory",
                 note=f"intervention recorded at {path.relative_to(self.root)}",
+            )
+            self._suspend_clearing_rules(
+                item, f"human steer at {gate_name} ({decision.decision})"
             )
         self.store.save(item)
         self.metrics.emit(
@@ -276,6 +434,7 @@ class Dispatcher:
             note=notes or ("resumed where it left off" if resume else ""),
         )
         item.state = nxt
+        item.metadata["epoch_len"] = len(item.history)  # human act: fresh attempt epoch
         self.store.save(item)
         self.metrics.emit(kind="revive", item=item.id, to_state=nxt, resumed=resume, by=by)
         return item.state
@@ -304,6 +463,7 @@ class Dispatcher:
             note=reason,
         )
         item.state = state
+        item.metadata["epoch_len"] = len(item.history)  # human act: fresh attempt epoch
         self.store.save(item)
         self.metrics.emit(
             kind="correction", item=item.id, from_state=old, to_state=state, by=by
@@ -326,6 +486,12 @@ class Dispatcher:
         )
         item.state = nxt
         self._note_park(item, state, nxt)
+        # Remember who vouched for this item: if it later needs human rework,
+        # every rule that auto-cleared it gets suspended (the demotion half of
+        # the autonomy ratchet — promotion stays human, in policies.yml).
+        cleared_by = item.metadata.setdefault("auto_cleared_by", [])
+        if rule["id"] not in cleared_by:
+            cleared_by.append(rule["id"])
         self.store.save(item)
         self.metrics.emit(
             kind="gate",
@@ -339,6 +505,72 @@ class Dispatcher:
         return nxt
 
     # --- internals ----------------------------------------------------------
+    def _suspend_clearing_rules(self, item: WorkItem, why: str) -> None:
+        """The demotion half of the autonomy ratchet: an item needing human
+        rework suspends every policy rule that auto-cleared it. Conservative on
+        purpose — the gate returns to the human, who reviews and reinstates
+        (``factory policy reinstate``) if the rule wasn't at fault."""
+        for rule_id in item.metadata.get("auto_cleared_by", []):
+            if self.policy_state.suspend(rule_id, item.id, why):
+                item.log(
+                    kind="note",
+                    actor="factory",
+                    note=f"policy {rule_id!r} suspended: it auto-cleared this item, which "
+                    f"then needed a human ({why}). Reinstate after review: "
+                    f"factory policy reinstate {rule_id}",
+                )
+                self.metrics.emit(
+                    kind="policy_suspended", rule=rule_id, item=item.id, why=why
+                )
+
+    def _hash_file(self, rel: str) -> str:
+        """Content hash of a root-relative file, or "missing" — so an artifact
+        that vanishes between open and decide reads as drift, not an error."""
+        p = self.root / rel
+        if not p.is_file():
+            return "missing"
+        return hashlib.sha256(p.read_bytes()).hexdigest()
+
+    def _gate_snapshot(self, item: WorkItem, packet: str | None) -> dict:
+        return {
+            "packet": packet,
+            "packet_hash": self._hash_file(packet) if packet else None,
+            "pr": item.pr,
+            "artifacts": {a: self._hash_file(a) for a in sorted(item.artifacts)},
+        }
+
+    def _gate_drift(self, item: WorkItem, bound: dict) -> list[str]:
+        """Everything that moved since ``bind_gate`` — named, so the refusal
+        tells the human exactly what to re-review."""
+        drift: list[str] = []
+        grew = len(item.history) - int(bound.get("history_len", 0))
+        if grew:
+            drift.append(f"item history advanced by {grew} event(s) since the gate was bound")
+        if item.pr != bound.get("pr"):
+            drift.append(f"pr changed: {bound.get('pr')!r} → {item.pr!r}")
+        if bound.get("packet") and self._hash_file(bound["packet"]) != bound.get("packet_hash"):
+            drift.append(f"review packet changed: {bound['packet']}")
+        old = bound.get("artifacts", {})
+        now = {a: self._hash_file(a) for a in sorted(item.artifacts)}
+        for a, h in now.items():
+            if a not in old:
+                drift.append(f"artifact added since bind: {a}")
+            elif h != old[a]:
+                drift.append(f"artifact changed since bind: {a}")
+        drift += [f"artifact removed since bind: {a}" for a in old if a not in now]
+        return drift
+
+    @staticmethod
+    def _runs_this_epoch(item: WorkItem, state: str) -> int:
+        """Completed runs of ``state`` since the last human touch (gate, correct,
+        or revive stamps ``metadata.epoch_len``). The lifetime ``attempts`` map is
+        deliberately untouched history — the retro's churn signal — while the cap
+        judges only the current fully-automated stretch."""
+        epoch = item.metadata.get("epoch_len", 0)
+        return sum(
+            1 for ev in item.history[epoch:] if ev.kind == "station" and ev.from_state == state
+        )
+
     def _note_park(self, item: WorkItem, from_state: str, nxt: str) -> None:
         """Remember where a park came from (any route into a revivable terminal),
         so ``revive --resume`` can re-enter there instead of the top of the line."""

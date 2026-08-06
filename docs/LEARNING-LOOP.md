@@ -19,9 +19,11 @@ This is the part that makes it a *factory* and not just a pipeline. A pipeline r
 
 The asymmetry is the whole point: you make a decision *once* (or a few times), the Retro station generalizes it, and the factory carries it forever. You propose nothing and dispose everything; the machine proposes and you dispose.
 
+Two of the loop's checks run mechanically, so it grades itself even between retros: the briefing's **recurrence check** flags any applied proposal whose intervention `--category` has recurred since it took effect (the fix didn't hold — computed from the records, not remembered), and a signed gate policy whose auto-cleared item later needed human rework is **auto-suspended** (its gate returns to the human; `factory policy list` / `reinstate` manage it). Autonomy is an asymmetric ratchet: promotion needs your signature, demotion is automatic.
+
 ## Gate policies: the lever that moves the number
 
-A gate policy is a small rule: *if a work item reaching gate G matches these conditions (labels, risk ceiling), apply this decision automatically.* It lives in `policies.yml`, and it does nothing until `approved_by` is set — so the factory can *suggest* shortcuts but never *take* them without your signature. Conservative by construction: the default at every gate is "require a human," and a learned policy only ever narrows that for a proven-safe slice.
+A gate policy is a small rule: *if a work item reaching gate G matches these conditions (labels, risk ceiling), apply this decision automatically.* It lives in `policies.yml`, and it does nothing until `approved_by` is set — so the factory can *suggest* shortcuts but never *take* them without your signature. Conservative by construction: the default at every gate is "require a human," and a learned policy only ever narrows that for a proven-safe slice. And the trust it earns is revocable by evidence: every auto-clear stamps the rule on the item, and if that item later needs your rework, the rule is suspended on the spot — the engine never keeps taking a shortcut that just failed.
 
 This is how "raise the one-shot ship rate" becomes a *consequence* of the learning loop rather than a setting you flip. You don't tell the factory to skip gates; you teach it — sharper stations so work needs no rework, plus the occasional signed policy for a proven-safe slice — and the metric follows.
 

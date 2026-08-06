@@ -30,6 +30,7 @@ def _now() -> str:
 class Metrics:
     def __init__(self, root: str | Path):
         self.events_dir = Path(root) / ".factory" / "metrics" / "events"
+        self.warnings: list[str] = []  # malformed lines noticed on the last read
 
     def emit(self, **event: Any) -> None:
         # One shard per item (single-writer, conflict-free); ts stamped here since
@@ -40,19 +41,29 @@ class Metrics:
         with open(shard, "a") as f:
             f.write(json.dumps(event) + "\n")
 
-    @staticmethod
-    def _read(path: Path) -> list[dict]:
+    def _read(self, path: Path) -> list[dict]:
+        """Read one shard, tolerating a torn line (e.g. a crash mid-append).
+        One bad line must not take down every view forever — it's skipped and
+        reported via ``self.warnings``, mirroring the retro ledger's discipline.
+        The shard is named in the warning: a line number alone no longer locates it."""
         out = []
         with open(path) as f:
-            for line in f:
+            for i, line in enumerate(f, 1):
                 line = line.strip()
-                if line:
+                if not line:
+                    continue
+                try:
                     out.append(json.loads(line))
+                except json.JSONDecodeError:
+                    self.warnings.append(
+                        f"{path.name} line {i}: unreadable (not JSON) — event skipped"
+                    )
         return out
 
     def events(self) -> list[dict]:
         # Reassemble the global log from the shards, ordered by ts — cross-shard
         # write order carries no meaning.
+        self.warnings = []
         rows: list[dict] = []
         if self.events_dir.exists():
             for shard in sorted(self.events_dir.glob("*.jsonl")):
@@ -88,7 +99,10 @@ class Metrics:
             key = f"{b.get('station', '?')} (blocked)"
             by_stage[key] = by_stage.get(key, 0) + 1
         total = len(shipped)
-        cost = sum(e.get("cost", 0.0) for e in events)
+        # Cost is counted once, at the station events that spent it. A `shipped`
+        # event repeats the item's *cumulative* cost (useful per-ship context);
+        # summing it here again would double-count every shipped item's spend.
+        cost = sum(e.get("cost", 0.0) for e in events if e.get("kind") == "station")
         # Trend: the last `window` ships vs the `window` before them, in ledger
         # (append) order — so the North Star can be seen moving, not just its
         # lifetime average, which weights the factory's earliest runs forever.

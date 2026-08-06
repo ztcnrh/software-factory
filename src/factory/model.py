@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -18,19 +19,63 @@ def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+# One shared ordering for risk comparisons ("unknown" ranks riskiest — it hasn't
+# been judged yet, so nothing may treat it as safe). Policies and the risk floor
+# both consume this; one home so the two can never disagree.
+RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "unknown": 3}
+
+# Deterministic risk floor: work whose text touches these concerns cannot enter
+# the line below `medium` unless a human explicitly says so, and a station may
+# raise its risk but never lower it back past the floor. A keyword hit is a dumb
+# signal, so it makes the weak claim ("not trivial — don't auto-clear its gates")
+# and leaves `high` to judgment: triage, or code-review's own auth/payments
+# council trigger, which reads the text rather than a rating.
+# Word-bounded alternation, not substrings: `auth` must not fire on `author`,
+# `token` must not fire on `tokenizer`. Families are prefix patterns
+# (`authoriz\w*`) so a new inflection can't slip the net the way an enumerated
+# list of conjugations does.
+RISK_FLOOR = "medium"
+_RISK_FLOOR_TERMS = (
+    # identity & access
+    r"auth", r"authn", r"authz", r"authenticat\w*", r"authoriz\w*",
+    r"oauth", r"sso", r"jwt", r"login", r"password\w*", r"token", r"tokens",
+    r"cookie", r"cookies", r"permission\w*", r"privilege\w*", r"rbac", r"acl",
+    # secrets & crypto
+    r"secret", r"secrets", r"credential\w*", r"encrypt\w*", r"decrypt\w*",
+    r"csrf", r"xss",
+    # money
+    r"payment\w*", r"billing", r"refund\w*",
+    # data at risk
+    r"migrat\w*", r"backfill\w*", r"pii", r"gdpr",
+)
+_RISK_FLOOR_RE = re.compile(r"\b(" + "|".join(_RISK_FLOOR_TERMS) + r")\b", re.IGNORECASE)
+
+
+def risk_floor_matches(text: str) -> list[str]:
+    """Distinct floor-triggering terms found in ``text``, lowercased, first-seen
+    order — recorded on the item so every later clamp can say *why*."""
+    seen: list[str] = []
+    for m in _RISK_FLOOR_RE.findall(text or ""):
+        w = m.lower()
+        if w not in seen:
+            seen.append(w)
+    return seen
+
+
 @dataclass
 class Event:
     """One entry in a work item's history. Every transition is recorded so the
     item's whole journey down the line is auditable and replayable."""
 
     ts: str
-    kind: str  # created | station | gate | auto_gate | spawn | note | correction | revive
+    kind: str  # created | station | gate | auto_gate | gate_bound | spawn | note | correction | ...
     from_state: str | None = None
     to_state: str | None = None
     verdict: str | None = None
     actor: str | None = None  # "triage" | "human:johndoe" | "driver:claude" | "policy:<id>" ...
     note: str | None = None
     cost: float = 0.0
+    ran: str | None = None  # how a station ran: inline | subagent | resumed | cloud
 
 
 @dataclass
@@ -94,6 +139,7 @@ class StationReport:
     notes: str = ""
     risk: str | None = None
     pr: str | None = None
+    ran: str = ""  # how the station ran (inline | subagent | resumed | cloud) — trace metadata
     labels: list[str] = field(default_factory=list)  # classifying labels to add (append-only)
     spawn: list[dict[str, Any]] = field(default_factory=list)  # new items → triage
 

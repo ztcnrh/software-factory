@@ -25,7 +25,7 @@ STATUSES = {"proposed", "applied", "dormant", "rejected", "superseded"}
 # observed outcome is recorded — that's what "reconcile past proposals" means.
 CLOSED = {"rejected", "superseded"}
 
-_FIELDS = ("title", "lever", "files", "answers", "signal", "pr", "status")
+_FIELDS = ("title", "lever", "files", "answers", "signal", "pr", "status", "category")
 
 
 def _now() -> str:
@@ -63,11 +63,16 @@ class Ledger:
             if row.get("op") == "add" and rid:
                 entry = {k: row.get(k) for k in _FIELDS}
                 entry.update(id=rid, date=row.get("ts", ""), outcome=row.get("outcome", ""))
+                entry["status_since"] = row.get("ts", "")
                 by_id[rid] = entry
             elif row.get("op") == "update" and rid in by_id:
                 for k in ("status", "outcome", "pr"):
                     if row.get(k) is not None:
                         by_id[rid][k] = row[k]
+                if row.get("status") is not None:
+                    # When the status last changed — the recurrence check scopes
+                    # "did the steer come back?" to interventions after this.
+                    by_id[rid]["status_since"] = row.get("ts", "")
             else:
                 self.warnings.append(f"line {i}: update for unknown id {rid!r} — skipped")
         return sorted(by_id.values(), key=lambda e: e["id"])
@@ -87,6 +92,7 @@ class Ledger:
         answers: list[str] | None = None,
         pr: str = "",
         status: str = "proposed",
+        category: str = "",
     ) -> dict:
         if not title.strip() or not lever.strip():
             raise LedgerError("a ledger row needs a --title and a --lever")
@@ -110,6 +116,7 @@ class Ledger:
                 "signal": signal.strip(),
                 "pr": pr,
                 "status": status,
+                "category": category.strip(),
             }
         )
         self.render()
@@ -165,6 +172,8 @@ class Ledger:
                 lines.append(f"- **Files:** {', '.join(e['files'])}")
             if e.get("answers"):
                 lines.append(f"- **Answers:** {', '.join(e['answers'])}")
+            if e.get("category"):
+                lines.append(f"- **Category:** {e['category']}")
             lines.append(f"- **How we'll know it worked:** {e['signal']}")
             if e.get("pr"):
                 lines.append(f"- **PR:** {e['pr']}")

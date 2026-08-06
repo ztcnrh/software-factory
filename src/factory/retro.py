@@ -15,6 +15,7 @@ from pathlib import Path
 from .interventions import Interventions
 from .ledger import Ledger
 from .metrics import Metrics
+from .policies import PolicyState
 from .store import Store
 
 # Times a station may run on one state before the item is flagged for a look:
@@ -59,6 +60,57 @@ def briefing(root: str | Path, churn_threshold: int = CHURN_THRESHOLD) -> str:
             )
         for w in ledger.warnings:
             lines.append(f"- ⚠ ledger: {w}")
+
+    # Mechanical recurrence check: an APPLIED proposal with a category is a
+    # falsifiable claim — "this class of steer stops". Interventions of that
+    # category recorded after it took effect say the claim is failing; compute
+    # that join here so no retro has to remember to do it.
+    recurrences = []
+    records = interventions.records()
+    for e in ledger.entries():
+        if e.get("status") != "applied" or not e.get("category"):
+            continue
+        since = e.get("status_since", "")
+        hits = [
+            r
+            for r in records
+            if r.get("category") == e["category"] and r.get("ts", "") > since
+        ]
+        if hits:
+            recurrences.append((e, hits))
+    if recurrences:
+        lines += [
+            "",
+            "## Recurrence check — applied proposals whose steer came back",
+            "",
+            "These proposals shipped, and interventions of the very category they were meant "
+            "to end have been recorded since. The fix didn't hold (or didn't cover the class): "
+            "adjudicate — tighten/supersede the proposal, or record the honest outcome.",
+            "",
+        ]
+        for e, hits in recurrences:
+            hit_names = ", ".join(f"`{h['path'].name}`" for h in hits)
+            lines.append(
+                f"- ⚠ **{e['id']}** (category `{e['category']}`, applied "
+                f"{str(e.get('status_since', ''))[:10]}): {len(hits)} matching intervention(s) "
+                f"since — {hit_names}"
+            )
+
+    suspended = PolicyState(root).suspended()
+    if suspended:
+        lines += [
+            "",
+            "## Suspended gate policies",
+            "",
+            "These signed rules auto-cleared an item that later needed human rework, so the "
+            "engine suspended them (their gates are back to human). Adjudicate each: if the "
+            "rule was at fault, propose a tighter replacement (and supersede its ledger row); "
+            "if the failure was unrelated, recommend reinstating "
+            "(`factory policy reinstate <id>`). Don't leave them in limbo.",
+            "",
+        ]
+        for rid, s in sorted(suspended.items()):
+            lines.append(f"- **{rid}** — suspended {s['ts']} after {s['item']}: {s['why']}")
 
     churn = []
     for item in Store(root).list_items():

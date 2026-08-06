@@ -13,6 +13,11 @@
 #   1. Repo secret  ANTHROPIC_API_KEY  (or CLAUDE_CODE_OAUTH_TOKEN).
 #   2. Labels created:  factory labels --github   (or `gh label create ...`).
 #   3. The factory installed in the repo (install/install.py --with-cloud).
+#   4. Repo variable  FACTORY_TOOLKIT_GIT  — a pip-installable ref to the factory
+#      toolkit, e.g.  git+https://github.com/<you>/software-factory@main  (the
+#      adopted repo carries only the .claude layer + config, not the engine, so
+#      the CLI must install from the toolkit source; a private toolkit repo needs
+#      a token in the URL or a checkout step of its own).
 
 name: factory-station
 
@@ -43,8 +48,18 @@ jobs:
           python-version: "3.13"
 
       - name: Install the factory CLI and Claude Code
+        env:
+          FACTORY_TOOLKIT_GIT: ${{ vars.FACTORY_TOOLKIT_GIT }}
         run: |
-          uv tool install .
+          # The adopted repo has no engine source — `uv tool install .` here would
+          # fail (or worse, install the *app* being built). Install the CLI from
+          # the toolkit ref instead, and fail fast with a real message if unset.
+          if [ -z "$FACTORY_TOOLKIT_GIT" ]; then
+            echo "::error::FACTORY_TOOLKIT_GIT repo variable is not set — point it at the" \
+                 "factory toolkit, e.g. git+https://github.com/<you>/software-factory@main"
+            exit 1
+          fi
+          uv tool install "$FACTORY_TOOLKIT_GIT"
           curl -fsSL https://claude.ai/install.sh | bash
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
@@ -63,10 +78,12 @@ jobs:
         run: |
           claude -p "You are the factory ${STATION} station running unattended. \
             The work item is GitHub issue #${ISSUE} (its local state lives in .factory/). \
-            Apply the 'factory-${STATION}' skill, do the real work, then finish by calling \
-            'factory advance' with the correct verdict, and re-label issue #${ISSUE} to the \
-            new factory:<state> with 'gh issue edit'. If you reach a human gate, comment the \
-            review packet on the issue and stop — do not decide for the human." \
+            Find the matching work item id, run 'factory brief <id>' and read the brief, \
+            then apply the 'factory-${STATION}' skill and do the real work. Finish by \
+            calling 'factory advance' with the correct verdict and '--ran cloud', and \
+            re-label issue #${ISSUE} to the new factory:<state> with 'gh issue edit'. \
+            If you reach a human gate, comment the review packet on the issue and stop — \
+            do not decide for the human." \
             --allowedTools "Bash,Read,Grep,Glob,Write,Edit" \
             --permission-mode acceptEdits
 

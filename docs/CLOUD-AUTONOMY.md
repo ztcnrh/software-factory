@@ -14,9 +14,10 @@ Two workflows ship (as `.disabled`):
 
 1. **Install with the cloud layer:** `python3 install/install.py /path/to/repo --with-cloud`. This drops the workflows under `.github/workflows/` (still `.disabled`).
 2. **Add the API secret:** repo *Settings → Secrets and variables → Actions →* `ANTHROPIC_API_KEY` (or `CLAUDE_CODE_OAUTH_TOKEN`).
-3. **Create the labels:** `factory labels --github` (uses your `gh` CLI). Or `factory labels` to print them first.
-4. **Flip the switch:** rename `factory-station.yml.disabled` → `factory-station.yml` (and the retro one if you want scheduled learning).
-5. **Shake it down:** open an issue, add `factory:triage`, and *watch* the Actions run. Keep a hand on the wheel for the first several items.
+3. **Point at the toolkit:** repo *Settings → Secrets and variables → Actions → Variables →* `FACTORY_TOOLKIT_GIT`, a pip-installable ref to the factory toolkit (e.g. `git+https://github.com/<you>/software-factory@main`). The adopted repo carries only the `.claude` layer and config — the workflow installs the `factory` CLI from this ref, and fails fast with a clear message if it's unset. A private toolkit repo needs a token in the URL or its own checkout step.
+4. **Create the labels:** `factory labels --github` (uses your `gh` CLI). Or `factory labels` to print them first.
+5. **Flip the switch:** rename `factory-station.yml.disabled` → `factory-station.yml` (and the retro one if you want scheduled learning).
+6. **Shake it down:** open an issue, add `factory:triage`, and *watch* the Actions run. Keep a hand on the wheel for the first several items.
 
 ## How it stays safe
 

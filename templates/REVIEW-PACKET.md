@@ -1,6 +1,8 @@
 # Review packet — <WI-id> @ <gate>
 
 > The shape the `/factory` driver (or a cloud station commenting on an issue) renders when the line stops at a human gate. The goal is **orientation in ten seconds** — everything worth reviewing is one link away, nothing to hunt for. The review itself takes as long as it deserves: the spec gate merits a real read (plan quality decides outcome quality), and the ship gate merits a real diff-plus-evidence review. The packet's job is that none of that time is spent assembling context.
+>
+> The driver saves the rendered packet to `.factory/work-items/<id>/packet-<gate>-<n>.md` and binds it — `factory gate <id> --bind --packet <file>` — before presenting, so the decision below is checked against exactly this content and refused if any of it changes first.
 
 **Item:** <title> — one paragraph: what it is and what the station produced. **Artifacts:** <links: spec files / PR / diff / screenshot> **Confidence:** <0..1>   ·   **Risk:** <low | medium | high> **Evidence:**
 - `spec_review` → the spec's key decisions + open questions, and the draft spec PR when one exists.
@@ -17,4 +19,4 @@ A send-back or park counts as a steer on its own — no `--changed` needed there
 
 Every decision is **signed**: `factory gate` records it under your git identity automatically (override with `--by <name>`; a cloud station passes the reviewer's `github.actor`), so who approved what is tracked with no extra typing.
 
-If you send it back or approve-with-tweaks, the `--notes` and `--category` are exactly what the **learning loop** uses to make this gate disappear for this class of work over time. Thirty seconds of "why" now buys you fewer gates later.
+If you send it back or approve-with-tweaks, the `--notes` and `--category` are exactly what the **learning loop** uses to make this gate disappear for this class of work over time. Thirty seconds of "why" now buys you fewer gates later. Name a `--category` for the *failure mode*, not the fix (`missing-edge-case`, not `add-validation`), in kebab-case, and reuse an existing one wherever it fits — the retro's recurrence check joins on that exact string, so a near-miss spelling quietly breaks it. The CLI prints the categories already in use whenever you introduce a new one.

@@ -17,6 +17,7 @@ agent can parse the directive unambiguously.
 from __future__ import annotations
 
 import argparse
+import difflib
 import getpass
 import json
 import os
@@ -24,10 +25,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .dispatch import Action, Dispatcher
+from . import brief as brief_mod
+from .dispatch import Action, Dispatcher, GateDriftError
 from .ledger import CLOSED, STATUSES, Ledger
 from .line import Line
 from .model import GateDecision, StationReport, WorkItem
+from .policies import PolicyError
 from .retro import briefing
 
 # Keyed by Action.type. The `blocked` gate is not an action type — it surfaces as
@@ -106,7 +109,7 @@ def _resolve_next(d: Dispatcher, item_id: str) -> Action:
         action = d.next_action(item)
         if action.type != "auto_gate":
             return action
-        rule = d.policies.auto_decision(action.gate, item)
+        rule = d.active_auto_rule(action.gate, item)
         d.apply_auto_gate(item, action.gate, rule)
 
 
@@ -137,6 +140,14 @@ def _print_action(action: Action, line: Line) -> None:
         print(f"  {action.message}")
     if action.type == "run_station":
         print(f"  → run skill `{action.skill}` (subagent `{action.agent}`)")
+        if action.checking:
+            print("  → checking station: fresh context, no chat steering (see the brief)")
+        if action.attempt and action.attempt > 1:
+            rerun = f"  ↻ attempt {action.attempt}"
+            if action.last_return:
+                rerun += f" — routed back by: {action.last_return}"
+            print(rerun)
+        print(f"  → brief it: factory brief {action.item_id}")
         verdicts = " | ".join(line.valid_verdicts(action.state))
         print(f"  → then: factory advance {action.item_id} --verdict <{verdicts}>")
     elif action.type == "run_external":
@@ -189,6 +200,12 @@ def cmd_new(args: argparse.Namespace) -> int:
         source_ref=args.source_ref,
     )
     print(f"✓ created {item.id}: {item.title}")
+    if item.metadata.get("risk_floor"):
+        matched = ", ".join(item.metadata.get("risk_floor_matches", []))
+        print(
+            f"  ⚠ risk floored to {item.risk} — touches {matched} "
+            "(pass --risk explicitly to override at creation)"
+        )
     action = _resolve_next(d, item.id)
     _mirror_issue_state(d, item.id, None)
     _print_action(action, d.line)
@@ -204,6 +221,41 @@ def cmd_next(args: argparse.Namespace) -> int:
     action = _resolve_next(d, args.id)
     _mirror_issue_state(d, args.id, prev)
     _print_action(action, d.line)
+    return 0
+
+
+# --- brief: the deterministic half of a station run's context ----------------
+
+
+def cmd_brief(args: argparse.Namespace) -> int:
+    d = _disp(args)
+    action = _resolve_next(d, args.id)
+    if action.type != "run_station":
+        hint = (
+            " At a human gate, render the review packet instead (templates/REVIEW-PACKET.md) "
+            "and bind it with `factory gate --bind --packet <file>`."
+            if action.type == "human_gate"
+            else ""
+        )
+        print(
+            f"✗ {args.id} is at {action.state!r} ({action.type}) — a brief is for a station "
+            f"run.{hint}",
+            file=sys.stderr,
+        )
+        return 1
+    item = d.store.load(args.id)
+    path = brief_mod.brief_path(d.root, item.id, action.state, action.attempt or 1)
+    if path.exists() and not args.force:
+        # Reuse, never clobber: the driver may already have appended session
+        # context, and that half of the packet is not regenerable.
+        print(path.read_text(), end="")
+        print(f"→ existing brief reused: {path} (--force regenerates)", file=sys.stderr)
+        return 0
+    text = brief_mod.compose(d.root, d.line, item, action)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    print(text, end="")
+    print(f"→ brief written: {path}", file=sys.stderr)
     return 0
 
 
@@ -235,6 +287,7 @@ def _inline_report_flags(args: argparse.Namespace) -> list[str]:
         "--human-reason": args.human_reason,
         "--spawn-title": args.spawn_title,
         "--spawn-body": args.spawn_body,
+        "--ran": args.ran,
     }
     return [flag for flag, value in given.items() if value is not None]
 
@@ -294,6 +347,7 @@ def cmd_advance(args: argparse.Namespace) -> int:
             human_reason=args.human_reason or "",
             notes=args.notes or "",
             spawn=spawn,
+            ran=args.ran or "",
         )
     new_state = d.advance(item, report)
     print(f"✓ {item.id}: {report.station} → {new_state}  (verdict: {report.verdict})")
@@ -311,6 +365,51 @@ def cmd_gate(args: argparse.Namespace) -> int:
     item = d.store.load(args.id)
     prev = item.state
     gate = d.line.gate_name(item.state) or item.state
+    if args.bind:
+        # --bind only binds; every decision-only flag is meaningless here — reject
+        # rather than silently drop (the caller thought it did something).
+        clashing = [
+            flag
+            for flag, value in (
+                ("--decision", args.decision),
+                ("--changed", args.changed or None),
+                ("--notes", args.notes),
+                ("--expected", args.expected),
+                ("--category", args.category),
+                ("--produced", args.produced),
+                ("--produced-file", args.produced_file),
+                ("--accept-drift", args.accept_drift or None),
+            )
+            if value
+        ]
+        if clashing:
+            print(
+                f"✗ --bind only records what is being reviewed (with an optional "
+                f"--packet); {', '.join(clashing)} belong to the follow-up --decision call",
+                file=sys.stderr,
+            )
+            return 1
+        if args.packet and not Path(args.packet).is_file():
+            print(f"✗ packet file not found: {args.packet}", file=sys.stderr)
+            return 1
+        snap = d.bind_gate(item, by=_resolve_actor(args), packet=args.packet)
+        print(
+            f"✓ {item.id}: {snap['gate']} still waits on the human — the decision is now bound to "
+            f"the reviewed content ({len(snap['artifacts'])} artifact(s)"
+            + (", packet saved" if args.packet else "")
+            + ")"
+        )
+        print(f"  decide with: factory gate {item.id} --decision <verdict> ...")
+        return 0
+    if not args.decision:
+        print(
+            "✗ --decision is required (or --bind to bind the review before deciding)",
+            file=sys.stderr,
+        )
+        return 1
+    if args.packet:
+        print("✗ --packet only means something with --bind", file=sys.stderr)
+        return 1
     decision = GateDecision(
         gate=gate,
         decision=args.decision,
@@ -341,8 +440,37 @@ def cmd_gate(args: argparse.Namespace) -> int:
             f"{decision.decision!r} doesn't write one — add --changed if you steered the work.",
             file=sys.stderr,
         )
-    new_state = d.gate(item, decision, produced=produced)
+    # Read the vocabulary in use BEFORE the decision writes its own record, but
+    # only report it after the gate actually took — a failed call shouldn't teach
+    # anyone anything.
+    known_categories: set[str] = set()
+    if decision.is_steer and decision.category:
+        known_categories = {
+            c
+            for r in d.interventions.records()
+            if (c := r.get("category")) and c != "uncategorized"
+        }
+    try:
+        new_state = d.gate(item, decision, produced=produced, accept_drift=args.accept_drift)
+    except GateDriftError as e:
+        print(f"✗ {e}", file=sys.stderr)
+        print(
+            "  Re-review the changed content and re-bind (factory gate --bind ...), or pass "
+            "--accept-drift to record the decision anyway (the drift is logged).",
+            file=sys.stderr,
+        )
+        return 1
     print(f"✓ {item.id}: gate {gate} → {new_state}  (decision: {args.decision})")
+    if decision.category and decision.category not in known_categories:
+        # The retro's recurrence check joins ledger rows to interventions on an
+        # exact string, so a near-miss spelling breaks it silently. The vocabulary
+        # is free-form on purpose — nothing to validate against — so surface what
+        # is already in use at the one moment someone is choosing a word.
+        print(
+            f"ⓘ new category {decision.category!r} — already in use: "
+            f"{', '.join(sorted(known_categories)) or '(none yet)'}",
+            file=sys.stderr,
+        )
     action = _resolve_next(d, item.id)
     _mirror_issue_state(d, item.id, prev)
     _print_action(action, d.line)
@@ -475,10 +603,21 @@ def _render_item(d: Dispatcher, item_id: str) -> None:
         print(f"  artifacts: {', '.join(item.artifacts)}")
     if item.pr:
         print(f"  pr: {item.pr}")
+    # The run trace: what each station run was fed (briefs) and what each gate
+    # reviewed (packets) — the per-item observability files, listed so nobody
+    # has to remember the runs/ convention to find them.
+    traces = sorted((d.store.dir / item.id).glob("runs/*-brief.md")) + sorted(
+        (d.store.dir / item.id).glob("packet-*.md")
+    )
+    if traces:
+        print("  run traces:")
+        for t in traces:
+            print(f"    {t.relative_to(d.store.root)}")
     print("  history:")
     for ev in item.history:
         move = f"{ev.from_state}→{ev.to_state}" if ev.to_state else ev.kind
-        print(f"    {ev.ts}  [{ev.actor}] {move} {ev.verdict or ''} {ev.note or ''}".rstrip())
+        ran = f" [{ev.ran}]" if ev.ran else ""
+        print(f"    {ev.ts}  [{ev.actor}]{ran} {move} {ev.verdict or ''} {ev.note or ''}".rstrip())
     print()
 
 
@@ -492,7 +631,10 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_metrics(args: argparse.Namespace) -> int:
-    s = _disp(args).metrics.summary()
+    m = _disp(args).metrics
+    s = m.summary()
+    for w in m.warnings:
+        print(f"⚠ metrics ledger: {w}", file=sys.stderr)
     print("\n📈 Factory metrics — North Star: one-shot ship rate\n")
     print(
         f"  one-shot ship rate: {s['one_shot_ship_rate']:.0%}  "
@@ -551,6 +693,7 @@ def cmd_ledger(args: argparse.Namespace) -> int:
             answers=args.answers or [],
             pr=args.pr or "",
             status=args.status,
+            category=args.category or "",
         )
         print(f"✓ recorded {e['id']}: {e['title']}")
         print(f"  rendered: {led.view}")
@@ -571,6 +714,153 @@ def cmd_ledger(args: argparse.Namespace) -> int:
     for w in led.warnings:
         print(f"⚠ {w}", file=sys.stderr)
     return 0
+
+
+def cmd_policy(args: argparse.Namespace) -> int:
+    d = _disp(args)
+    if args.policy_cmd == "list":
+        suspended = d.policy_state.suspended()
+        if not d.policies.rules and not suspended:
+            print("(no gate policies defined — policies.yml has no rules)")
+            return 0
+        for rule in d.policies.rules:
+            rid = rule["id"]
+            if rid in suspended:
+                s = suspended[rid]
+                status = f"SUSPENDED since {s['ts']} — {s['item']}: {s['why']}"
+            elif rule.get("approved_by"):
+                status = f"active (signed by {rule['approved_by']})"
+            else:
+                status = "dormant (unsigned)"
+            print(f"  {rid}  [{status}]")
+            print(f"        gate: {rule['gate']}  decision: {rule['decision']}")
+        # A suspension whose rule vanished from policies.yml would otherwise be
+        # invisible — surface it rather than let the overlay rot silently.
+        for rid in suspended:
+            if not any(r.get("id") == rid for r in d.policies.rules):
+                print(f"  {rid}  [SUSPENDED, but no longer in policies.yml — stale overlay "
+                      f"entry; reinstate to clear it]")
+        return 0
+    # reinstate
+    try:
+        d.policy_state.reinstate(args.rule_id, by=_resolve_actor(args), notes=args.notes or "")
+    except PolicyError as e:
+        print(f"✗ {e}", file=sys.stderr)
+        return 1
+    print(f"✓ policy {args.rule_id!r} reinstated — it may auto-clear its gate again")
+    return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Cross-check the factory's stores against each other and the config —
+    'is my factory consistent?' as one command. Read-only."""
+    from .interventions import Interventions
+    from .metrics import Metrics
+    from .policies import Policies, PolicyState
+    from .store import Store
+
+    root = _root(args)
+    errors: list[str] = []
+    warns: list[str] = []
+
+    # The broad excepts below buy continuation, not survival — main() already
+    # catches at the boundary. One broken store must not hide the other checks.
+    line = None
+    try:
+        line = Line.load(root / "line.yml")
+        print("✓ line.yml loads and validates")
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"line.yml: {e}")
+    policies = None
+    try:
+        policies = Policies.load(root / "policies.yml")
+        print(f"✓ policies.yml loads and validates ({len(policies.rules)} rule(s))")
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"policies.yml: {e}")
+
+    store = Store(root)
+    # Lineage resolves against what's on disk, not what parsed — an unreadable
+    # item is one error, not also a "broken lineage" warning on every child.
+    known_ids = set(store.list_ids())
+    items = {}
+    for iid in known_ids:
+        try:
+            items[iid] = store.load(iid)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"work item {iid}: unreadable ({e})")
+    print(f"✓ {len(items)} work item(s) parse")
+    for leftover in sorted(store.dir.glob("*.tmp")) if store.dir.exists() else []:
+        warns.append(f"leftover temp file in the store: {leftover.name} (crashed save?)")
+    for iid, item in sorted(items.items()):
+        if item.id != iid:
+            # Every save would write to a different file than the one it read.
+            errors.append(f"{iid}: file holds id {item.id!r} — filename and id disagree")
+        if line and item.state not in line.states:
+            errors.append(f"{iid}: state {item.state!r} is not on the line")
+        if item.parent and item.parent not in known_ids:
+            warns.append(f"{iid}: parent {item.parent!r} does not exist (broken lineage)")
+        if item.metadata.get("gate_binding") and line and not line.is_gate(item.state):
+            warns.append(
+                f"{iid}: has a gate binding but sits at {item.state!r} (not a gate) — "
+                "stale; the next gate decision at that gate would clear it"
+            )
+        for art in item.artifacts:
+            # Nothing else catches this: _hash_file maps a missing file to the
+            # string "missing", which then matches itself between bind and decide.
+            if not (root / art).is_file():
+                warns.append(
+                    f"{iid}: artifact {art!r} does not exist (state {item.state}) — "
+                    "a station told to read it gets nothing, and a gate binding "
+                    "over it detects no drift"
+                )
+
+    if policies:
+        suspended = PolicyState(root).suspended()
+        for rid in suspended:
+            if not any(r.get("id") == rid for r in policies.rules):
+                warns.append(
+                    f"policy overlay: suspended rule {rid!r} no longer exists in policies.yml"
+                )
+
+    metrics = Metrics(root)
+    metrics.events()
+    warns += [f"metrics ledger: {w}" for w in metrics.warnings]
+    led = Ledger(root)
+    entries = led.entries()
+    warns += [f"retro ledger: {w}" for w in led.warnings]
+    interventions = Interventions(root)
+    records = interventions.records()
+    n_iv = len(records)
+    # `factory gate` nudges when a steer coins a new category; nothing nudges the
+    # ledger side, so a near-miss spelling only ever surfaces here.
+    in_use = {c for r in records if (c := r.get("category")) and c != "uncategorized"}
+    for e in entries:
+        cat = e.get("category")
+        if cat and cat not in in_use:
+            near = difflib.get_close_matches(cat, sorted(in_use), n=1)
+            warns.append(
+                f"retro ledger: {e['id']} category {cat!r} matches no intervention record"
+                + (f" — did you mean {near[0]!r}?" if near else "")
+                + " (the recurrence check joins on this exact string)"
+            )
+    lost = [r for r in records if r.get("malformed")]
+    for r in lost:
+        warns.append(
+            f"intervention {r['path'].name}: no readable machine block — it still "
+            "counts as a steer, but drops out of every category join"
+        )
+    print(f"✓ metrics/ledger read; {n_iv} intervention record(s)")
+
+    import shutil as _shutil
+
+    print(f"· gh CLI: {'found' if _shutil.which('gh') else 'not found (intake needs it)'}")
+
+    for w in warns:
+        print(f"⚠ {w}")
+    for e in errors:
+        print(f"✗ {e}", file=sys.stderr)
+    print(f"\n{len(errors)} error(s), {len(warns)} warning(s)")
+    return 1 if errors else 0
 
 
 def cmd_labels(args: argparse.Namespace) -> int:
@@ -756,11 +1046,44 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--spawn-title", help="File a follow-up work item; it enters the line at triage")
     s.add_argument("--spawn-body", help="Body for the spawned item (requires --spawn-title)")
     s.add_argument(
+        "--ran",
+        choices=["inline", "subagent", "resumed", "cloud"],
+        help="How this station run executed (trace metadata on the history event): a fresh "
+        "subagent, inline in the driver session, a resumed subagent, or a cloud run",
+    )
+    s.add_argument(
         "--report",
         metavar="FILE",
         help="JSON file with a full StationReport; replaces ALL inline flags above",
     )
     s.set_defaults(func=cmd_advance)
+
+    # -- brief --
+    s = sub.add_parser(
+        "brief",
+        help="Write + print the deterministic context brief for an item's next station run",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  factory brief WI-0007\n"
+            "  factory brief WI-0007 --force\n"
+            "\n"
+            "Writes .factory/work-items/<id>/runs/<state>-<attempt>-brief.md — the engine-owned\n"
+            "half of the station's context packet (identity, risk, lineage, the request,\n"
+            "artifact pointers, what routed it here) — and prints it to stdout. The driver\n"
+            "appends session-only context under the marked section, then passes the file's\n"
+            "content to the station verbatim. An existing brief is reused, never overwritten\n"
+            "(--force regenerates, discarding driver additions), so what each worker was fed\n"
+            "stays on disk as the run's trace."
+        ),
+    )
+    s.add_argument("id", help="Work item id (WI-####)")
+    s.add_argument(
+        "--force",
+        action="store_true",
+        help="Regenerate even if this run's brief exists (discards any driver-added section)",
+    )
+    s.set_defaults(func=cmd_brief)
 
     # -- gate --
     s = sub.add_parser(
@@ -769,6 +1092,8 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
+            "  factory gate WI-0007 --bind \\\n"
+            "      --packet .factory/work-items/WI-0007/packet-ship_review-1.md\n"
             "  factory gate WI-0007 --decision approved\n"
             "  factory gate WI-0007 --decision needs_revision --category missing-edge-case \\\n"
             '      --notes "public write endpoints must always specify input validation" \\\n'
@@ -776,6 +1101,15 @@ def build_parser() -> argparse.ArgumentParser:
             '  factory gate WI-0007 --decision approved --changed --notes "tightened rollout"\n'
             "\n"
             "Valid decisions depend on the gate — `factory next <id>` prints them.\n"
+            "Binding and deciding are two separate calls, in that order. --bind (with the\n"
+            "--packet the human is reading, and optionally --by) records what is being\n"
+            "reviewed — the packet file, the item's artifact files, the PR pointer,\n"
+            "content-hashed — and changes nothing about the gate: it still waits on the\n"
+            "human. The human's answer then comes back as a second call, --decision. If\n"
+            "any bound content changed in between, that decision is refused with a list of\n"
+            "what moved; re-review and re-bind, or --accept-drift to record anyway (logged,\n"
+            "and the human's call to make). A decision with no prior --bind still works —\n"
+            "it just isn't drift-checked.\n"
             "A steering decision (needs_revision / not_ready / park) or --changed writes an\n"
             "intervention record: give it a generalizable --notes — that's what the retro\n"
             "station learns from."
@@ -783,9 +1117,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     s.add_argument("id", help="Work item id (WI-####)")
     s.add_argument(
+        "--bind",
+        action="store_true",
+        help="Bind the upcoming decision to the reviewed content (hash packet/artifacts/pr) "
+        "instead of deciding now; pair it with --packet",
+    )
+    s.add_argument(
+        "--packet",
+        help="With --bind: the rendered review-packet file the human is looking at "
+        "(saved under .factory/work-items/<id>/)",
+    )
+    s.add_argument(
         "--decision",
-        required=True,
         help="The gate verdict; `factory next <id>` lists the valid set for this gate",
+    )
+    s.add_argument(
+        "--accept-drift",
+        action="store_true",
+        help="Record the decision even though bound content changed since --bind "
+        "(the drift is logged in the item history)",
     )
     s.add_argument(
         "--by",
@@ -981,6 +1331,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=sorted(STATUSES),
         help="Initial status (default: %(default)s)",
     )
+    a.add_argument(
+        "--category",
+        help="The intervention category this proposal answers (e.g. missing-edge-case). "
+        "Once the row is `applied`, the retro briefing mechanically flags any later "
+        "intervention of the same category as a recurrence — the fix didn't hold",
+    )
     a.set_defaults(func=cmd_ledger)
     u = lsub.add_parser(
         "update",
@@ -1016,6 +1372,57 @@ def build_parser() -> argparse.ArgumentParser:
         help="Only rows currently at this status",
     )
     ll.set_defaults(func=cmd_ledger)
+
+    # -- policy --
+    s = sub.add_parser(
+        "policy",
+        help="Inspect gate policies (incl. suspensions) or reinstate a suspended rule",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  factory policy list\n"
+            '  factory policy reinstate low-risk-docs --notes "rule was fine; the steer was\n'
+            '      about wording, not the gate"\n'
+            "\n"
+            "Autonomy is an asymmetric ratchet. Promotion is human: a rule fires only once\n"
+            "someone signs approved_by in policies.yml. Demotion is automatic: when an item a\n"
+            "rule auto-cleared later needs human rework (a gate steer or a block), the rule is\n"
+            "suspended — its gate goes back to the human — until a human reviews what happened\n"
+            "and reinstates it here. Suspensions live in .factory/policy-state.json (engine-\n"
+            "owned overlay); policies.yml stays yours alone to edit."
+        ),
+    )
+    psub = s.add_subparsers(dest="policy_cmd", required=True)
+    pl = psub.add_parser("list", help="Every rule with its live status (active/dormant/suspended)")
+    pl.set_defaults(func=cmd_policy)
+    pr = psub.add_parser("reinstate", help="Re-arm a suspended rule after reviewing its failure")
+    pr.add_argument("rule_id", help="The rule id from policies.yml")
+    pr.add_argument("--notes", help="Why it's safe to re-arm (kept in the overlay's history)")
+    pr.add_argument(
+        "--by",
+        help="Who is reinstating; defaults to $FACTORY_USER or your git identity",
+    )
+    pr.set_defaults(func=cmd_policy)
+
+    # -- doctor --
+    s = sub.add_parser(
+        "doctor",
+        help="Cross-check config and stores for consistency (read-only; exit 1 on errors)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Checks: line.yml and policies.yml validate; every work item parses, sits on a\n"
+            "known state, and matches its filename; every artifact path still exists; lineage\n"
+            "(parent) pointers resolve; no stale gate bindings, crashed-save leftovers, or\n"
+            "orphaned policy suspensions; metrics/ledger files are readable (torn lines\n"
+            "counted); every ledger category matches an intervention record, and every\n"
+            "intervention still has a readable machine block — the two halves of the retro's\n"
+            "recurrence join, which fails silently when either drifts.\n"
+            "\n"
+            "Warnings inform; errors exit 1. Run it when something feels off, after a crash,\n"
+            "or before trusting a factory you've just moved or upgraded."
+        ),
+    )
+    s.set_defaults(func=cmd_doctor)
 
     s = sub.add_parser("labels", help="List the factory labels, or create them in a repo (gh)")
     s.add_argument("--github", action="store_true", help="Create the labels via the gh CLI")

@@ -8,7 +8,9 @@ import pytest
 from factory.adapters import github
 from factory.cli import _print_action, _resolve_actor, main
 from factory.dispatch import Action, Dispatcher
+from factory.ledger import Ledger
 from factory.line import Line
+from factory.model import StationReport
 
 
 def _gate_action(gate: str, state: str) -> Action:
@@ -78,6 +80,185 @@ def test_gate_produced_flags_are_mutually_exclusive(factory_root: Path, capsys):
     assert "not allowed with argument" in capsys.readouterr().err
 
 
+def test_policy_list_and_reinstate_flow(factory_root: Path, capsys):
+    """The operator's view of the ratchet: list shows live status per rule
+    (active/dormant/suspended with the why), reinstate re-arms, and a second
+    reinstate fails loudly instead of pretending."""
+    import yaml
+
+    from factory.policies import PolicyState
+
+    (factory_root / "policies.yml").write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "rules": [
+                    {"id": "r-docs", "gate": "spec_review", "decision": "approved",
+                     "when": {"labels_any": ["docs"]}, "approved_by": "johndoe"},
+                    {"id": "r-dormant", "gate": "ship_review", "decision": "approved",
+                     "when": "all", "approved_by": None},
+                ],
+            }
+        )
+    )
+    PolicyState(factory_root).suspend("r-docs", "WI-0009", "steer at ship_review")
+    rc = main(["--root", str(factory_root), "policy", "list"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "SUSPENDED" in out and "WI-0009" in out
+    assert "dormant" in out
+
+    rc = main(["--root", str(factory_root), "policy", "reinstate", "r-docs",
+               "--by", "johndoe", "--notes", "reviewed"])
+    assert rc == 0
+    rc = main(["--root", str(factory_root), "policy", "list"])
+    assert "SUSPENDED" not in capsys.readouterr().out.replace("reinstate", "")
+    rc = main(["--root", str(factory_root), "policy", "reinstate", "r-docs"])
+    assert rc == 1
+    assert "not suspended" in capsys.readouterr().err
+
+
+def test_brief_writes_the_run_packet_and_reuses_it(factory_root: Path, capsys):
+    """The driver→station handoff becomes a file on disk: brief writes
+    runs/<state>-<attempt>-brief.md once, and a re-run reuses it rather than
+    clobbering the session context the driver may have appended."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("Add CSV export", body="Users need CSV downloads.")
+    item.state = "implement"
+    d.store.save(item)
+    rc = main(["--root", str(factory_root), "brief", item.id])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "# Station brief" in out and "## Session context (driver-added)" in out
+    path = factory_root / ".factory" / "work-items" / item.id / "runs" / "implement-1-brief.md"
+    assert path.exists()
+
+    with open(path, "a") as f:
+        f.write("\nInterview: prefer streaming export.\n")
+    rc = main(["--root", str(factory_root), "brief", item.id])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "Interview: prefer streaming export." in captured.out  # reused, additions intact
+    assert "reused" in captured.err
+
+    rc = main(["--root", str(factory_root), "brief", item.id, "--force"])
+    assert rc == 0
+    assert "Interview" not in capsys.readouterr().out  # regenerated deterministically
+
+
+def test_brief_marks_a_checking_station_session_section_closed(factory_root: Path, capsys):
+    """A checking station's brief must say its session section is deliberately
+    empty — the steering-blindness of checkers is part of the packet contract,
+    not driver folklore."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("Change under review")
+    item.state = "code_review"
+    d.store.save(item)
+    rc = main(["--root", str(factory_root), "brief", item.id])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "deliberately empty" in out and "checking station" in out
+
+
+def test_brief_surfaces_retry_context_and_the_review_conversation(factory_root: Path, capsys):
+    """An implement retry's brief must carry what sent it back and point at the
+    latest review conversation file — the retry starts from the worklist, not
+    from archaeology."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("Feature")
+    item.state = "implement"
+    d.store.save(item)
+    item = d.store.load(item.id)
+    d.advance(item, StationReport(station="implement", verdict="implemented"))
+    review_dir = factory_root / ".factory" / "work-items" / item.id
+    review_dir.mkdir(parents=True, exist_ok=True)
+    (review_dir / "review-1.md").write_text("## Worklist\n1. add tests")
+    d.advance(
+        item, StationReport(station="code_review", verdict="changes_requested", summary="no tests")
+    )
+    rc = main(["--root", str(factory_root), "brief", item.id])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "(attempt 2" in out
+    assert "Routed here by:" in out and "no tests" in out
+    assert "review-1.md" in out
+
+
+def test_brief_refuses_a_gate_and_points_at_the_packet_flow(factory_root: Path, capsys):
+    """Briefs are for station runs; at a human gate the right artifact is the
+    review packet + gate --bind — the error must teach the flow, not just fail."""
+    item_id = _item_at(factory_root, "ship_review")
+    rc = main(["--root", str(factory_root), "brief", item_id])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "review packet" in err and "--bind" in err
+
+
+def test_gate_bind_rejects_decision_only_flags(factory_root: Path, capsys):
+    """--bind binds a review; decision flags riding along would be silently
+    meaningless — reject them loudly instead of half-doing two verbs."""
+    item_id = _item_at(factory_root, "spec_review")
+    rc = main(
+        ["--root", str(factory_root), "gate", item_id, "--bind", "--decision", "approved"]
+    )
+    assert rc == 1
+    assert "belong to the follow-up --decision call" in capsys.readouterr().err
+
+
+def test_gate_requires_a_decision_or_an_open(factory_root: Path, capsys):
+    """A bare `factory gate <id>` does nothing recordable — demand one of the
+    two verbs rather than exiting silently successful."""
+    item_id = _item_at(factory_root, "spec_review")
+    rc = main(["--root", str(factory_root), "gate", item_id])
+    assert rc == 1
+    assert "--decision is required" in capsys.readouterr().err
+
+
+def test_gate_packet_flag_requires_open(factory_root: Path, capsys):
+    """--packet outside --bind would be silently dropped; the caller meant to
+    bind a review, so say so."""
+    item_id = _item_at(factory_root, "spec_review")
+    rc = main(
+        ["--root", str(factory_root), "gate", item_id, "--decision", "approved",
+         "--packet", "nowhere.md"]
+    )
+    assert rc == 1
+    assert "--packet only means something with --bind" in capsys.readouterr().err
+
+
+def test_gate_bind_decide_drift_flow_end_to_end(factory_root: Path, capsys):
+    """The full CLI arc: open binds (with a packet file), a post-review edit is
+    refused with the culprit named, and --accept-drift records it — the codex
+    TOCTOU guard as an operator actually drives it."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("gated work")
+    item.state = "ship_review"
+    item.artifacts = ["evidence.md"]
+    d.store.save(item)
+    (factory_root / "evidence.md").write_text("all tests green")
+    packet = factory_root / "packet.md"
+    packet.write_text("# Review packet\nAll good.")
+
+    rc = main(
+        ["--root", str(factory_root), "gate", item.id, "--bind", "--packet", str(packet)]
+    )
+    assert rc == 0
+    assert "still waits on the human" in capsys.readouterr().out
+
+    (factory_root / "evidence.md").write_text("actually, one test was skipped")
+    rc = main(["--root", str(factory_root), "gate", item.id, "--decision", "approved"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "evidence.md" in err and "--accept-drift" in err
+
+    rc = main(
+        ["--root", str(factory_root), "gate", item.id, "--decision", "approved",
+         "--accept-drift"]
+    )
+    assert rc == 0
+    assert d.store.load(item.id).state == "deploy"
+
+
 def test_gate_steering_without_notes_warns_but_records(factory_root: Path, capsys):
     """A send-back with no --notes still goes through (never block a human at a
     gate), but warns loudly: an intervention record without a why is a learning-loop
@@ -96,6 +277,35 @@ def test_gate_plain_approval_does_not_warn(factory_root: Path, capsys):
     rc = main(["--root", str(factory_root), "gate", item_id, "--decision", "approved"])
     assert rc == 0
     assert "no --notes" not in capsys.readouterr().err
+
+
+def test_gate_surfaces_the_category_vocabulary_on_a_new_word(factory_root: Path, capsys):
+    """The recurrence check joins ledger rows to interventions on an exact string,
+    so a near-miss spelling breaks it silently. Nothing can validate a free-form
+    vocabulary — so the CLI teaches it at the one moment someone picks a word."""
+    first = _item_at(factory_root, "spec_review")
+    main(["--root", str(factory_root), "gate", first, "--decision", "needs_revision",
+          "--notes", "w", "--category", "missing-edge-case"])
+    capsys.readouterr()
+    second = _item_at(factory_root, "spec_review")
+    main(["--root", str(factory_root), "gate", second, "--decision", "needs_revision",
+          "--notes", "w", "--category", "missing_edge_case"])
+    err = capsys.readouterr().err
+    assert "new category 'missing_edge_case'" in err
+    assert "missing-edge-case" in err  # the word they probably meant, shown to them
+
+
+def test_gate_stays_quiet_when_the_category_is_already_in_use(factory_root: Path, capsys):
+    """The nudge exists to flag divergence; firing on every reuse would train the
+    reader to ignore it, which is how a warning stops being one."""
+    first = _item_at(factory_root, "spec_review")
+    main(["--root", str(factory_root), "gate", first, "--decision", "needs_revision",
+          "--notes", "w", "--category", "wrong-scope"])
+    capsys.readouterr()
+    second = _item_at(factory_root, "spec_review")
+    main(["--root", str(factory_root), "gate", second, "--decision", "needs_revision",
+          "--notes", "w", "--category", "wrong-scope"])
+    assert "new category" not in capsys.readouterr().err
 
 
 def test_gate_warns_when_intervention_fields_ride_a_non_steer(factory_root: Path, capsys):
@@ -449,3 +659,138 @@ def test_help_renders_usage_examples(capsys):
             main([cmd, "-h"])
         assert exc.value.code == 0
         assert "Examples:" in capsys.readouterr().out
+
+
+def test_doctor_reports_healthy_on_a_clean_root(factory_root: Path, capsys):
+    """The baseline: a fresh, consistent factory must exit 0 with zero errors —
+    doctor's silence has to be trustworthy before its noise can be."""
+    d = Dispatcher(factory_root)
+    d.new_item("clean item")
+    rc = main(["--root", str(factory_root), "doctor"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "0 error(s)" in out
+
+
+def test_doctor_catches_a_corrupt_item_and_an_unknown_state(factory_root: Path, capsys):
+    """The two hard failures a crashed or hand-edited store can leave: an
+    unparseable item JSON and an item stranded on a state the line doesn't
+    know. Both must be errors (exit 1), not warnings."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("will be corrupted")
+    stranded = d.new_item("off the line")
+    stranded.state = "no_such_state"
+    d.store.save(stranded)
+    (factory_root / ".factory" / "work-items" / f"{item.id}.json").write_text("{TORN")
+    rc = main(["--root", str(factory_root), "doctor"])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert item.id in captured.err
+    assert "no_such_state" in captured.err
+
+
+def test_doctor_warns_on_lineage_bindings_and_overlay_drift(factory_root: Path, capsys):
+    """The soft inconsistencies that rot silently: a dangling parent pointer, a
+    stale gate binding on a non-gate state, and a suspension for a rule that
+    left policies.yml — surfaced as warnings, exit 0."""
+    from factory.policies import PolicyState
+
+    d = Dispatcher(factory_root)
+    item = d.new_item("orphan child")
+    item.parent = "WI-9999"
+    item.metadata["gate_binding"] = {"gate": "spec_review"}
+    d.store.save(item)  # at triage (not a gate) with a binding + missing parent
+    PolicyState(factory_root).suspend("ghost-rule", "WI-0001", "steer")
+    rc = main(["--root", str(factory_root), "doctor"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "WI-9999" in out
+    assert "gate binding" in out
+    assert "ghost-rule" in out
+    assert "3 warning(s)" in out
+
+
+def test_doctor_does_not_blame_children_of_an_unreadable_parent(factory_root: Path, capsys):
+    """One corrupt item is one cause; it must not also produce a 'broken lineage'
+    warning on every innocent child pointing at it. Lineage resolves against the
+    ids on disk (what Store.load uses), not against the ids that happened to parse."""
+    d = Dispatcher(factory_root)
+    parent = d.new_item("will be corrupted")
+    child = d.new_item("innocent child")
+    child.parent = parent.id
+    d.store.save(child)
+    (factory_root / ".factory" / "work-items" / f"{parent.id}.json").write_text("{TORN")
+    rc = main(["--root", str(factory_root), "doctor"])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "unreadable" in captured.err
+    assert "broken lineage" not in captured.out
+
+
+def test_doctor_flags_an_artifact_that_does_not_exist(factory_root: Path, capsys):
+    """The line's main pull channel fails silently everywhere else: a station told
+    to read a missing path gets nothing, and a gate binding hashes it to the
+    literal "missing" so it matches itself at decide time and reports no drift."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("has a ghost spec")
+    item.artifacts = ["docs/specs/WI-0001-spec.md"]
+    d.store.save(item)
+    rc = main(["--root", str(factory_root), "doctor"])
+    out = capsys.readouterr().out
+    assert rc == 0  # a warning, not an error — the item is still workable
+    assert "docs/specs/WI-0001-spec.md" in out and "does not exist" in out
+
+
+def test_doctor_catches_an_id_that_disagrees_with_its_filename(factory_root: Path, capsys):
+    """list_ids() keys off the filename but load() returns the embedded id, so a
+    mismatch means every save writes to a different file than it read — silent
+    divergence of the source of truth, hence an error rather than a warning."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("mislabeled")
+    path = factory_root / ".factory" / "work-items" / f"{item.id}.json"
+    data = json.loads(path.read_text())
+    data["id"] = "WI-4242"
+    path.write_text(json.dumps(data))
+    rc = main(["--root", str(factory_root), "doctor"])
+    assert rc == 1
+    assert "filename and id disagree" in capsys.readouterr().err
+
+
+def test_doctor_flags_a_ledger_category_no_intervention_uses(factory_root: Path, capsys):
+    """The recurrence join is exact string equality, so a near-miss spelling makes
+    it find nothing forever. `factory gate` nudges the steer side; nothing nudges
+    the ledger side, which is what an agent types while writing up a proposal."""
+    from factory.interventions import Interventions
+    from factory.model import GateDecision, WorkItem
+
+    Interventions(factory_root).record(
+        WorkItem(id="WI-0001", title="t", state="spec_review"),
+        GateDecision(gate="spec_review", decision="needs_revision", category="missing-edge-case"),
+        "spec_review",
+    )
+    Ledger(factory_root).add(
+        title="tighten the spec skill",
+        lever="skill",
+        files=["x"],
+        answers=["y"],
+        signal="s",
+        category="missing_edge_case",  # underscores — silently joins nothing
+    )
+    rc = main(["--root", str(factory_root), "doctor"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "matches no intervention record" in out
+    assert "did you mean 'missing-edge-case'?" in out
+
+
+def test_doctor_flags_an_intervention_with_no_machine_block(factory_root: Path, capsys):
+    """records() is best-effort by design, so a record whose machine block is gone
+    still counts as a steer but drops out of every category join — best-effort has
+    to be visible somewhere or it is just silent loss with better manners."""
+    d = factory_root / ".factory" / "interventions"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "WI-0001-spec_review-2026-08-04T10-00-00Z.md").write_text("# hand-written notes\n")
+    rc = main(["--root", str(factory_root), "doctor"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "no readable machine block" in out

@@ -35,14 +35,21 @@ north_star: >
 # `skill`/`agent` name the Claude Code skill + subagent that run a station.
 # A station with no skill/agent is "external" (CI/CD, deploy) — driven by a
 # configured shell command locally, or by GitHub Actions in cloud mode.
+# `checking: true` marks a station as a checker of other stations' work. The
+# engine surfaces it on the NEXT directive and the station brief, and the driver
+# protocol keys isolation on it: a checking station always runs in a fresh
+# context and never receives chat steering — it converges on the spec and the
+# persisted artifacts alone.
 states:
   triage:       {kind: station,    skill: factory-triage,      agent: factory-triage}
   spec:         {kind: station,    skill: factory-spec,        agent: factory-spec}
   spec_review:  {kind: human_gate, gate: spec_review,
                  prompt: "Review the spec. Approve to implement, or send back for revision."}
   implement:    {kind: station,    skill: factory-implement,   agent: factory-implement}
-  code_review:  {kind: station,    skill: factory-code-review, agent: factory-code-review}
-  verify:       {kind: station,    skill: factory-verify,      agent: factory-verify}
+  code_review:  {kind: station,    skill: factory-code-review, agent: factory-code-review,
+                 checking: true}
+  verify:       {kind: station,    skill: factory-verify,      agent: factory-verify,
+                 checking: true}
   ship_review:  {kind: human_gate, gate: ship_review,
                  prompt: "Review the code and verification output. Ready to ship?"}
   # `deploy` is external (no agent): the post-merge CI/CD workflow. `ships_on`
@@ -63,6 +70,12 @@ states:
   done:         {kind: terminal}
 
 start: triage
+
+# Loop circuit-breaker: runs a station may complete per *human epoch* — the stretch
+# since the last gate decision, correction, or revive (lifetime `attempts` keep
+# accruing for the retro's churn signal). Past the cap, an automated route back into
+# the station lands at `blocked`. Override per station entry; delete this key = uncapped.
+max_attempts: 3
 
 # Routing: for each state, verdict -> next state.
 # Station verdicts come from the StationReport the agent emits; human-gate
