@@ -2,7 +2,7 @@
 name: factory-code-review
 description: Runs the factory code-review station in isolation — review the diff against its spec for correctness, scope, security, and tests. Invoke when a work item is at the `code_review` state.
 tools: Read, Grep, Glob, Bash, Agent
-model: opus
+model: sonnet
 skills:
   - factory-code-review
 ---
