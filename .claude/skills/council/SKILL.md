@@ -1,6 +1,6 @@
 ---
 name: council
-description: Convene a council of subagents to investigate one contested question from genuinely different angles in parallel, then synthesize by evidence quality into a single recommendation — with an optional cross-critique second round when the seats diverge. Use for consequential decisions with no single right answer (architecture, UX-affecting design, performance/caching strategy, data/privacy, auth, cost or quality-vs-complexity tradeoffs), for review of high-risk changes, or whenever the user asks for a council, second opinions, red-teaming, or parallel investigation. In the factory, the spec and code-review stations convene councils on contested calls; the driver may also convene one before presenting a high-risk item at a human gate.
+description: Convene a council of subagents to investigate one contested question from genuinely different angles in parallel, then synthesize by evidence quality into a single recommendation — with an optional cross-critique second round when the seats diverge. It is the most expensive move available, so it is for the rare decision that is consequential, genuinely contested between sound approaches, unsettleable by a direct test, and whose outcome would actually change what gets built — architecture and API shape, irreversible schema/auth/data calls, UX-locking design, quality-vs-complexity tradeoffs, review of high-risk changes. Routine calls, anything a test would answer, and questions that just need facts gathered get a decision or a research subagent, not a panel. Also use whenever the user asks for a council, second opinions, red-teaming, or parallel investigation. In the factory, the spec and code-review stations convene councils on contested calls; the driver may also convene one before presenting a high-risk item at a human gate.
 ---
 
 # Council
@@ -9,9 +9,9 @@ Coordinate several subagents investigating the same question — differentiated 
 
 ## When to convene
 
-A council is judgment infrastructure, not a safety ritual. Convene one when three things are true at once: the decision is **consequential** (expensive to reverse, or it shapes how later work gets built), it is **genuinely contested** (reasonable, well-informed approaches disagree — not merely unfamiliar to you), and it **can't be settled empirically** (no test, benchmark, or reproduction would answer it faster than deliberation would).
+A council is judgment infrastructure, not a safety ritual — and it is the most expensive move you have, several full investigations plus a synthesis spent on a single question. It has to earn that against everything else the same budget could buy. Convene one only when all four hold at once: the decision is **consequential** (expensive to reverse, or it shapes how later work gets built), it is **genuinely contested** (reasonable, well-informed approaches disagree — not merely unfamiliar to you), it **can't be settled empirically** (no test, benchmark, or reproduction would answer it faster than deliberation would), and — the test that does the most work — **the outcome would actually change what you produce**. If you can already name what you'd recommend and expect the seats to agree, that's ratification, not deliberation; skip it and make the call.
 
-That shape shows up across engineering, not just where something might break. Illustrations, not a checklist:
+The areas below *often* host such a decision, but none of them qualifies on its own — working in an important area is not the same as facing a contested fork inside it, and most work in every one of them is routine. Match on the four conditions, not on the topic:
 - The load-bearing structural calls: architecture, API shape, extensibility, where a module boundary goes.
 - Designs that lock in UX or product behavior.
 - Performance strategy — caching, query shape, "does this optimization earn its complexity."
@@ -19,7 +19,14 @@ That shape shows up across engineering, not just where something might break. Il
 - Quality-vs-complexity calls between *sound* designs — which one ages better, whether extra robustness earns the complexity it adds. (This is not a venue for ratifying shortcuts: when a path would knowingly incur tech debt, the default is to build it the right way — quality wins. Convene only when "the right way" is itself contested.)
 - Review of high-risk diffs, incident root-cause, "is this alternative worth pursuing."
 
-Don't convene when a direct test would settle it (verify, don't deliberate), or when any competent path is fine — routine work gets a decision, not a panel. And budget **one council per decision**: a well-framed council either settles the question or escalates it (round two below, then the human). Reconvening to re-ask the same question buys noise, not confidence.
+**Reach for the cheaper move first.** A council is what's left after these don't apply:
+- A test, benchmark, or reproduction would settle it → run it. Verify, don't deliberate.
+- Any competent path is fine, or one option is plainly stronger → make the call. Routine work gets a decision, not a panel.
+- What you're missing is *facts*, not judgment — how something is used, what a subsystem does, what a long thread says → that's one research subagent, not several deliberating seats.
+- The fork is genuine taste, product priority, or a spend-vs-benefit call → deliberation can't resolve those; they're a human's. Surface the fork with your provisional pick (see *When the council can't settle it*) instead of convening.
+- A human reviews this work shortly anyway → put the fork in front of them there. Spending a council to pre-answer a question its decider is about to answer buys little.
+
+And budget **one council per decision**: a well-framed council either settles the question or escalates it (round two below, then the human). Reconvening to re-ask the same question buys noise, not confidence.
 
 ## Who convenes it
 
@@ -41,9 +48,16 @@ If the request is ambiguous, ask only the minimum clarification needed; otherwis
 
 The council's value comes from **angle diversity**. Every seat here is a Claude model, so varying the model buys far less than varying the perspective — two seats on the same model with genuinely different angles diverge; two models with the same prompt converge. **The seat's prompt — the angle, the framing, the specific concerns you tell it to chase — is the highest-leverage knob.** Invest your effort there.
 
-Run **every seat on the same model**, so differences between reports reflect the angles, not the substrate. `opus` is the default and the ceiling — the strongest model available for judgment work like this. `sonnet` is acceptable for a lighter council. Never `haiku` — it isn't strong enough for judgment work.
+Run **every seat in a round on the same model**, so differences between reports reflect the angles, not the substrate. **`sonnet` is the default**, and the paragraph above is why: if the angle is the leverage and the substrate isn't, then buying the strongest model for every seat is paying a premium on the variable that matters least — several times over, for one decision. Never `haiku` — it isn't strong enough for judgment work.
 
-Derive the angles from the question: two or three genuinely non-overlapping seats beat five vague ones, and no seat should be askable as "review the architecture, generally." Useful angles include:
+Lift a round to `opus` when the **stakes** justify it, not when the topic sounds weighty. Any one of these is enough:
+- **A wrong answer is expensive to undo** — a schema or migration, a public contract, an auth or data-privacy model, anything already live in front of users.
+- **The reasoning is deep rather than wide** — the answer turns on interactions a fast read gets *confidently* wrong: concurrency and ordering, security arguments, invariants that must survive every state. (A question that mainly needs ground covered is the opposite case; that's breadth, and sonnet covers ground fine.)
+- **A sonnet round came back weak** — seats hedging, thin evidence, or converging on something that doesn't hold up. Escalate the *next* round rather than restarting, and keep that round internally uniform.
+
+When it's a close call, run sonnet and escalate if the reports disappoint: that path pays for one cheap round plus the expensive one only when it was needed, while starting on opus pays the expensive one either way.
+
+Derive the angles from the question. **Two well-differentiated seats is the default**; add a third only when a distinct specialist angle genuinely applies. Each seat is a full investigation, so the count is a cost, not a thoroughness dial — two non-overlapping seats beat five vague ones, and no seat should be askable as "review the architecture, generally." Useful angles include:
 - an architect/correctness seat — does it hold up? broken assumptions, boundary conditions, races, the cases the happy path ignores;
 - an implementation/testability seat — feasibility, blast radius, what it takes to build, test, and roll out;
 - a specialist seat matched to the stakes — security, performance, product/UX risk, data correctness, migration safety, operational impact;

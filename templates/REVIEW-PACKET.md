@@ -7,7 +7,7 @@
 **Item:** <title> — one paragraph: what it is and what the station produced. **Artifacts:** <links: spec files / PR / diff / screenshot> **Confidence:** <0..1>   ·   **Risk:** <low | medium | high> **Evidence:**
 - `spec_review` → the spec's key decisions + open questions, and the draft spec PR when one exists.
 - `ship_review` → the verification results (tests run, behavior exercised); if the item looped through code review, link the latest `.factory/work-items/<id>/review-*.md` — the review↔implement conversation, with each ask and its resolution.
-- High-risk or contested items → fold in the `council` synthesis (usually already convened by the spec or code-review station; check the item's notes).
+- If a station convened a `council` on the item (check its notes) → fold in the synthesis and any split. Councils are rare by design, so most packets won't have one.
 
 ## Your decision
 - ✅ **Approve** → `factory gate <WI-id> --decision approved`
