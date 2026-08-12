@@ -9,8 +9,11 @@ from factory.policies import Policies, PolicyError, PolicyState
 from factory.retro import briefing
 
 
-def _item(**kw) -> WorkItem:
-    return WorkItem(id="WI-0001", title="t", **kw)
+def _item(labels: list[str] | None = None, **kw) -> WorkItem:
+    item = WorkItem(id="WI-0001", title="t", **kw)
+    for name in labels or []:
+        item.add_label(name, by="triage")
+    return item
 
 
 def test_dormant_rule_is_ignored():
@@ -255,7 +258,7 @@ def test_when_all_is_a_deliberate_match_everything():
 def test_labels_all_requires_every_listed_label():
     """`labels_all` (the newly-documented key) matches only when the item carries
     every listed label — a stricter conjunction than `labels_any`."""
-    rule = _rule(when={"labels_all": ["docs", "reviewed"]}, approved_by="johndoe")
+    rule = _rule(when={"labels_all": ["docs", "chore"]}, approved_by="johndoe")
     pol = Policies({"rules": [rule]})
-    assert pol.auto_decision("spec_review", _item(labels=["docs", "reviewed"])) == rule
+    assert pol.auto_decision("spec_review", _item(labels=["docs", "chore"])) == rule
     assert pol.auto_decision("spec_review", _item(labels=["docs"])) is None

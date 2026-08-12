@@ -1,14 +1,13 @@
 """Assemble the deterministic half of a station run's context packet.
 
-``factory brief`` writes one file per station run — ``runs/<state>-<attempt>-brief.md``
-under the item's directory — carrying everything the *engine* knows the station
-needs: identity, risk, lineage, the request, artifact pointers, what routed the
-item here, and where to read next. The driver appends session-only context under
-the marked section and passes the file's content to the station verbatim. That
-makes "what was this worker actually fed?" a file on disk instead of a memory of
-chat — the trace layer for the driver→station handoff. The NL half (how to do
-the job) stays in the station's skill: the brief points at it, never paraphrases
-it, so the two can't drift apart.
+``factory brief`` writes one file per station *state* (``runs/<state>-brief.md``)
+carrying what the engine knows the station needs: identity, risk, lineage, the
+request, artifact pointers, what routed the item here, and where to read next. A
+retry appends its own section rather than minting a second file. The driver appends
+session-only context under the marked section and passes the file verbatim, so "what
+was this worker actually fed?" is a file on disk rather than a memory of chat. How to
+do the job stays in the station's skill — the brief points at it, never paraphrases
+it, so the two can't drift.
 """
 
 from __future__ import annotations
@@ -16,6 +15,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from .checklist import Checklist
+from .classifiers import Classifiers
 from .dispatch import Action
 from .line import Line
 from .model import WorkItem
@@ -42,29 +43,54 @@ def runs_dir(root: str | Path, item_id: str) -> Path:
     return item_dir(root, item_id) / "runs"
 
 
-def brief_path(root: str | Path, item_id: str, state: str, attempt: int) -> Path:
-    return runs_dir(root, item_id) / f"{state}-{attempt}-brief.md"
+def scratchpad_dir(root: str | Path, item_id: str) -> Path:
+    """Where a station may checkpoint mid-run. Swept when the item finishes, so a
+    station can write freely without first deciding whether the result is durable."""
+    return runs_dir(root, item_id) / "scratchpad"
+
+
+def brief_path(root: str | Path, item_id: str, state: str) -> Path:
+    """One brief per station *state*, not per attempt — a retry appends a section,
+    so the state's whole run history reads as one document."""
+    return runs_dir(root, item_id) / f"{state}-brief.md"
+
+
+def run_marker(attempt: int) -> str:
+    """Marks one attempt's section inside the state's brief. Explicit rather than
+    the rendered heading, which ``--force`` would stop matching if its wording moved."""
+    return f"<!-- factory:run {attempt} -->"
+
+
+_REVIEW_NAME = re.compile(r"code-review-(\d+)\.md")
 
 
 def latest_review(root: str | Path, item_id: str) -> Path | None:
-    """The highest-numbered review conversation file, if any — the send-back
-    worklist an implement retry (or a re-review) reads first."""
+    """The highest-numbered review conversation file — the send-back worklist an
+    implement retry (or a re-review) reads first."""
     best: tuple[int, Path] | None = None
-    for p in item_dir(root, item_id).glob("review-*.md"):
-        m = re.fullmatch(r"review-(\d+)\.md", p.name)
+    for p in item_dir(root, item_id).glob("code-review-*.md"):
+        m = _REVIEW_NAME.fullmatch(p.name)
         if m and (best is None or int(m.group(1)) > best[0]):
             best = (int(m.group(1)), p)
     return best[1] if best else None
 
 
-def compose(root: str | Path, line: Line, item: WorkItem, action: Action) -> str:
+def compose(
+    root: str | Path,
+    line: Line,
+    item: WorkItem,
+    action: Action,
+    classifiers: Classifiers | None = None,
+) -> str:
     """Render the deterministic brief for this station run. Pure templating of
     state the engine already owns — no interpretation, nothing the item's files
     don't already say."""
     root = Path(root)
+    classifiers = classifiers or Classifiers.default()
     cap = line.max_attempts(action.state)
     cap_part = f" of max {cap} this epoch" if cap else ""
     lines = [
+        run_marker(action.attempt or 1),
         f"# Station brief — {item.id} @ {action.state} (attempt {action.attempt}{cap_part})",
         "",
         "Deterministic context assembled by `factory brief` from durable state. The driver may",
@@ -72,14 +98,22 @@ def compose(root: str | Path, line: Line, item: WorkItem, action: Action) -> str
         "",
         f"- **Item:** {item.id} — {item.title}",
         f"- **Risk:** {item.risk}"
-        + (f"  ·  **Labels:** {', '.join(item.labels)}" if item.labels else ""),
+        + (f"  ·  **Labels:** {classifiers.mark(item.labels)}" if item.labels else ""),
+        # Shown at the moment a station picks a label — what stops `docs-update`
+        # and `doc-update` becoming two terms for one idea.
+        f"- **Classifiers in use:** {', '.join(classifiers.names)} "
+        "(anything else is recorded but matches no gate policy — propose additions to "
+        "`classifiers.yml` rather than coining a near-duplicate)",
     ]
     if item.parent:
         lines.append(f"- **Parent:** {item.parent}")
     if item.source_ref:
         lines.append(f"- **Source:** {item.source} {item.source_ref}")
+    if item.branch:
+        lines.append(f"- **Feature branch:** `{item.branch}` — the item's branch; the spec and "
+                     "every implementation pass land here")
     if item.pr:
-        lines.append(f"- **PR:** {item.pr}")
+        lines.append(f"- **Open change PR:** {item.pr}")
     if action.last_return:
         lines.append(f"- **Routed here by:** {action.last_return}")
     body = item.body.strip() or "_(no body — the title is the whole request)_"
@@ -94,7 +128,34 @@ def compose(root: str | Path, line: Line, item: WorkItem, action: Action) -> str
     review = latest_review(root, item.id)
     if review:
         lines.append(f"- Latest review conversation: `{review.relative_to(root)}`")
+    # Both checkers get structurally identical briefs; naming the checklist is what
+    # differentiates their inputs, rather than the prose in their skills alone.
+    if action.checking:
+        chk = Checklist.find(root, item.artifacts)
+        lines += ["", "## Your grading surface", ""]
+        if chk:
+            lines += [
+                f"`{chk.relative_to(root)}` — one row per in-scope behavior invariant, "
+                "already scoped by the spec.",
+                "Fill **your** column and leave the other alone: code review records whether "
+                "each invariant is implemented (judged by reading), verify records whether it "
+                "holds (judged by running).",
+                "Rows are durable — work finished before your context ends survives, and a "
+                "station replacing you does not repeat it.",
+            ]
+        else:
+            lines.append(
+                "_(no checklist registered on this item — grade against the spec's numbered "
+                "Behavior invariants directly)_"
+            )
     lines += [
+        "",
+        "## Scratchpad",
+        "",
+        f"`{scratchpad_dir(root, item.id).relative_to(root)}` — yours to checkpoint into mid-run",
+        "(partial findings, a long command's output) so a context that ends early doesn't lose",
+        "them. Swept when the item finishes; anything worth keeping goes in a real file and is",
+        "registered with `--artifact`.",
         "",
         "## Read next",
         "",

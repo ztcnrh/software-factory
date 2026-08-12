@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 from . import brief as brief_mod
+from . import sweep as sweep_mod
 from .dispatch import Action, Dispatcher, GateDriftError
 from .ledger import CLOSED, STATUSES, Ledger
 from .line import Line
@@ -130,6 +131,21 @@ def _mirror_issue_state(d: Dispatcher, item_id: str, prev_state: str | None) -> 
         print(f"  ⚠ issue #{item.source_ref} label sync failed: {msg}", file=sys.stderr)
 
 
+def _warn_unrecognized(d: Dispatcher, item: WorkItem) -> None:
+    """Say so the moment a label lands outside the vocabulary. It is still recorded
+    — we never drop input — but it satisfies no gate policy, and the person who
+    just coined it is the only one positioned to notice it's a near-duplicate."""
+    unknown = d.classifiers.unrecognized(item.labels)
+    if not unknown:
+        return
+    print(
+        f"ⓘ label(s) outside the vocabulary: {', '.join(unknown)} — recorded, but they match no "
+        f"gate policy. Known: {', '.join(d.classifiers.names)}. Promote one by adding it to "
+        "classifiers.yml.",
+        file=sys.stderr,
+    )
+
+
 def _print_action(action: Action, line: Line) -> None:
     # Distinct glyph for the blocked gate: it means a station blocked itself (via its
     # routed `blocked` verdict or the human_required escape hatch — something only a
@@ -194,12 +210,16 @@ def cmd_new(args: argparse.Namespace) -> int:
         args.title,
         body=body,
         labels=args.label or [],
+        # Intake labels are the human's classification: a station can't retract
+        # one, only the human at a gate can.
+        labels_by=f"human:{_resolve_actor(args)}",
         risk=args.risk,
         parent=args.parent,
         source=source,
         source_ref=args.source_ref,
     )
     print(f"✓ created {item.id}: {item.title}")
+    _warn_unrecognized(d, item)
     if item.metadata.get("risk_floor"):
         matched = ", ".join(item.metadata.get("risk_floor_matches", []))
         print(
@@ -244,18 +264,32 @@ def cmd_brief(args: argparse.Namespace) -> int:
         )
         return 1
     item = d.store.load(args.id)
-    path = brief_mod.brief_path(d.root, item.id, action.state, action.attempt or 1)
-    if path.exists() and not args.force:
+    path = brief_mod.brief_path(d.root, item.id, action.state)
+    existing = path.read_text() if path.exists() else ""
+    marker = brief_mod.run_marker(action.attempt or 1)
+    if marker in existing and not args.force:
         # Reuse, never clobber: the driver may already have appended session
         # context, and that half of the packet is not regenerable.
-        print(path.read_text(), end="")
+        print(existing, end="")
         print(f"→ existing brief reused: {path} (--force regenerates)", file=sys.stderr)
         return 0
-    text = brief_mod.compose(d.root, d.line, item, action)
+    text = brief_mod.compose(d.root, d.line, item, action, classifiers=d.classifiers)
+    if marker in existing:
+        # --force regenerates *this* run's section and keeps the ones before it:
+        # earlier attempts are the trace of what those workers were actually fed.
+        head = existing.split(marker)[0].rstrip()
+        text = (head + "\n\n---\n\n" + text) if head else text
+        how = "regenerated"
+    elif existing:
+        text = existing.rstrip() + "\n\n---\n\n" + text
+        how = f"appended (attempt {action.attempt})"
+    else:
+        how = "written"
     path.parent.mkdir(parents=True, exist_ok=True)
+    brief_mod.scratchpad_dir(d.root, item.id).mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     print(text, end="")
-    print(f"→ brief written: {path}", file=sys.stderr)
+    print(f"→ brief {how}: {path}", file=sys.stderr)
     return 0
 
 
@@ -281,7 +315,9 @@ def _inline_report_flags(args: argparse.Namespace) -> list[str]:
         "--cost": args.cost,
         "--risk": args.risk,
         "--pr": args.pr,
+        "--branch": args.branch,
         "--label": args.label or None,
+        "--unlabel": args.unlabel or None,
         "--notes": args.notes,
         "--human-required": args.human_required or None,
         "--human-reason": args.human_reason,
@@ -290,6 +326,25 @@ def _inline_report_flags(args: argparse.Namespace) -> list[str]:
         "--ran": args.ran,
     }
     return [flag for flag, value in given.items() if value is not None]
+
+
+def _paired_unlabels(args: argparse.Namespace) -> list[tuple[str, str]] | None:
+    """Zip --unlabel with --unlabel-reason, or print why they don't zip. Mispairing
+    is easy on a repeatable flag and would otherwise attach a reason to the wrong
+    label — so the counts must match exactly, and the check happens before any
+    state is touched."""
+    names = args.unlabel or []
+    reasons = args.unlabel_reason or []
+    if not names and not reasons:
+        return []
+    if len(names) != len(reasons):
+        print(
+            f"✗ --unlabel and --unlabel-reason must pair up: got {len(names)} label(s) and "
+            f"{len(reasons)} reason(s). Repeat them together, one reason per label.",
+            file=sys.stderr,
+        )
+        return None
+    return list(zip(names, reasons, strict=True))
 
 
 def cmd_advance(args: argparse.Namespace) -> int:
@@ -328,6 +383,9 @@ def cmd_advance(args: argparse.Namespace) -> int:
         if args.spawn_body and not args.spawn_title:
             print("✗ --spawn-body needs --spawn-title to spawn anything", file=sys.stderr)
             return 1
+        unlabels = _paired_unlabels(args)
+        if unlabels is None:
+            return 1
         spawn = []
         if args.spawn_title:
             spawn.append({"title": args.spawn_title, "body": args.spawn_body or ""})
@@ -342,7 +400,9 @@ def cmd_advance(args: argparse.Namespace) -> int:
             cost=args.cost or 0.0,
             risk=args.risk,
             pr=args.pr,
+            branch=args.branch,
             labels=args.label or [],
+            unlabels=unlabels,
             human_required=args.human_required,
             human_reason=args.human_reason or "",
             notes=args.notes or "",
@@ -351,6 +411,9 @@ def cmd_advance(args: argparse.Namespace) -> int:
         )
     new_state = d.advance(item, report)
     print(f"✓ {item.id}: {report.station} → {new_state}  (verdict: {report.verdict})")
+    for name, reason in report.unlabels:
+        print(f"  ↩ label {name!r} retracted: {reason}")
+    _warn_unrecognized(d, item)
     action = _resolve_next(d, item.id)
     _mirror_issue_state(d, item.id, prev)
     _print_action(action, d.line)
@@ -379,6 +442,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
                 ("--produced", args.produced),
                 ("--produced-file", args.produced_file),
                 ("--accept-drift", args.accept_drift or None),
+                ("--unlabel", args.unlabel or None),
             )
             if value
         ]
@@ -389,8 +453,12 @@ def cmd_gate(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-        if args.packet and not Path(args.packet).is_file():
-            print(f"✗ packet file not found: {args.packet}", file=sys.stderr)
+        # The packet path is root-relative: that's how the engine hashes it at bind
+        # time and reads it to promote at decision time. Checking it against the
+        # process's CWD instead rejected a perfectly good path whenever --root
+        # wasn't the working directory.
+        if args.packet and not (_root(args) / args.packet).is_file():
+            print(f"✗ packet file not found: {_root(args) / args.packet}", file=sys.stderr)
             return 1
         snap = d.bind_gate(item, by=_resolve_actor(args), packet=args.packet)
         print(
@@ -409,6 +477,9 @@ def cmd_gate(args: argparse.Namespace) -> int:
         return 1
     if args.packet:
         print("✗ --packet only means something with --bind", file=sys.stderr)
+        return 1
+    unlabels = _paired_unlabels(args)
+    if unlabels is None:
         return 1
     decision = GateDecision(
         gate=gate,
@@ -451,7 +522,13 @@ def cmd_gate(args: argparse.Namespace) -> int:
             if (c := r.get("category")) and c != "uncategorized"
         }
     try:
-        new_state = d.gate(item, decision, produced=produced, accept_drift=args.accept_drift)
+        new_state = d.gate(
+            item,
+            decision,
+            produced=produced,
+            accept_drift=args.accept_drift,
+            unlabels=unlabels,
+        )
     except GateDriftError as e:
         print(f"✗ {e}", file=sys.stderr)
         print(
@@ -461,6 +538,8 @@ def cmd_gate(args: argparse.Namespace) -> int:
         )
         return 1
     print(f"✓ {item.id}: gate {gate} → {new_state}  (decision: {args.decision})")
+    for name, reason in unlabels:
+        print(f"  ↩ label {name!r} retracted: {reason}")
     if decision.category and decision.category not in known_categories:
         # The retro's recurrence check joins ledger rows to interventions on an
         # exact string, so a near-miss spelling breaks it silently. The vocabulary
@@ -474,6 +553,38 @@ def cmd_gate(args: argparse.Namespace) -> int:
     action = _resolve_next(d, item.id)
     _mirror_issue_state(d, item.id, prev)
     _print_action(action, d.line)
+    return 0
+
+
+# --- sweep: reclaim a finished item's scratch --------------------------------
+
+
+def cmd_sweep(args: argparse.Namespace) -> int:
+    d = _disp(args)
+    if bool(args.id) == bool(args.all):
+        print("✗ name one work item, or pass --all (not both, not neither)", file=sys.stderr)
+        return 1
+    ids = [args.id] if args.id else d.store.list_ids()
+    swept = 0
+    for iid in ids:
+        item = d.store.load(iid)
+        if not d.line.is_terminal(item.state):
+            if args.id:  # explicit target: say why nothing happened
+                print(
+                    f"✗ {iid} is at {item.state!r}, not a terminal state — its scratch is "
+                    "still in use. Sweep it once it's done or parked.",
+                    file=sys.stderr,
+                )
+                return 1
+            continue
+        lines = sweep_mod.run(d.root, item, dry_run=args.dry_run)
+        if lines:
+            swept += 1
+            print(f"\n{iid} ({item.state}):")
+            for line in lines:
+                print(f"  {line}")
+    verb = "would reclaim" if args.dry_run else "reclaimed"
+    print(f"\n{verb} scratch from {swept} item(s)." if swept else "\nNothing to sweep.")
     return 0
 
 
@@ -593,22 +704,36 @@ def _render_item(d: Dispatcher, item_id: str) -> None:
         f"  state: {item.state}   risk: {item.risk}   steers: {item.steers}   "
         f"human touches: {item.human_touches}   cost: {item.cost}"
     )
+    runs = sum(item.attempts.values())
+    if runs:
+        per_state = ", ".join(f"{st} ×{n}" for st, n in item.attempts.items())
+        print(f"  station runs: {runs}  ({per_state})")
     if item.labels:
-        print(f"  labels: {', '.join(item.labels)}")
+        print(f"  labels: {d.classifiers.mark(item.labels)}")
+    # Provenance and retractions: who classified this item, and what a station or
+    # the human took back off. It's the record that decides who may correct what,
+    # so it belongs where someone deciding is already looking.
+    retracted = [e for e in item.label_log if e.action == "retract"]
+    if item.label_log:
+        print("  label log:")
+        for name in item.labels:
+            print(f"    + {name}  (by {item.provenance(name)})")
+        for e in retracted:
+            print(f"    − {e.name}  (retracted by {e.by}: {e.reason})")
     if item.parent:
         print(f"  parent: {item.parent}")
     if item.source_ref:
         print(f"  source: {item.source} {item.source_ref}")
     if item.artifacts:
         print(f"  artifacts: {', '.join(item.artifacts)}")
+    if item.branch:
+        print(f"  branch: {item.branch}")
     if item.pr:
         print(f"  pr: {item.pr}")
-    # The run trace: what each station run was fed (briefs) and what each gate
-    # reviewed (packets) — the per-item observability files, listed so nobody
-    # has to remember the runs/ convention to find them.
-    traces = sorted((d.store.dir / item.id).glob("runs/*-brief.md")) + sorted(
-        (d.store.dir / item.id).glob("packet-*.md")
-    )
+    # What each run was fed (briefs) and what the human was looking at when they
+    # decided (promoted renders). Briefs vanish at the sweep; decisions stay.
+    home = d.store.dir / item.id
+    traces = sorted(home.glob("runs/*-brief.md")) + sorted(home.glob("decisions/*.md"))
     if traces:
         print("  run traces:")
         for t in traces:
@@ -652,7 +777,9 @@ def cmd_metrics(args: argparse.Namespace) -> int:
     print(f"  human gate stops:   {s['human_gate_stops']}  (human present (expected))")
     print(f"  human steers:       {s['human_steers']}  (send-backs, corrections, unblocks)")
     print(f"  fully hands-off:    {s['hands_off_shipped']}/{s['shipped']}  (no human present)")
-    print(f"  total cost:         {s['total_cost']}")
+    print(f"  station runs:       {s['station_runs']}  (cost proxy — one run, one agent)")
+    print(f"  runs per shipped:   {s['runs_per_shipped']}  (the line's minimum path is 6)")
+    print(f"  total cost:         {s['total_cost']}  (self-reported by stations via --cost)")
     print(f"  cost per shipped:   {s['cost_per_shipped']}")
     if s["steers_by_stage"]:
         print("\n  where humans had to step in (aim the learning here):")
@@ -754,6 +881,7 @@ def cmd_policy(args: argparse.Namespace) -> int:
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Cross-check the factory's stores against each other and the config —
     'is my factory consistent?' as one command. Read-only."""
+    from .classifiers import Classifiers
     from .interventions import Interventions
     from .metrics import Metrics
     from .policies import Policies, PolicyState
@@ -821,6 +949,30 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 warns.append(
                     f"policy overlay: suspended rule {rid!r} no longer exists in policies.yml"
                 )
+        # A rule keyed on a label outside the vocabulary is well-formed and can
+        # never fire — the one failure this pair has that nothing else reports.
+        for rid, name in policies.unrecognized_conditions():
+            near = difflib.get_close_matches(name, policies.classifiers.names, n=1)
+            warns.append(
+                f"policy {rid!r} matches on label {name!r}, which is not in classifiers.yml — "
+                "the rule can never fire"
+                + (f" (did you mean {near[0]!r}?)" if near else "")
+            )
+
+    # Labels in use that the vocabulary doesn't know: recorded on purpose, but
+    # inert for policy, and this is where near-duplicate drift becomes visible.
+    vocab = Classifiers.load(root / "classifiers.yml")
+    where = "classifiers.yml" if vocab.path and vocab.path.exists() else "the built-in seed"
+    print(f"✓ {len(vocab.names)} classifier(s) loaded from {where}")
+    in_use: dict[str, list[str]] = {}
+    for iid, item in sorted(items.items()):
+        for name in vocab.unrecognized(item.labels):
+            in_use.setdefault(name, []).append(iid)
+    for name, ids in sorted(in_use.items()):
+        warns.append(
+            f"label {name!r} is on {', '.join(ids)} but not in classifiers.yml — recorded, "
+            "and it satisfies no gate policy until someone promotes it"
+        )
 
     metrics = Metrics(root)
     metrics.events()
@@ -875,9 +1027,9 @@ def cmd_labels(args: argparse.Namespace) -> int:
         print("✗ --repo only means something with --github", file=sys.stderr)
         return 1
 
-    path = _root(args) / "labels.yml"
+    path = _root(args) / "github-labels.yml"
     if not path.exists():
-        print(f"✗ no labels.yml at {path.parent}", file=sys.stderr)
+        print(f"✗ no github-labels.yml at {path.parent}", file=sys.stderr)
         return 1
     labels = (yaml.safe_load(path.read_text()) or {}).get("labels", [])
     if not args.github:
@@ -1027,14 +1179,41 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["low", "medium", "high", "unknown"],
         help="Revised risk, if the station learned something (policies match on this)",
     )
-    s.add_argument("--pr", help="PR URL or number for the change")
+    s.add_argument(
+        "--pr",
+        help="PR URL or number for this implementation pass — the change branch's PR, which "
+        "targets the item's feature branch (never the integration branch)",
+    )
+    s.add_argument(
+        "--branch",
+        help="The item's feature branch (e.g. feature/AMPS-91__session-leak): the branch the "
+        "spec and every implementation pass land on, merged into the integration branch as "
+        "one unit at the ship gate. Set once, by whichever station creates it",
+    )
     s.add_argument(
         "--label",
         action="append",
         metavar="LABEL",
-        help="Attach a classifying label to the item; repeat for more (--label read-only "
-        "--label docs). Additive — never removes existing labels. Gate policies match on "
-        "these (`labels_any` / `labels_all`).",
+        help="Attach a classifying label to the item; repeat for more (--label refactor "
+        "--label docs). Idempotent. Gate policies match on these (`labels_any` / "
+        "`labels_all`), and only labels in classifiers.yml satisfy one — a label outside "
+        "that vocabulary is still recorded, just marked and inert.",
+    )
+    s.add_argument(
+        "--unlabel",
+        action="append",
+        metavar="LABEL",
+        help="Retract a classification this station disproved; pair each with an "
+        "--unlabel-reason and repeat for more. A station may only retract what a station "
+        "applied — a human's label (or one from before the log existed) is refused, and the "
+        "refusal takes the whole advance with it. Nothing is erased: the log keeps the "
+        "original application and the retraction side by side.",
+    )
+    s.add_argument(
+        "--unlabel-reason",
+        action="append",
+        metavar="TEXT",
+        help="Why that classification was wrong — required, one per --unlabel, in order",
     )
     s.add_argument(
         "--notes",
@@ -1074,22 +1253,61 @@ def build_parser() -> argparse.ArgumentParser:
             "  factory brief WI-0007\n"
             "  factory brief WI-0007 --force\n"
             "\n"
-            "Writes .factory/work-items/<id>/runs/<state>-<attempt>-brief.md — the engine-owned\n"
-            "half of the station's context packet (identity, risk, lineage, the request,\n"
-            "artifact pointers, what routed it here) — and prints it to stdout. The driver\n"
-            "appends session-only context under the marked section, then passes the file's\n"
-            "content to the station verbatim. An existing brief is reused, never overwritten\n"
-            "(--force regenerates, discarding driver additions), so what each worker was fed\n"
-            "stays on disk as the run's trace."
+            "Writes .factory/work-items/<id>/runs/<state>-brief.md — the engine-owned half of\n"
+            "the station's context packet (identity, risk, lineage, the request, artifact\n"
+            "pointers, what routed it here) — and prints it to stdout. The driver appends\n"
+            "session-only context under the marked section, then passes the file's content to\n"
+            "the station verbatim.\n"
+            "\n"
+            "One file per station state, not per attempt: a retry appends its own section, so\n"
+            "the state's whole run history reads as one document and a retrying station sees\n"
+            "what its predecessor was told. This run's brief is reused if it already exists\n"
+            "(--force regenerates just this run's section, keeping the earlier ones). It also\n"
+            "creates runs/scratchpad/ — the station's working area, swept when the item ends."
         ),
     )
     s.add_argument("id", help="Work item id (WI-####)")
     s.add_argument(
         "--force",
         action="store_true",
-        help="Regenerate even if this run's brief exists (discards any driver-added section)",
+        help="Regenerate this run's section even if it exists (discards any driver-added "
+        "context in it; earlier attempts' sections are kept)",
     )
     s.set_defaults(func=cmd_brief)
+
+    # -- sweep --
+    s = sub.add_parser(
+        "sweep",
+        help="Reclaim a finished item's scratch (briefs, scratchpad, undecided gate renders)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  factory sweep WI-0007 --dry-run\n"
+            "  factory sweep WI-0007\n"
+            "  factory sweep --all\n"
+            "\n"
+            "The factory writes two kinds of file. Memory is what nothing else holds: the\n"
+            "specs, the checklist, the review conversation, the decisions you actually made.\n"
+            "Scratch is what the engine can rebuild or what no longer has a reader: the\n"
+            "per-run briefs (regenerate with `factory brief`), a station's scratchpad, and\n"
+            "gate renders no decision ever bound to. This removes the second kind.\n"
+            "\n"
+            "It runs automatically when an item reaches a terminal state, so you mostly won't\n"
+            "type it — it's here for items that predate it and for a manual pass. Two rules\n"
+            "make it safe: a file survives because the item REGISTERED it as an artifact (not\n"
+            "because of where it sits or what it's called), and a path that resolves outside\n"
+            "the item's own directory is refused. --all sweeps every terminal item; an item\n"
+            "still on the line is skipped, since its scratch is still in use."
+        ),
+    )
+    s.add_argument("id", nargs="?", help="Work item id; omit with --all")
+    s.add_argument(
+        "--all", action="store_true", help="Sweep every item at a terminal state (done, parked)"
+    )
+    s.add_argument(
+        "--dry-run", action="store_true", help="List what would be removed; remove nothing"
+    )
+    s.set_defaults(func=cmd_sweep)
 
     # -- gate --
     s = sub.add_parser(
@@ -1099,7 +1317,7 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Examples:\n"
             "  factory gate WI-0007 --bind \\\n"
-            "      --packet .factory/work-items/WI-0007/packet-ship_review-1.md\n"
+            "      --packet .factory/work-items/WI-0007/review-packets/ship_review-1.md\n"
             "  factory gate WI-0007 --decision approved\n"
             "  factory gate WI-0007 --decision needs_revision --category missing-edge-case \\\n"
             '      --notes "public write endpoints must always specify input validation" \\\n'
@@ -1131,7 +1349,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument(
         "--packet",
         help="With --bind: the rendered review-packet file the human is looking at "
-        "(saved under .factory/work-items/<id>/)",
+        "(saved under .factory/work-items/<id>/review-packets/). Resolved against the "
+        "factory root, not your working directory",
     )
     s.add_argument(
         "--decision",
@@ -1159,6 +1378,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     s.add_argument("--expected", help="What the human wanted the station to produce")
     s.add_argument("--category", help="Intervention category, e.g. missing-edge-case, wrong-scope")
+    s.add_argument(
+        "--unlabel",
+        action="append",
+        metavar="LABEL",
+        help="Retract a label as part of this decision; pair each with an --unlabel-reason "
+        "and repeat for more. Unlike a station's, your retraction is unrestricted — you can "
+        "take off a label whoever applied it, including one carried over from before the log "
+        "existed. The log keeps both entries.",
+    )
+    s.add_argument(
+        "--unlabel-reason",
+        action="append",
+        metavar="TEXT",
+        help="Why that classification was wrong — required, one per --unlabel, in order",
+    )
     produced_src = s.add_mutually_exclusive_group()
     produced_src.add_argument(
         "--produced", help="What the station produced (inline text), embedded in the record"
@@ -1430,7 +1664,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     s.set_defaults(func=cmd_doctor)
 
-    s = sub.add_parser("labels", help="List the factory labels, or create them in a repo (gh)")
+    s = sub.add_parser(
+        "labels",
+        help="List the GitHub conveyor labels, or create them in a repo (gh)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "These are the `factory:<state>` labels that mirror an item's position onto its\n"
+            "GitHub issue (and trigger the cloud workflows) — presentation, defined in\n"
+            "github-labels.yml. They are NOT the classifiers stations label work items with:\n"
+            "those live in classifiers.yml, gate policies match on them, and they never touch\n"
+            "GitHub. Two different things, two different files."
+        ),
+    )
     s.add_argument("--github", action="store_true", help="Create the labels via the gh CLI")
     s.add_argument("--repo", help="Target repo (owner/name) for --github")
     s.set_defaults(func=cmd_labels)

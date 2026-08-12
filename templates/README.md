@@ -9,8 +9,8 @@ Everything in this directory is **load-bearing**: some component of the factory 
 
 Three things deliberately **not** here:
 
-- The spec shapes (`PRODUCT.md`, `TECH.md`) live in the skills that write them — `.claude/skills/write-product-spec` and `write-tech-spec` — because a fixed-heading template file fights their "optional sections earn their place" rule and would be a second home for the same shape.
-- Formats rendered by engine *code* live in that code (e.g. the intervention record's shape is `src/factory/interventions.py`), so the engine stays self-contained when installed as a CLI tool.
+- The spec shapes (`PRODUCT.md`, `TECH.md`) live in the skills that write them — `.claude/skills/write-product-spec` and `write-tech-spec` — because a fixed-heading template file fights their "optional sections earn their place" rule and would be a second home for the same shape. `CHECKLIST.md` follows them: its shape lives in `.claude/skills/factory-spec`, the station that writes it, next to the scoping decision it encodes.
+- Formats rendered by engine *code* live in that code (e.g. the intervention record's shape is `src/factory/interventions.py`, the station brief's is `src/factory/brief.py`), so the engine stays self-contained when installed as a CLI tool. Where a shape is written by a skill but *parsed* by the engine — the checklist's machine block — the engine owns only the marker constant and the parse (`src/factory/checklist.py`), so the fence can't drift while the table stays the writer's to shape.
 - Human-facing guidance with no consumer lives in `docs/` or `FACTORY-MANUAL.md`, not here.
 
 Editing a template changes real factory output — which also makes these files fair game for the **retro station** to improve.

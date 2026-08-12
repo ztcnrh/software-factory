@@ -120,8 +120,8 @@ def test_policy_list_and_reinstate_flow(factory_root: Path, capsys):
 
 def test_brief_writes_the_run_packet_and_reuses_it(factory_root: Path, capsys):
     """The driver→station handoff becomes a file on disk: brief writes
-    runs/<state>-<attempt>-brief.md once, and a re-run reuses it rather than
-    clobbering the session context the driver may have appended."""
+    runs/<state>-brief.md once, and a re-run reuses it rather than clobbering the
+    session context the driver may have appended."""
     d = Dispatcher(factory_root)
     item = d.new_item("Add CSV export", body="Users need CSV downloads.")
     item.state = "implement"
@@ -130,7 +130,7 @@ def test_brief_writes_the_run_packet_and_reuses_it(factory_root: Path, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert "# Station brief" in out and "## Session context (driver-added)" in out
-    path = factory_root / ".factory" / "work-items" / item.id / "runs" / "implement-1-brief.md"
+    path = factory_root / ".factory" / "work-items" / item.id / "runs" / "implement-brief.md"
     assert path.exists()
 
     with open(path, "a") as f:
@@ -172,7 +172,7 @@ def test_brief_surfaces_retry_context_and_the_review_conversation(factory_root: 
     d.advance(item, StationReport(station="implement", verdict="implemented"))
     review_dir = factory_root / ".factory" / "work-items" / item.id
     review_dir.mkdir(parents=True, exist_ok=True)
-    (review_dir / "review-1.md").write_text("## Worklist\n1. add tests")
+    (review_dir / "code-review-1.md").write_text("## Worklist\n1. add tests")
     d.advance(
         item, StationReport(station="code_review", verdict="changes_requested", summary="no tests")
     )
@@ -181,7 +181,7 @@ def test_brief_surfaces_retry_context_and_the_review_conversation(factory_root: 
     assert rc == 0
     assert "(attempt 2" in out
     assert "Routed here by:" in out and "no tests" in out
-    assert "review-1.md" in out
+    assert "code-review-1.md" in out
 
 
 def test_brief_refuses_a_gate_and_points_at_the_packet_flow(factory_root: Path, capsys):
@@ -238,7 +238,7 @@ def test_labels_repo_without_github_is_rejected(factory_root: Path, capsys):
 def test_labels_lists_without_touching_github(factory_root: Path, capsys):
     """A bare `factory labels` stays a read-only inspect (the CLI's convention for
     status/metrics/doctor) — it prints the set and points at --github to create."""
-    (factory_root / "labels.yml").write_text(
+    (factory_root / "github-labels.yml").write_text(
         "labels:\n  - name: factory:triage\n    color: ededed\n    description: In triage\n"
     )
     rc = main(["--root", str(factory_root), "labels"])
@@ -341,6 +341,29 @@ def test_gate_warns_when_intervention_fields_ride_a_non_steer(factory_root: Path
     )
     assert rc == 0
     assert "add --changed" in capsys.readouterr().err
+
+
+def test_the_feature_branch_and_the_change_pr_are_recorded_separately(
+    factory_root: Path, capsys
+):
+    """The branch outlives every implementation pass while `pr` turns over with
+    each one, so a single field would lose the branch the item actually ships."""
+    item_id = _item_at(factory_root, "triage")
+    main(["--root", str(factory_root), "advance", item_id, "--verdict", "needs_spec"])
+    main(
+        ["--root", str(factory_root), "advance", item_id, "--verdict", "ready_for_review",
+         "--branch", "feature/WI-0001__session-leak"]
+    )
+    main(["--root", str(factory_root), "gate", item_id, "--decision", "approved"])
+    main(
+        ["--root", str(factory_root), "advance", item_id, "--verdict", "implemented", "--pr", "#13"]
+    )
+    item = Dispatcher(factory_root).store.load(item_id)
+    assert (item.branch, item.pr) == ("feature/WI-0001__session-leak", "#13")
+    capsys.readouterr()
+    main(["--root", str(factory_root), "status", item_id])
+    out = capsys.readouterr().out
+    assert "branch: feature/WI-0001__session-leak" in out and "pr: #13" in out
 
 
 def test_advance_label_flag_lands_on_the_item(factory_root: Path):

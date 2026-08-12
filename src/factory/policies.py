@@ -25,6 +25,7 @@ from typing import Any
 
 import yaml
 
+from .classifiers import Classifiers
 from .model import RISK_ORDER as _RISK_ORDER
 from .model import WorkItem
 
@@ -36,19 +37,46 @@ class PolicyError(Exception):
 
 
 class Policies:
-    def __init__(self, data: dict[str, Any], path: Path | None = None):
+    def __init__(
+        self,
+        data: dict[str, Any],
+        path: Path | None = None,
+        classifiers: Classifiers | None = None,
+    ):
         self.path = path
         self.default = data.get("default", "require_human")
         self.rules: list[dict] = data.get("rules") or []
+        # Label conditions match the *recognized* vocabulary only, so an
+        # unrecognized label can't clear a gate (see classifiers.py).
+        self.classifiers = classifiers or Classifiers.default()
         self._validate()
 
     @classmethod
-    def load(cls, path: str | Path) -> Policies:
+    def load(cls, path: str | Path, classifiers: Classifiers | None = None) -> Policies:
         p = Path(path)
+        # The vocabulary lives beside the rules that consume it; a caller with its
+        # own loaded copy passes it in so a factory has exactly one.
+        classifiers = classifiers or Classifiers.load(p.parent / "classifiers.yml")
         if not p.exists():
-            return cls({"default": "require_human", "rules": []}, p)
+            return cls({"default": "require_human", "rules": []}, p, classifiers)
         with open(p) as f:
-            return cls(yaml.safe_load(f) or {}, p)
+            return cls(yaml.safe_load(f) or {}, p, classifiers)
+
+    def unrecognized_conditions(self) -> list[tuple[str, str]]:
+        """(rule id, label) for every label a rule matches on that the vocabulary
+        doesn't know — a rule that can therefore never fire. Silent by nature:
+        the rule is well-formed, it just stopped matching. ``factory doctor``
+        surfaces it."""
+        out = []
+        for rule in self.rules:
+            when = rule.get("when")
+            if not isinstance(when, dict):
+                continue
+            for key in ("labels_any", "labels_all"):
+                for name in when.get(key, []):
+                    if not self.classifiers.is_recognized(name):
+                        out.append((rule.get("id", "?"), name))
+        return out
 
     def auto_decision(
         self, gate: str, item: WorkItem, suspended: frozenset[str] | set[str] = frozenset()
@@ -106,13 +134,16 @@ class Policies:
                     f"{sorted(_RISK_ORDER)}"
                 )
 
-    @staticmethod
-    def _matches(when: dict | str, item: WorkItem) -> bool:
+    def _matches(self, when: dict | str, item: WorkItem) -> bool:
         if when == "all":  # validated match-everything sentinel
             return True
-        if "labels_any" in when and not set(when["labels_any"]) & set(item.labels):
+        # Only recognized labels count: an unrecognized one is recorded on the item
+        # but must not clear a gate — nobody promoted it into the vocabulary, and a
+        # gate that stays with the human is the safe way to be wrong.
+        labels = set(self.classifiers.recognized(item.labels))
+        if "labels_any" in when and not set(when["labels_any"]) & labels:
             return False
-        if "labels_all" in when and not set(when["labels_all"]) <= set(item.labels):
+        if "labels_all" in when and not set(when["labels_all"]) <= labels:
             return False
         if "max_risk" in when:
             limit = _RISK_ORDER.get(when["max_risk"], 0)

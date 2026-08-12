@@ -10,7 +10,7 @@ Your job here is not to write features. It's to **operate the line and keep rais
 
 ### Required (local, no accounts)
 1. **Install the CLI.** `uv tool install /path/to/software-factory` puts the `factory` command on your PATH. (uv already owns Python on your machine, so this just works.)
-2. **Adopt the factory into a repo.** From the factory directory: `python3 install/install.py /path/to/your/repo`. This copies the skills, subagents, commands, hooks, line/policy/label config, and templates into the repo, and creates the `.factory/` state directory. Then `cd` there and run `factory init`.
+2. **Adopt the factory into a repo.** From the factory directory: `python3 install/install.py /path/to/your/repo`. This copies the skills, subagents, commands, hooks, the line/policy/classifier/label config, and templates into the repo; plants marked blocks in `CLAUDE.md`, `.gitignore`, and `.gitattributes`; and creates the `.factory/` state directory. Then `cd` there and run `factory init`.
 3. **Open that repo in Claude Code.** The `SessionStart` hook will greet you with the board; `/factory` and `/factory-status` are available as commands.
 
 That's the whole local setup. You can run the entire loop from here, by hand-driving with `/factory`.
@@ -20,7 +20,8 @@ These unlock the "runs while you sleep" behavior and richer integrations. None a
 
 - [ ] **Anthropic API key as a GitHub secret** — to run stations unattended via GitHub Actions. Add `ANTHROPIC_API_KEY` (or `CLAUDE_CODE_OAUTH_TOKEN`) under the repo's *Settings → Secrets and variables → Actions*. See [CLOUD-AUTONOMY.md](docs/CLOUD-AUTONOMY.md).
 - [ ] **Enable the workflows** — install with `--with-cloud`, then rename `.github/workflows/factory-*.yml.disabled` → `.yml`. Treat the first runs as a supervised shakedown.
-- [ ] **Create the conveyor labels in GitHub** — `factory labels --github` (needs the `gh` CLI).
+- [ ] **Create the conveyor labels in GitHub** — `factory labels --github` (needs the `gh` CLI). These are the `factory:<state>` issue labels from `github-labels.yml`, not the classifiers in `classifiers.yml` — different file, different job.
+- [ ] **Skim `classifiers.yml`** — the vocabulary stations classify work items with, and what gate policies match on. It ships seeded with universal terms (`bug`, `feature`, `docs`, …); add what your work actually looks like. A label outside it is still recorded, just flagged and inert for policy, so this is a nudge rather than a wall.
 - [ ] **A sandbox repo** — for your first cloud run, point it at a throwaway repo, not something precious.
 - [ ] **A `DIRECTION.md`** — install with `--with-direction` (or copy `templates/DIRECTION.md`) and spend ten minutes filling in the north star, Now/Next/Later, and non-negotiables. The spec station anchors specs to it and flags divergence instead of drifting off-vision — the more autonomously the factory runs, the more this file substitutes for the vision in your head.
 - [ ] **(Later) Monitoring + notifications** — connect the Monitor station to whatever you use (Sentry/Datadog/logs) and route gate pings to Slack. Both are noted as extension points in [EXTENDING.md](docs/EXTENDING.md).
@@ -51,6 +52,7 @@ One backstop worth knowing at intake: work whose text touches sensitive ground (
 Under the hood each step is just the CLI:
 - `factory next <id>` — what to do next (auto-clears any gates an approved policy covers).
 - `factory brief <id>` — the station run's context packet, written into the item's `runs/` dir (the driver adds session context, then hands it to the station — every run's inputs stay on disk).
+- `factory sweep <id>` — reclaim a finished item's scratch. Runs automatically when an item ends, so you'll rarely type it; `--all` catches up items from before it existed.
 - `factory advance <id> --verdict <v> ...` — a station reports its result; the item routes onward.
 - `factory gate <id> --decision <d> ...` — your decision at a gate (below).
 - `factory status [<id>]` / `factory metrics` / `factory doctor` — inspect; doctor cross-checks the stores for consistency.
@@ -66,7 +68,11 @@ When the line stops, you get a **review packet**: what the item is, what the sta
 The packet is also **bound**: the driver saves it under the item and runs `factory gate --bind --packet <file>`, snapshotting exactly what you're reviewing (the packet, the artifact files, the PR pointer). Binding decides nothing — the gate still waits on you. If any of it changes before your decision lands, `factory gate --decision` refuses and names what moved — you re-review the changed part instead of approving blind. What you approve is what you saw; `--accept-drift` exists for deciding *with the change in view*.
 
 ### Spec review (`spec_review`)
-The Spec station wrote `specs/<id>-<slug>/PRODUCT.md` (plus `TECH.md` for architectural changes) and, when a remote exists, opened a **draft spec PR** — review there if you like a PR surface, or read the files directly. The **Behavior** section is the contract — numbered invariants the verify station will later check one by one — with explicit **Latitude** marking what's deliberately left to the implementer, and inline **Open question** markers waiting on you. Approve if the invariants remove the ambiguity and the non-goals are named; send it back if something's missing. After approval, implementation lands on the same branch/PR, so the ship gate later reviews one unit.
+The Spec station wrote `specs/<id>-<slug>/PRODUCT.md` (plus `TECH.md` for architectural changes) and committed them to the item's **feature branch** — read the files directly, or diff that branch. The **Behavior** section is the contract — numbered invariants the verify station will later check one by one — with explicit **Latitude** marking what's deliberately left to the implementer, and inline **Open question** markers waiting on you. Approve if the invariants remove the ambiguity and the non-goals are named; send it back if something's missing.
+
+**Approving here merges nothing.** The spec already sits on the feature branch that implementation builds on, so approving means *build against this plan* — the item's one merge into your integration branch comes later, at the ship gate.
+
+That branch is the whole point: each implementation pass arrives as a `change/…` branch PR'd into it, so the feature branch accumulates the plan and the code and lands as a single unit. You get three things from it. A spec edit made during implementation shows up as a diff you can actually read, instead of vanishing into a wall of new lines. A send-back costs nothing structural — it's just the next change branch. And no pull request ever hits your integration branch with only a spec in it, so nothing wakes your CI before there's code to run it against.
 ```bash
 factory gate <id> --decision approved
 factory gate <id> --decision needs_revision \
@@ -74,17 +80,25 @@ factory gate <id> --decision needs_revision \
 ```
 
 ### Ship review (`ship_review`)
-The Verify station attached evidence (tests, behavior, screenshots). **Approving == merging the PR**, which triggers your project's post-merge CI/CD; the external `deploy` step watches it and a green deploy = shipped → done. Bounce to code-review if it's not ready.
+The Verify station attached evidence (tests, behavior, screenshots). **Approving == merging the PR**, which triggers your project's post-merge CI/CD; the external `deploy` step watches it and a green deploy = shipped → done.
+
+Read the packet's headline first: it counts how many of the spec's invariants were **verified by running** versus categorized as `blocked` (out of verify's reach), `accepted` (low risk, not exercised), or `out-of-scope`. That line tells you in one glance what was demonstrated and what you're being asked to take on trust — the per-invariant evidence sits in `specs/<id>-<slug>/CHECKLIST.md` when you want it. `verified` never means "some rows were left blank": the engine refuses that verdict, so an unanswered invariant can't reach you disguised as a pass.
+
+You have two ways back, and which you pick says where the problem was. **`not_ready`** returns it to code review — something is wrong with the change. **`recheck`** returns it straight to verification — nothing is wrong with the change; verification just couldn't demonstrate part of it (it needed access, or an environment that wouldn't come up), you've since cleared that blocker, and it needs demonstrating rather than rebuilding. That costs one station run instead of three.
 One thing to check for: if implementation legitimately drifted from the spec you approved (an edge case surfaced, a better approach won), the implement station updated `specs/<id>-<slug>/` in the same PR and flagged it — re-read the changed spec sections here, because you're approving what actually ships, spec included. A drift that *broke* the approved intent never gets this far; the station is required to block and ask you instead.
 ```bash
 factory gate <id> --decision approved        # merge PR → deploy → done
 factory gate <id> --decision not_ready --notes "..." --category ...
+factory gate <id> --decision recheck --notes "granted staging access"   # → back to verify
 ```
 
 ### Shelving at either gate (`park`)
 Both gates also let you stop the line: `--decision park --notes "why" --category ...` moves the item to `parked` (terminal but **revivable**). Use it when the item shouldn't proceed *now* — an external/org blocker, a premature vision, more tech debt than it's worth. Because `park` is a steering decision, your `--notes` reason is captured as an intervention, so shelving also feeds the learning loop.
 
 To bring it back: `factory revive <id>` re-enters at triage (the safe default — the codebase and priorities may have moved while it sat), or `factory revive <id> --resume` re-enters at the state it was parked from (recorded at park time) when you know the shelved context is still fresh — e.g. an item parked at `ship_review` goes straight back to that gate instead of re-running the whole line.
+
+### Fixing a label at any gate
+Labels are gate-policy inputs, so a wrong one isn't cosmetic — it's a live input to auto-approval. Add `--unlabel <name> --unlabel-reason "<why>"` to any decision to take one off. Yours works on any label, whoever applied it; a station can only retract what a station applied, so it can correct another station's guess but never overrule yours. Nothing is erased either way: the log keeps the original application beside the reason it came off, and `factory status <id>` shows both.
 
 ### Clarification (`needs_human`)
 Triage couldn't proceed without a product/priority call only you can make. Answer, and it re-enters triage.

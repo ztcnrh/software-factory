@@ -1,6 +1,6 @@
 ---
 name: factory-spec
-description: The factory's spec station — coordinate spec-driven development for a work item (often mirroring a GitHub, Jira, Linear, or other tracker issue). Gathers full context, drives write-product-spec (and write-tech-spec when the change is architectural), opens the draft spec PR, and routes the item to human review. Use when a work item is at the `spec` state, or when asked to write the spec for a factory work item.
+description: The factory's spec station — coordinate spec-driven development for a work item (often mirroring a GitHub, Jira, Linear, or other tracker issue). Gathers full context, drives write-product-spec (and write-tech-spec when the change is architectural), opens the item's feature branch, and routes the item to human review. Use when a work item is at the `spec` state, or when asked to write the spec for a factory work item.
 ---
 
 # Spec station
@@ -13,7 +13,7 @@ This skill is a thin coordinator around two writing skills that own the actual s
 
 When you write an artifact and its skill isn't already in context, load **this repo's** copy — read `.claude/skills/write-product-spec/SKILL.md` (or `.claude/skills/write-tech-spec/SKILL.md`) by that path, not a same-named skill from your global `~/.claude/`. The factory is self-contained per project, so its bundled copy is the source of truth. If the repo's copy is missing, stop and report it rather than writing a spec from memory: an improvised spec looks fine but skips the invariant discipline the whole line relies on, so the damage stays invisible until it surfaces downstream.
 
-This skill owns everything around them: context intake, the human's taste, artifact location, the spec PR, and the advance.
+This skill owns everything around them: context intake, the human's taste, artifact location, the item's feature branch, and the advance.
 
 ## 1. Gather context
 
@@ -34,11 +34,47 @@ The spec is where the human's product judgment matters most, and the cheapest pl
 - Spec directory: `specs/<id>-<slug>/` — slug is a short kebab of the title (e.g. `specs/WI-0012-add-export-options/`), so a listing of `specs/` reads like a roadmap instead of a serial number. If the repo already has an established specs convention, follow it; the files are named exactly `PRODUCT.md` and `TECH.md`.
 - **PRODUCT.md, always** — follow the `write-product-spec` skill.
 - **TECH.md, when architectural or cross-cutting** — follow the `write-tech-spec` skill; some items might not need it, and its prototype-first allowance lives there.
+- **CHECKLIST.md, always** — one row per **in-scope** numbered Behavior invariant from PRODUCT.md, and the file both checking stations grade against. You write it because you are the one who already decided what's in scope: an invariant this item doesn't own (deferred, or belonging to a sibling item) is left out here and named under the table, so neither checker re-derives that call and reaches a different answer.
+
+  Rows carry the invariant's number and text, then three columns you leave empty: **Implemented** (code review fills it, by reading), **Holds** (verify fills it, by running), and **Evidence** (prose for the human — the command or observation behind those two verdicts; the engine never reads it). Then the machine block the engine parses, marked exactly:
+
+  ````markdown
+  | # | Invariant | Implemented | Holds | Evidence |
+  | - | --------- | ----------- | ----- | -------- |
+  | 1 | Requests over the limit get 429 |  |  |  |
+  | 2 | The limit is per-key, not global |  |  |  |
+
+  Out of scope: 7–8 (owned by WI-0009, the dashboard).
+
+  <!-- machine-readable: the factory engine parses this block -->
+  ```yaml
+  item: WI-0007
+  rows:
+    - n: 1
+      invariant: "Requests over the limit get 429"
+      implemented: ""
+      holds: ""
+    - n: 2
+      invariant: "The limit is per-key, not global"
+      implemented: ""
+      holds: ""
+  ```
+  ````
+
+  Write the scope line even when nothing is out of scope (`Out of scope: none — this item owns all of them`) — a checker reading a checklist with no scope line can't tell a decided scope from a skipped one. A row's `invariant` is a handle, not a quotation: the number is the contract, so condensing PRODUCT.md's wording to fit a cell is expected. `implemented` takes `yes` (`y`/`true`/`done`/✅ also read as yes); anything else, blank included, reads as not implemented. `holds` takes one of `verified`, `failed`, `blocked`, `accepted`, `out-of-scope`. There is no `evidence` key — that column lives in the table only.
+
+  Register it with `--artifact` alongside the specs. Registration is what arms the engine's guard (a `verified` verdict is refused while any row is undisposed) and what keeps the file through the sweep — an unregistered checklist guards nothing and no station will find it. Keep it to invariants: it's the acceptance contract, not a task list.
 - A **council** is the rare exception here, not a step in the flow — most specs, including hard ones, should ship without one. Every item you spec goes to a human at the spec-review gate a moment later, so the cheap move is almost always to write the fork down: a subjective product call, or a design fork you can frame but not settle, belongs in **Open questions** where the human decides it — never a silent decision, and rarely a panel. Convene only when a call is consequential *and* genuinely contested between sound approaches *and* unsettleable by a quick test *and* would change what you write — if you already know what you'd recommend, write it. When that bar is truly met, Read `.claude/skills/council/SKILL.md` (the criteria and the protocol), spawn the seats via your `Agent` tool, and fold the strongest objections in.
 
-## 4. Open the draft spec PR
+## 4. Open the item's feature branch
 
-If a remote exists: create the item's working branch — the same one the implement station will continue on — following the repo's branch convention if it has one (a ticket prefix, `feature/…`, whatever the team uses), else defaulting to `factory/<id>-<slug>`. The name isn't load-bearing; the engine records whatever you use in the item's `pr` field, so favor the project's habits. Commit only the spec artifacts, push, and open a **draft** PR (`gh pr create --draft`). Title it `<id>: <title> — spec`; the body links the tracker issue (no closing keywords — the spec doesn't implement it), the spec files, and any open questions. The PR is the human's review surface at the gate, and after approval the implementation lands on the same branch, so the ship gate reviews one unit and the spec ships with the code. No remote → the branch and files are the artifact.
+Create the item's **feature branch** — `feature/<TICKET-KEY>__<slug>` when the item mirrors a tracker issue (e.g. `feature/AMPS-91__session-leak`), else `feature/<id>-<slug>` — off the integration branch, and commit the spec artifacts to it. Follow the repo's convention where it has one; the engine records whatever you use.
+
+**Don't open a pull request.** Nothing but the spec is on the branch yet, so a PR now is a review surface with no code in it — and in most repos it wakes CI for nothing. Implementation lands on this same branch (one pass at a time, each on its own `change/…` branch PR'd into it), so what eventually reaches the integration branch is the plan and the change together, as one reviewable unit.
+
+This is also why the spec gate merges nothing: approval there means *build against this plan*, and the plan is already where the building happens. A later edit to the spec still shows up as a readable line-level diff, because the base it's edited against — the feature branch — already contains it.
+
+Record the branch with `--branch`. If the repo has no git at all, the spec files themselves are the artifact; say so in `--notes`.
 
 ## 5. Hand off
 
@@ -47,15 +83,17 @@ factory advance <id> \
   --verdict ready_for_review \
   --summary "<what the spec decides, in one line>" \
   [--notes "<reasoning the spec artifact doesn't carry: council synthesis + any split, taste you absorbed, why you reclassified risk, the calls the reviewer must make>"] \
-  --artifact specs/<id>-<slug>/PRODUCT.md [--artifact specs/<id>-<slug>/TECH.md] \
-  [--pr "<#NN or branch>"] --confidence <0..1> \
-  [--risk <low|medium|high>] [--label <classifier>]
+  --artifact specs/<id>-<slug>/PRODUCT.md --artifact specs/<id>-<slug>/CHECKLIST.md \
+  [--artifact specs/<id>-<slug>/TECH.md] \
+  --branch "feature/<KEY>__<slug>" --confidence <0..1> \
+  [--risk <low|medium|high>] [--label <classifier>] \
+  [--unlabel <classifier> --unlabel-reason "<what your analysis disproved>"]
 ```
-`--summary` is the one-line headline that lands on the board and the item's history. `--notes` is optional but usually worth it here: it's the home for the reasoning that isn't in the spec files, and since your own context is discarded the moment you finish, notes is how that reasoning survives — the human at the gate (via the review packet) and the implementer both read it in the item's history. Keep it to the decisions and their why: a few lines, not a re-narration of the spec (that's what the artifact is for). The spec files carry the full detail; `--confidence` is logged for a future confidence-weighted gate policy. This routes the item to the **spec_review** human gate. If the real analysis revealed a truer classification than triage's quick pass — e.g. the change is actually read-only, or it touches auth/data and is riskier — correct it here with `--risk` and additive `--label` (free-form classifiers policies key on, e.g. `read-only`). Your labels land before the `spec_review` gate, so a signed policy can act on them. If you genuinely cannot spec it without a product decision, the line routes for that: `factory advance <id> --verdict blocked --summary "<the decision you need>"` sends the item to the blocked human gate — and honestly counts as a human step-in, because autonomy broke here.
+`--summary` is the one-line headline that lands on the board and the item's history. `--notes` is optional but usually worth it here: it's the home for the reasoning that isn't in the spec files, and since your own context is discarded the moment you finish, notes is how that reasoning survives — the human at the gate (via the review packet) and the implementer both read it in the item's history. Keep it to the decisions and their why: a few lines, not a re-narration of the spec (that's what the artifact is for). The spec files carry the full detail; `--confidence` is logged for a future confidence-weighted gate policy. This routes the item to the **spec_review** human gate. You are the first station to look properly, so you are the one positioned to correct triage's quick pass: `--risk` if the change is riskier or safer than it looked, `--label` to add a classification (pick from the vocabulary your brief lists), and `--unlabel <name> --unlabel-reason "<why>"` when your analysis actually *disproved* one — reproducing a bug and finding a different cause is the textbook case. Retraction is a correction, not an erasure: the log keeps triage's original call beside your reason for taking it back. You can only retract what a station applied; a label the human set at intake stays until they remove it at a gate. All of this lands before `spec_review`, so a signed policy acts on the corrected classification rather than the first guess. If you genuinely cannot spec it without a product decision, the line routes for that: `factory advance <id> --verdict blocked --summary "<the decision you need>"` sends the item to the blocked human gate — and honestly counts as a human step-in, because autonomy broke here.
 
 ## Revisions
 
-If the item comes back `needs_revision`, read its intervention record under `.factory/interventions/` — it says exactly what the human wanted. Address that specific gap, don't rewrite wholesale, and push to the **same** spec branch/PR.
+If the item comes back `needs_revision`, read its intervention record under `.factory/interventions/` — it says exactly what the human wanted. Address that specific gap, don't rewrite wholesale, and commit to the **same** feature branch.
 
 ## Guardrails
 

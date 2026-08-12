@@ -79,6 +79,22 @@ class Event:
 
 
 @dataclass
+class LabelEvent:
+    """One application or retraction of a label.
+
+    Labels are gate-policy inputs, so a classification has to be correctable —
+    and *who* applied one decides who may take it off (a station may correct
+    another station, never the human). The log is append-only: a retraction is a
+    new entry, never an edit of the entry that applied it."""
+
+    name: str
+    action: str  # add | retract
+    by: str  # a station name ("triage"), "human:<who>", or "unknown"
+    at: str = field(default_factory=_now)
+    reason: str | None = None  # required on a retraction: why the classification was wrong
+
+
+@dataclass
 class WorkItem:
     """A unit of work. The local JSON of this object is the source of truth;
     GitHub issues (if used) are a mirror."""
@@ -88,9 +104,12 @@ class WorkItem:
     body: str = ""
     state: str = "triage"
     risk: str = "unknown"  # low | medium | high | unknown (triage assigns this)
-    labels: list[str] = field(default_factory=list)
+    label_log: list[LabelEvent] = field(default_factory=list)  # `labels` is derived from this
     artifacts: list[str] = field(default_factory=list)  # files produced (specs, etc.)
-    pr: str | None = None
+    # The item's feature branch: spec and every implementation pass land here, and
+    # it merges into the integration branch at the ship gate as one unit.
+    branch: str | None = None
+    pr: str | None = None  # the open change PR, targeting `branch`
     source: str = "local"  # local | github
     source_ref: str | None = None  # e.g. github issue number
     attempts: dict[str, int] = field(default_factory=dict)  # per-state run counts
@@ -102,6 +121,43 @@ class WorkItem:
     updated: str = field(default_factory=_now)
     history: list[Event] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def labels(self) -> list[str]:
+        """The labels currently applied, derived from the log — a name is active
+        if its most recent entry is an ``add``. Never stored (``to_dict`` emits
+        only ``label_log``), so the two can't drift apart."""
+        active: list[str] = []
+        for ev in self.label_log:
+            if ev.action == "add":
+                if ev.name not in active:
+                    active.append(ev.name)
+            elif ev.name in active:
+                active.remove(ev.name)
+        return active
+
+    def provenance(self, name: str) -> str | None:
+        """Who applied ``name`` most recently — the fact that decides who may
+        retract it. ``None`` if the item has never carried it."""
+        for ev in reversed(self.label_log):
+            if ev.name == name and ev.action == "add":
+                return ev.by
+        return None
+
+    def add_label(self, name: str, by: str) -> LabelEvent | None:
+        """Apply a label. Idempotent: re-asserting an active one records nothing."""
+        if name in self.labels:
+            return None
+        ev = LabelEvent(name=name, action="add", by=by)
+        self.label_log.append(ev)
+        return ev
+
+    def retract_label(self, name: str, by: str, reason: str) -> LabelEvent:
+        """Take a label back off. Callers validate first (see ``Dispatcher.unlabel``,
+        which owns the authority rule) — this only records."""
+        ev = LabelEvent(name=name, action="retract", by=by, reason=reason)
+        self.label_log.append(ev)
+        return ev
 
     def log(self, **kwargs: Any) -> Event:
         ev = Event(ts=_now(), **kwargs)
@@ -116,6 +172,7 @@ class WorkItem:
     def from_dict(cls, d: dict[str, Any]) -> WorkItem:
         d = dict(d)
         d["history"] = [Event(**e) for e in d.get("history", [])]
+        d["label_log"] = [LabelEvent(**e) for e in d.get("label_log", [])]
         return cls(**d)
 
 
@@ -139,13 +196,22 @@ class StationReport:
     notes: str = ""
     risk: str | None = None
     pr: str | None = None
+    branch: str | None = None
     ran: str = ""  # how the station ran (inline | subagent | resumed | cloud) — trace metadata
-    labels: list[str] = field(default_factory=list)  # classifying labels to add (append-only)
+    labels: list[str] = field(default_factory=list)  # classifying labels to add
+    # Classifications this station disproved: (name, why). A station may retract
+    # only what a station applied — the dispatcher enforces that and refuses the
+    # whole report otherwise, so a bad retraction can't half-apply a verdict.
+    unlabels: list[tuple[str, str]] = field(default_factory=list)
     spawn: list[dict[str, Any]] = field(default_factory=list)  # new items → triage
 
 
 # Gate decisions that are themselves a steer (rework), regardless of --changed.
-STEERING_VERDICTS = {"needs_revision", "not_ready", "park"}
+# `recheck` belongs here even though the code is fine: the human had to resolve a
+# blocker the line couldn't get past, which is an unblock — and the North Star
+# counts those. It also writes an intervention record, which is the point: "verify
+# couldn't reach staging" is exactly the recurring gap a retro should aim at.
+STEERING_VERDICTS = {"needs_revision", "not_ready", "recheck", "park"}
 
 
 @dataclass

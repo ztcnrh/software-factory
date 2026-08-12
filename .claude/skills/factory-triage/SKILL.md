@@ -50,7 +50,7 @@ Guards — decomposition is for the clear case, not a habit:
 - **When in doubt, don't split.** `needs_spec` on the whole item is the safe default; a spec handles scoped complexity fine.
 
 ## Output contract
-Emit your verdict to the line. Set **risk** and attach any **labels** that classify the item — gate policies match on both (`max_risk`, and `labels_any` / `labels_all`), so this is how triage feeds the auto-approval loop (e.g. tag a read-only change `read-only` so a policy can later clear its gate untouched):
+Emit your verdict to the line. Set **risk** and attach any **labels** that classify the item — gate policies match on both (`max_risk`, and `labels_any` / `labels_all`), so this is how triage feeds the auto-approval loop (e.g. tag a docs-only change `docs` so a policy can later clear its gate untouched):
 
 ```
 factory advance <id> \
@@ -62,7 +62,9 @@ factory advance <id> \
   --notes "<anything the next station should know>"
 ```
 
-These are free-form **classifier** labels the policies key on (e.g. `read-only`) — keep them short and consistent so a policy can rely on them, and they're **additive** (you classify, never overwrite).
+**Label from the vocabulary.** Your brief lists the classifiers this repo recognizes (`classifiers.yml`). Prefer an existing term over coining a near-duplicate — `doc-update` alongside `docs` is two terms for one idea, and a policy keyed on either then matches half the work. A label outside the vocabulary is still recorded and never dropped, so say what's true if nothing fits; it just won't satisfy a gate policy until a human promotes it, and it's flagged everywhere until they do.
+
+You classify early on partial information, so treat your labels as a first pass: a later station that disproves one can retract it (`--unlabel`), and the log keeps both entries.
 
 For `needs_human_clarification`, instead phrase the open question crisply in `--summary` — the human will see it at the gate.
 

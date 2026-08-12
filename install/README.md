@@ -19,17 +19,20 @@ Or let your agent drive it: in a Claude Code session in this repo, say *"install
 
 **Updating.** Pull the latest toolkit, then run `--upgrade`. It diffs three ways per file — what's installed, what the toolkit shipped at install time (the manifest's commit is the baseline), and what it ships now — so it can do the right thing per file: apply toolkit changes to files you never touched, **keep** files the retro station (or you) improved locally, and flag true conflicts (both sides changed) for a hand merge, printing the exact diff commands for each. The kept-local list doubles as the **upstreaming radar** — local improvements the toolkit might want back. Nothing is ever clobbered; `--force` remains the explicit "take the toolkit side wholesale" escape hatch, and a plain rerun still just fills gaps. Every install stamps `.factory/install-manifest.json` (toolkit version + commit + what was created); a reinstall or upgrade prints what was there before, and pre-manifest installs fall back to a conservative two-way compare (differences are kept, never overwritten).
 
-**Uninstalling.** `--uninstall` removes exactly what the installer created (per the manifest), strips the CLAUDE.md block, and unmerges the factory's settings entries — your own files are untouched. `.factory/` (work items, interventions, metrics) is deliberately left behind; delete it manually for a clean slate. `--dry-run` works here too.
+**Uninstalling.** `--uninstall` removes exactly what the installer created (per the manifest), strips the CLAUDE.md, `.gitignore`, and `.gitattributes` blocks, and unmerges the factory's settings entries — your own files are untouched. `.factory/` (work items, interventions, metrics) is deliberately left behind; delete it manually for a clean slate. `--dry-run` works here too.
 
 ### What it copies into your repo
 - `.claude/skills/` — the station skills (triage, spec, implement, code-review, verify, retro), the spec-writing pair the spec station drives (`write-product-spec`, `write-tech-spec`), `council` (which includes its cross-critique second round), and `research` (delegate noisy investigation to a subagent, keep the caller's context clean). (The deferred `monitor` station is parked under `deferred/` and is not installed.)
 - `.claude/agents/` — the matching subagents (isolated runners).
 - `.claude/commands/` — `/factory` and `/factory-status`.
 - `.claude/hooks/` + merged `.claude/settings.json` — the board + steering hooks.
-- `line.yml`, `policies.yml`, `labels.yml` — the line, gate policies, labels.
+- `line.yml`, `policies.yml` — the line and its gate policies.
+- `classifiers.yml` — the vocabulary stations classify work items with, and what gate policies match on. Ships seeded with universal terms; yours to grow.
+- `github-labels.yml` — the `factory:<state>` conveyor labels mirrored onto GitHub issues (presentation, not policy input). Named `labels.yml` before v0.6.0; an upgrade removes the old file.
 - `FACTORY-MANUAL.md` — the human's operating guide (setup, gate playbook, homework).
 - `templates/` — the live artifact shapes (the review packet; spec shapes live in the spec-writing skills); see its README.
 - `.factory/` — empty runtime state dirs (the factory's memory).
+- A marked block in **`.gitignore`** and **`.gitattributes`** (same `factory:begin`/`factory:end` mechanism as the CLAUDE.md block; only what's between the markers is ever written or removed). The first keeps factory *scratch* out of git — per-run station briefs, station scratchpads, and gate renders no decision bound to, all of which the engine can rebuild. The second marks `.factory/` as generated, so the factory's bookkeeping is still committed (a teammate needs the same board) but collapses in pull-request diffs instead of burying the change under review.
 - A short **factory block in `CLAUDE.md`** (created or appended between `<!-- factory:begin/end -->` markers; reinstalls refresh only that block, your own content is never touched) — so every session discovers the factory even before the repo's hooks are trusted.
 - `--with-cloud`: `.github/workflows/*.disabled` — the opt-in cloud layer.
 - `--with-direction`: a `DIRECTION.md` starter at the repo root — the project north star / roadmap buckets / non-negotiables the spec station anchors specs to (it flags divergence rather than drifting). Planted once, then it's **yours**: untracked by the manifest, never overwritten (not even by `--force`), never uninstalled. Skipped the flag? Copy `templates/DIRECTION.md` yourself anytime.

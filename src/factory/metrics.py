@@ -102,7 +102,15 @@ class Metrics:
         # Cost is counted once, at the station events that spent it. A `shipped`
         # event repeats the item's *cumulative* cost (useful per-ship context);
         # summing it here again would double-count every shipped item's spend.
-        cost = sum(e.get("cost", 0.0) for e in events if e.get("kind") == "station")
+        station_events = [e for e in events if e.get("kind") == "station"]
+        cost = sum(e.get("cost", 0.0) for e in station_events)
+        # The structural cost proxy: one station run is one agent doing one job.
+        # Unlike `cost` it needs nothing from the stations — the engine already
+        # records every run — so it always has data, and a change that removes a
+        # rework loop shows up here whether or not anyone reported a number. It
+        # counts runs, not tokens: an opus council inside one run reads the same
+        # as a sonnet review (see docs/OPTIMIZATION-AREAS.md).
+        station_runs = len(station_events)
         # Trend: the last `window` ships vs the `window` before them, in ledger
         # (append) order — so the North Star can be seen moving, not just its
         # lifetime average, which weights the factory's earliest runs forever.
@@ -124,6 +132,8 @@ class Metrics:
             "steers_by_stage": dict(sorted(by_stage.items(), key=lambda kv: -kv[1])),
             "total_cost": round(cost, 4),
             "cost_per_shipped": round(cost / total, 4) if total else 0.0,
+            "station_runs": station_runs,
+            "runs_per_shipped": round(station_runs / total, 2) if total else 0.0,
             "trend": {
                 "window": window,
                 "recent_ships": len(recent),

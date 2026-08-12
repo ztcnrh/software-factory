@@ -42,13 +42,13 @@ If `--upgrade` reports *everything* as `conflict … (no baseline)`, the manifes
 The low-cost exit — worth naming even at install time, it lowers the cost of trying.
 
 1. `python3 install/install.py <target> --uninstall --dry-run`, and show what leaves.
-2. On yes: `--uninstall`. It removes exactly what the installer created, strips only the CLAUDE.md block, and unmerges only the factory's settings entries. Their own files, `.factory/` history, a filled-in `DIRECTION.md`, and any workflow they enabled all stay put. `.factory/` is left on purpose — delete it by hand only if they want a clean slate.
+2. On yes: `--uninstall`. It removes exactly what the installer created, strips only the marked blocks it planted (CLAUDE.md, `.gitignore`, `.gitattributes`), and unmerges only the factory's settings entries. Their own files, `.factory/` history, a filled-in `DIRECTION.md`, and any workflow they enabled all stay put. `.factory/` is left on purpose — delete it by hand only if they want a clean slate.
 
 ## First-run steps (after a fresh install)
 
 1. `uv tool install <toolkit-path>` — puts the `factory` CLI on PATH (skip if already installed). You can run this.
 2. `cd <target> && factory init` — validates config, creates state dirs. You can run this.
-3. Tell them to **commit the installed files.** `.claude/` and `.factory/` are dot-directories some IDE explorers hide — confirm they're visible and not gitignored. They belong in version control: `.factory/` is the factory's memory, `.claude/` skills evolve as the retro learns, and git history is the revert path if a `--force` ever overwrites a local improvement.
+3. Tell them to **commit the installed files.** `.claude/` and `.factory/` are dot-directories some IDE explorers hide — confirm they're visible and not gitignored. They belong in version control: `.factory/` is the factory's memory, `.claude/` skills evolve as the retro learns, and git history is the revert path if a `--force` ever overwrites a local improvement. The install also plants ignore rules for the factory's *scratch* (per-run briefs, station scratchpads, undecided gate renders) and marks `.factory/` generated so it collapses in PR diffs — mention it if they ask why their work-item PRs stay readable.
 4. On their first Claude Code session in the repo, Claude Code will ask to trust the project's hooks — they should say yes (the factory's board + steering capture). This one's theirs, not yours.
 5. If you planted `DIRECTION.md`, nudge them to spend ten minutes filling it in (north star, Now/Next/Later, non-negotiables) — the spec station anchors to it from the first item.
 6. First drive: `factory new "<something small>"` then `/factory` in a Claude Code session in that repo.

@@ -78,7 +78,13 @@ CLAUDE_ITEMS = [
     "hooks/factory_board.py",
     "hooks/record_intervention.py",
 ]
-ROOT_FILES = ["line.yml", "policies.yml", "labels.yml", "FACTORY-MANUAL.md"]
+ROOT_FILES = [
+    "line.yml",
+    "policies.yml",
+    "classifiers.yml",  # the vocabulary stations classify with (policy input)
+    "github-labels.yml",  # the factory:<state> conveyor labels mirrored onto issues
+    "FACTORY-MANUAL.md",
+]
 
 # The CLAUDE.md pointer block. CLAUDE.md is the one context channel with an
 # unconditional load guarantee (every session, from turn one, even before the
@@ -128,6 +134,79 @@ def plant_claude_md(target: Path, dry: bool = False) -> str:
     sep = "" if text.endswith("\n\n") else ("\n" if text.endswith("\n") else "\n\n")
     path.write_text(text + sep + CLAUDE_MD_BLOCK)
     return f"appended factory block: {path}"
+
+
+# Two marked blocks in the repo's own git config files, planted and stripped by
+# the same mechanism as the CLAUDE.md block: what the engine can rebuild isn't
+# committed, and what only the factory holds is committed but kept out of the way
+# of the change under review.
+_GIT_BLOCK_BEGIN = "# factory:begin"
+_GIT_BLOCK_END = "# factory:end"
+
+GITIGNORE_BLOCK = (
+    f"{_GIT_BLOCK_BEGIN}\n"
+    "# Factory scratch: rebuildable, so not worth committing. A gate render is\n"
+    "# scratch until a decision binds to it; that promotes it to decisions/, kept.\n"
+    ".factory/work-items/*/runs/\n"
+    ".factory/work-items/*/review-packets/\n"
+    f"{_GIT_BLOCK_END}\n"
+)
+
+GITATTRIBUTES_BLOCK = (
+    f"{_GIT_BLOCK_BEGIN}\n"
+    "# The factory's memory: committed so it travels with the repo, but collapsed\n"
+    "# by default in PR diffs so it doesn't bury the change under review.\n"
+    ".factory/** linguist-generated=true\n"
+    f"{_GIT_BLOCK_END}\n"
+)
+
+
+def plant_git_block(target: Path, filename: str, block: str, dry: bool = False) -> str:
+    """Plant (or refresh) a marked block in one of the repo's git config files.
+
+    Same contract as the CLAUDE.md block: only the text between the sentinels is
+    ever written, so the project's own rules outside them survive byte-for-byte
+    and an upgrade refreshes ours without a --force."""
+    path = target / filename
+    if not path.exists():
+        if dry:
+            return f"would create: {path}"
+        path.write_text(block)
+        return f"created: {path}"
+    text = path.read_text()
+    if _GIT_BLOCK_BEGIN in text and _GIT_BLOCK_END in text:
+        if dry:
+            return f"would refresh factory block: {path}"
+        head, rest = text.split(_GIT_BLOCK_BEGIN, 1)
+        tail = rest.split(_GIT_BLOCK_END, 1)[1]
+        path.write_text(head + block.rstrip("\n") + tail)
+        return f"refreshed factory block: {path}"
+    if dry:
+        return f"would append factory block: {path}"
+    sep = "" if text.endswith("\n\n") else ("\n" if text.endswith("\n") else "\n\n")
+    path.write_text(text + sep + block)
+    return f"appended factory block: {path}"
+
+
+def strip_git_block(target: Path, filename: str, dry: bool) -> str | None:
+    """Reverse plant_git_block: remove the marked block, preserving everything
+    else; if the file held nothing but our block, remove the file."""
+    path = target / filename
+    if not path.exists():
+        return None
+    text = path.read_text()
+    if _GIT_BLOCK_BEGIN not in text or _GIT_BLOCK_END not in text:
+        return None
+    if dry:
+        return f"would strip factory block from: {path}"
+    head = text.split(_GIT_BLOCK_BEGIN, 1)[0]
+    tail = text.split(_GIT_BLOCK_END, 1)[1]
+    remains = (head.rstrip("\n") + "\n\n" + tail.lstrip("\n")).strip("\n")
+    if remains:
+        path.write_text(remains + "\n")
+        return f"stripped factory block from: {path}"
+    path.unlink()
+    return f"removed: {path} (contained only the factory block)"
 
 
 def plant_direction(target: Path, dry: bool) -> str:
@@ -180,7 +259,7 @@ _MANIFEST_REL = ".factory/install-manifest.json"
 # Shared files are never blind-deleted by uninstall or the reinstall prune: even
 # when the installer created them, the user may have added their own content
 # since. Their strip/unmerge paths remove only the factory's part.
-_SHARED_FILES = {"CLAUDE.md", ".claude/settings.json"}
+_SHARED_FILES = {"CLAUDE.md", ".claude/settings.json", ".gitignore", ".gitattributes"}
 
 # Paths the toolkit USED to ship and no longer does, but which the manifest-diff
 # prune can't catch because they sit inside a still-shipped directory (so the
@@ -191,6 +270,7 @@ _SHARED_FILES = {"CLAUDE.md", ".claude/settings.json"}
 _RETIRED_PATHS = [
     "templates/PRODUCT.md",  # retired 0.2.0: spec shape moved into the write-product-spec skill
     "templates/TECH.md",  # retired 0.2.0: spec shape moved into the write-tech-spec skill
+    "labels.yml",  # retired 0.6.0: renamed github-labels.yml, to free the word for classifiers.yml
 ]
 
 
@@ -238,6 +318,8 @@ def prune_retired(target: Path, prior: dict | None, dry: bool) -> list[str]:
         if rel in shipped or rel in _SHARED_FILES:
             kept.append(rel)
             continue
+        if rel in _RETIRED_PATHS:
+            continue  # step 1 already took it; a dry run would otherwise log it twice
         _remove(rel, log)
     if not dry:
         prior["created"] = kept
@@ -431,6 +513,8 @@ def uninstall(target: Path, prior: dict | None, dry: bool) -> int:
             shutil.rmtree(p) if p.is_dir() else p.unlink()
             log.append(f"removed: {p}")
     log.append(strip_claude_md(target, dry))
+    log.append(strip_git_block(target, ".gitignore", dry))
+    log.append(strip_git_block(target, ".gitattributes", dry))
     log.append(unmerge_settings(target, dry))
     if not dry:  # prune now-empty factory parent dirs (user content keeps them alive)
         for rel in (
@@ -636,6 +720,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.with_direction:
         log.append(plant_direction(target, dry))
     log.append(plant_claude_md(target, dry))
+    log.append(plant_git_block(target, ".gitignore", GITIGNORE_BLOCK, dry))
+    log.append(plant_git_block(target, ".gitattributes", GITATTRIBUTES_BLOCK, dry))
     runtime = target / ".factory"
     subs = ("work-items", "interventions", "metrics")
     missing = [s for s in subs if not (runtime / s).is_dir()]
