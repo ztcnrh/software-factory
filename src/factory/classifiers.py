@@ -2,11 +2,11 @@
 
 Not to be confused with ``github-labels.yml`` — the conveyor labels mirrored onto
 GitHub issues, which are presentation. These are the terms gate policies match on
-(``labels_any`` / ``labels_all``).
+(``classifiers_any`` / ``classifiers_all``).
 
-The set is open at the edges: a label outside it is still recorded (the
+The set is open at the edges: a classifier outside it is still recorded (the
 classification may be right and the vocabulary merely behind), but it is marked
-unrecognized wherever labels are shown and never satisfies a policy, and promoting
+unrecognized wherever classifiers are shown and never satisfies a policy, and promoting
 it is a human edit to ``classifiers.yml``. That asymmetry is what stops
 ``docs-update`` and ``doc-update`` quietly becoming two terms.
 """
