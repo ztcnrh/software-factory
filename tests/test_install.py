@@ -21,7 +21,8 @@ _TOOLKIT_PARTS = (
     "workflows",
     "line.yml",
     "policies.yml",
-    "labels.yml",
+    "classifiers.yml",
+    "github-labels.yml",
     "FACTORY-MANUAL.md",
     "pyproject.toml",
 )
@@ -160,6 +161,41 @@ def test_force_merges_settings_instead_of_clobbering(tmp_path: Path):
     settings = json.loads((claude / "settings.json").read_text())
     assert "Bash(my-own-tool:*)" in settings["permissions"]["allow"]
     assert settings.get("hooks")  # factory hooks arrived via merge
+
+
+def test_install_plants_the_scratch_ignore_rules_idempotently(tmp_path: Path):
+    """The factory writes scratch into every adopting repo; if the install doesn't
+    plant the ignore rules, a work item's PR arrives buried in briefs. Reinstall
+    must refresh the block in place rather than stacking a second copy."""
+    (tmp_path / ".gitignore").write_text("node_modules/\n")
+    _install(tmp_path)
+    _install(tmp_path)
+    text = (tmp_path / ".gitignore").read_text()
+    assert text.count("# factory:begin") == 1
+    assert "node_modules/" in text  # the project's own rules survive
+    assert ".factory/work-items/*/runs/" in text
+
+
+def test_install_keeps_factory_bookkeeping_out_of_the_review_surface(tmp_path: Path):
+    """`.factory/` has to be committed (it's the factory's memory, and a teammate
+    needs the same board) but must not bury the change under review — so it ships
+    marked generated, which collapses it in pull-request diffs by default."""
+    _install(tmp_path)
+    assert ".factory/** linguist-generated=true" in (tmp_path / ".gitattributes").read_text()
+
+
+def test_uninstall_strips_the_git_blocks_and_nothing_else(tmp_path: Path):
+    """The low-cost exit has to be genuinely low-cost: leaving factory rules in an
+    adopter's .gitignore after they opted out is exactly the residue that makes
+    people distrust an installer."""
+    (tmp_path / ".gitignore").write_text("node_modules/\n*.log\n")
+    _install(tmp_path)
+    _install(tmp_path, "--uninstall")
+    text = (tmp_path / ".gitignore").read_text()
+    assert "factory" not in text
+    assert "node_modules/" in text and "*.log" in text
+    # We created .gitattributes, and it held only our block — it goes entirely.
+    assert not (tmp_path / ".gitattributes").exists()
 
 
 def test_uninstall_removes_factory_but_preserves_user_content(tmp_path: Path):
@@ -374,10 +410,12 @@ def test_upgrade_flags_conflicts_and_keeps_yours(toolkit: Path, tmp_path: Path):
     winner."""
     _install_from(toolkit, tmp_path)
     local = "# labels — locally customized\nversion: 1\nlabels: []\n"
-    (tmp_path / "labels.yml").write_text(local)
-    _bump_toolkit(toolkit, "labels.yml", "# labels — toolkit reworked\nversion: 2\nlabels: []\n")
+    (tmp_path / "github-labels.yml").write_text(local)
+    _bump_toolkit(
+        toolkit, "github-labels.yml", "# labels — toolkit reworked\nversion: 2\nlabels: []\n"
+    )
     out = _install_from(toolkit, tmp_path, "--upgrade")
-    assert (tmp_path / "labels.yml").read_text() == local
+    assert (tmp_path / "github-labels.yml").read_text() == local
     assert "conflict — kept yours" in out and "both changed" in out
     assert "your changes:" in out and "toolkit changes:" in out
 

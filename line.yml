@@ -10,9 +10,12 @@
 #   spec -> spec_review(human) -> implement
 #   implement -> code_review -> verify -> ship_review(human) -> deploy -> done
 #
-# `ship_review` approval == merging the PR; that merge triggers the project's
-# post-merge CI/CD (build + deploy, with a health-wait baked in). `deploy` is the
-# single external station that watches that workflow: green == shipped -> done.
+# An item lives on one feature branch: the spec is committed there and each
+# implementation pass is PR'd into it. The factory never merges — `ship_review`
+# approval clears the human to merge that feature branch into the integration
+# branch themselves, which triggers the project's post-merge CI/CD
+# (build + deploy, with a health-wait baked in). `deploy` is the single external
+# station that watches that workflow: green == shipped -> done.
 # Continuous monitoring + auto-spawn is deferred (see docs/OPTIMIZATION-AREAS.md);
 # intake is `factory new` or the `factory intake` sensor (labeled GitHub issues
 # filed into triage), not a monitor loop.
@@ -103,8 +106,11 @@ routing:
     verified: ship_review
     failed: ship_review            # verification output always goes to the human gate
   ship_review:
-    approved: deploy               # approve == merge the PR, which kicks off CI/CD
-    not_ready: code_review         # the diagram's "Not ready" loop
+    approved: deploy               # approved; the human's own merge kicks off CI/CD
+    not_ready: code_review         # the diagram's "Not ready" loop — something's wrong with the code
+    recheck: verify                # nothing's wrong with the code: the human cleared a blocker
+                                   # verification hit (access, an environment) and sends it back
+                                   # to be demonstrated, not rebuilt
     park: parked                   # human shelves it (recorded, revivable) — the gate's "halt"
   deploy:
     succeeded: done                # post-merge CI/CD went green (build + deploy + health-wait)

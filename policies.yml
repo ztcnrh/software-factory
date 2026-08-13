@@ -23,8 +23,8 @@ default: require_human
 #   when         conditions; ALL must hold. These are the ONLY valid keys —       [required]
 #                an unknown key is a load error, so a typo can't silently widen a
 #                rule to match everything:
-#                  labels_any: [a, b]   item has at least one of these labels
-#                  labels_all: [a, b]   item has every one of these labels
+#                  classifiers_any: [a, b]   item carries at least one of these
+#                  classifiers_all: [a, b]   item carries every one of these
 #                  max_risk:   low      triage risk must be <= this  (low|medium|high|unknown)
 #                To match EVERY item at the gate on purpose, set `when: all`
 #                (rare — if you truly want no human there, drop the gate in line.yml).
@@ -37,8 +37,8 @@ rules: []
 #   - id: auto-approve-docs-spec
 #     gate: spec_review
 #     when:                       # ALL conditions must hold for the work item
-#       labels_any: [docs, documentation]
-#       labels_all: [reviewed]    # (illustrative) EVERY listed label must be present
+#       classifiers_any: [docs, chore]
+#       classifiers_all: [docs]   # (illustrative) EVERY listed one must be present
 #       max_risk: low             # triage-assigned risk must be <= this
 #     decision: approved
 #     rationale: "12/12 docs-only specs were approved unchanged in the last 30 days."

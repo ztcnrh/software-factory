@@ -86,7 +86,11 @@ A common report shape is what makes the synthesis a comparison instead of a re-d
 
 Read each report as it lands — the useful output is the report, not the lifecycle status. If a report is thin on evidence or makes an unsupported claim, send a focused follow-up to that same seat via **SendMessage** rather than spawning a replacement — it retains its context; a fresh seat starts cold.
 
+**A seat that returns nothing is a condition to handle, not a fact to reason around.** If a report is empty, truncated, or never arrives, you have fewer angles than you convened — which is the one thing the council was buying. Re-ask that seat via **SendMessage** first; if it still comes back empty, spawn a replacement for that angle, and if neither works, say plainly what you're missing rather than synthesizing around the hole. Never present a recommendation as a council's when the council didn't report: a synthesis of one silent seat and one live one is a single opinion wearing a panel's authority, and whoever reads it next has no way to tell.
+
 Then compare reports by **evidence quality, not vote count**: lead with the recommendation; call out consensus and disagreements; explain why the winner wins against the decision criteria; distinguish "do now" from optional future hardening; name confidence and material unknowns. Produce a decision memo, not a transcript summary.
+
+**Persist the synthesis; the raw reports are working material.** The memo is the artifact — it's what the caller acts on and what a human reads later. If seats write their reports to disk (long investigations, or a process where a seat's context may not survive), those files are scratch: fold what matters into the memo and don't hand them onward as the deliverable. A stack of dense reports is not a decision, and passing several of them to a human in place of one memo moves the synthesis work onto them, which is exactly the work the council existed to do.
 
 ## Final answer template
 

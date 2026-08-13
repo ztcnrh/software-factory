@@ -79,6 +79,35 @@ class Event:
 
 
 @dataclass
+class ClassifierEvent:
+    """One application or retraction of a classifier.
+
+    Classifiers are gate-policy inputs, so a classification has to be correctable —
+    and *who* applied one decides who may take it off (a station may correct
+    another station, never the human). The log is append-only: a retraction is a
+    new entry, never an edit of the entry that applied it."""
+
+    name: str
+    action: str  # add | retract
+    by: str  # a station name ("triage"), "human:<who>", or "unknown"
+    at: str = field(default_factory=_now)
+    reason: str | None = None  # required on a retraction: why the classification was wrong
+
+
+@dataclass
+class ChangePass:
+    """One implementation pass: a change branch off the item's feature branch,
+    and the pull request carrying it back into that branch.
+
+    Passes accumulate rather than replace. A send-back after the human has merged
+    the pass in flight opens a new numbered branch, and the one before it is still
+    what a prior gate decision was bound to."""
+
+    branch: str | None = None
+    pr: str | None = None
+
+
+@dataclass
 class WorkItem:
     """A unit of work. The local JSON of this object is the source of truth;
     GitHub issues (if used) are a mirror."""
@@ -88,9 +117,16 @@ class WorkItem:
     body: str = ""
     state: str = "triage"
     risk: str = "unknown"  # low | medium | high | unknown (triage assigns this)
-    labels: list[str] = field(default_factory=list)
+    # `classifiers` is derived from this log
+    classifier_log: list[ClassifierEvent] = field(default_factory=list)
     artifacts: list[str] = field(default_factory=list)  # files produced (specs, etc.)
+    # The item's own branch and its pull request into the integration branch. The
+    # spec station opens both; everything the item produces ends up here.
+    branch: str | None = None
     pr: str | None = None
+    # Every implementation pass, oldest first; `change_branch`/`change_pr` derive
+    # from the last one.
+    change_passes: list[ChangePass] = field(default_factory=list)
     source: str = "local"  # local | github
     source_ref: str | None = None  # e.g. github issue number
     attempts: dict[str, int] = field(default_factory=dict)  # per-state run counts
@@ -102,6 +138,67 @@ class WorkItem:
     updated: str = field(default_factory=_now)
     history: list[Event] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def classifiers(self) -> list[str]:
+        """The classifiers currently applied, derived from the log — a name is
+        active if its most recent entry is an ``add``. Never stored (``to_dict``
+        emits only ``classifier_log``), so the two can't drift apart."""
+        active: list[str] = []
+        for ev in self.classifier_log:
+            if ev.action == "add":
+                if ev.name not in active:
+                    active.append(ev.name)
+            elif ev.name in active:
+                active.remove(ev.name)
+        return active
+
+    @property
+    def change_branch(self) -> str | None:
+        """The pass in flight — the most recently opened one. Derived, never
+        stored, so it can't drift from the log the way an overwritten field would."""
+        return self.change_passes[-1].branch if self.change_passes else None
+
+    @property
+    def change_pr(self) -> str | None:
+        return self.change_passes[-1].pr if self.change_passes else None
+
+    def open_change_pass(self, branch: str | None = None, pr: str | None = None) -> None:
+        """Record what a station reported about its implementation pass.
+
+        A report naming the branch already in flight (or naming none at all) fills
+        in that pass; a different branch opens a new one. That single rule is what
+        keeps a re-push from forking the log and a new numbered branch from
+        overwriting the pass before it."""
+        tip = self.change_passes[-1] if self.change_passes else None
+        if tip is not None and (branch is None or tip.branch in (None, branch)):
+            tip.branch = branch or tip.branch
+            tip.pr = pr or tip.pr
+        elif branch or pr:
+            self.change_passes.append(ChangePass(branch=branch, pr=pr))
+
+    def provenance(self, name: str) -> str | None:
+        """Who applied ``name`` most recently — the fact that decides who may
+        retract it. ``None`` if the item has never carried it."""
+        for ev in reversed(self.classifier_log):
+            if ev.name == name and ev.action == "add":
+                return ev.by
+        return None
+
+    def add_classifier(self, name: str, by: str) -> ClassifierEvent | None:
+        """Apply a classifier. Idempotent: re-asserting an active one records nothing."""
+        if name in self.classifiers:
+            return None
+        ev = ClassifierEvent(name=name, action="add", by=by)
+        self.classifier_log.append(ev)
+        return ev
+
+    def retract_classifier(self, name: str, by: str, reason: str) -> ClassifierEvent:
+        """Take a classifier back off. Callers validate first (see
+        ``Dispatcher.retract``, which owns the authority rule) — this only records."""
+        ev = ClassifierEvent(name=name, action="retract", by=by, reason=reason)
+        self.classifier_log.append(ev)
+        return ev
 
     def log(self, **kwargs: Any) -> Event:
         ev = Event(ts=_now(), **kwargs)
@@ -116,6 +213,8 @@ class WorkItem:
     def from_dict(cls, d: dict[str, Any]) -> WorkItem:
         d = dict(d)
         d["history"] = [Event(**e) for e in d.get("history", [])]
+        d["classifier_log"] = [ClassifierEvent(**e) for e in d.get("classifier_log", [])]
+        d["change_passes"] = [ChangePass(**c) for c in d.get("change_passes", [])]
         return cls(**d)
 
 
@@ -138,14 +237,25 @@ class StationReport:
     human_reason: str = ""
     notes: str = ""
     risk: str | None = None
+    branch: str | None = None
     pr: str | None = None
+    change_branch: str | None = None
+    change_pr: str | None = None
     ran: str = ""  # how the station ran (inline | subagent | resumed | cloud) — trace metadata
-    labels: list[str] = field(default_factory=list)  # classifying labels to add (append-only)
+    classifiers: list[str] = field(default_factory=list)  # classifiers to add
+    # Classifications this station disproved: (name, why). A station may retract
+    # only what a station applied — the dispatcher enforces that and refuses the
+    # whole report otherwise, so a bad retraction can't half-apply a verdict.
+    retractions: list[tuple[str, str]] = field(default_factory=list)
     spawn: list[dict[str, Any]] = field(default_factory=list)  # new items → triage
 
 
 # Gate decisions that are themselves a steer (rework), regardless of --changed.
-STEERING_VERDICTS = {"needs_revision", "not_ready", "park"}
+# `recheck` belongs here even though the code is fine: the human had to resolve a
+# blocker the line couldn't get past, which is an unblock — and the North Star
+# counts those. It also writes an intervention record, which is the point: "verify
+# couldn't reach staging" is exactly the recurring gap a retro should aim at.
+STEERING_VERDICTS = {"needs_revision", "not_ready", "recheck", "park"}
 
 
 @dataclass

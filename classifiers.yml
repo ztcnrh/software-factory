@@ -1,0 +1,33 @@
+# classifiers.yml — the vocabulary stations classify work items with.
+#
+# These are the terms the *line* reasons about: gate policies match on them
+# (`classifiers_any` / `classifiers_all` in policies.yml), and a station's brief
+# lists them so it picks an existing term instead of coining a near-duplicate.
+#
+# Not to be confused with github-labels.yml — those are the conveyor labels
+# mirrored onto GitHub issues (presentation), not policy input.
+#
+# The set is open at the edges, on purpose:
+#   - A classifier outside this list is still recorded on the item. Never dropped
+#     — the station may be right and this file merely behind.
+#   - It is marked "(unrecognized)" everywhere classifiers are shown, and it never
+#     satisfies a gate policy. A gate that doesn't auto-clear goes to you, which
+#     is the safe direction to fail.
+#   - Promoting one is a human edit here. That's the whole gate: it's how
+#     `doc-update` and `docs-update` don't quietly become two terms.
+#
+# Shipped seeded with universal terms. Yours will diverge — add what your work
+# actually looks like (`data-migration`, `flaky-test`, `customer-reported`).
+
+version: 1
+
+classifiers:
+  - bug
+  - feature
+  - chore
+  - docs
+  - perf
+  - security
+  - infra
+  - refactor
+  - test

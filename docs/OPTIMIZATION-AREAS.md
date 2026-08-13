@@ -66,13 +66,13 @@ Each entry: what it is today · why it's fine for now · the idea for later.
 
 ---
 
-## 7. Cost is a self-reported proxy — no real meter, no budget
+## 7. Cost is counted in station runs — structural, but blind to what a run spends
 
-**Today.** `--cost` on advance is whatever the station claims (usually a rough effort proxy), metrics sum it, and the attempt cap is the only enforceable spend brake. Nothing measures real tokens/dollars per run, and nothing refuses to start a run over a budget — in-session subagents expose no per-run cost to the driver, so there is honestly nothing to meter yet.
+**Today.** Two channels, neither a meter. `--cost` on advance is whatever the station claims, and across five real items in the first adopting repo every recorded value was `0.0` or `1.0` — the stations simply don't report it, so the North Star's "and at what cost" half had no data at all. `station_runs` / `runs_per_shipped` (v0.6.0) fixed the *empty* problem by deriving cost from history the engine already writes: one station event is one agent doing one job, needing nothing from any station. What it can't see is that a run is not a unit of spend. An opus council convened inside one code-review run — several full investigations plus a synthesis — reads exactly the same as a routine sonnet review. So the proxy tracks rework faithfully (which is where the money actually went: one item that looped twice cost four extra runs) and tracks *depth* not at all.
 
-**Why it's fine for now.** Interactive driving means the human *is* the budget — they see every loop and can stop it (and the attempt cap now stops the silent ones). Cost-per-shipped stays comparable as a proxy even if its unit is fuzzy.
+**Why it's fine for now.** Interactive driving means the human *is* the budget — they see every loop and can stop it (and the attempt cap stops the silent ones). Runs-per-shipped against a six-run minimum path is a real, comparable number today, and the thing it measures well is the thing worth cutting first.
 
-**The idea for later.** When station runs go headless (`claude -p`, as the bench's fab build runs them), real per-run cost arrives for free in the result stream — capture it into `advance --cost`, add per-item/per-day caps the driver checks before dispatching (fab's `run_budget = min(per_run, item_remaining, day_remaining)`), and surface both in `factory metrics`. The `--ran` trace field already distinguishes headless runs, so proxy-cost and metered-cost items can be told apart in the ledger.
+**The idea for later.** Two paths into the same `--cost` channel, so `factory metrics` needs no further change. **Headless:** when station runs go headless (`claude -p`, as the bench's fab build runs them), real per-run cost arrives for free in the result stream — capture it into `advance --cost`, add per-item/per-day caps the driver checks before dispatching (fab's `run_budget = min(per_run, item_remaining, day_remaining)`), and surface both in `factory metrics`. **Interactive:** the Claude Code session transcript already carries per-message `usage`, with `isSidechain` distinguishing subagent messages from the driver's — enough to attribute tokens to a station run. That belongs in a `.claude/`-layer adapter, never in the engine: it parses an undocumented internal format that only exists on one runtime, and the engine has to stay portable and offline. The `--ran` trace field already distinguishes headless runs, so proxy-cost and metered-cost items can be told apart in the ledger.
 
 ---
 

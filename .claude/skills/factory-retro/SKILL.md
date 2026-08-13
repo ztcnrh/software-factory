@@ -30,7 +30,7 @@ Cluster the interventions by root cause, not surface symptom. For each cluster a
 | Pattern | Lever |
 |---|---|
 | Station keeps missing the same kind of thing | **Edit that station's SKILL.md** — add the check to its quality bar / read-first. |
-| A gate approves the same category unchanged, every time | **Propose a gate policy** in `policies.yml` (dormant, `approved_by: null`) so that category auto-clears once the human signs it. Follow the rule shape documented at the top of `policies.yml` — the only valid `when` keys are `labels_any`, `labels_all`, `max_risk`, and an unknown key is a hard load error (so match the schema exactly; don't invent conditions). This is what raises the one-shot ship rate. |
+| A gate approves the same category unchanged, every time | **Propose a gate policy** in `policies.yml` (dormant, `approved_by: null`) so that category auto-clears once the human signs it. Follow the rule shape documented at the top of `policies.yml` — the only valid `when` keys are `classifiers_any`, `classifiers_all`, `max_risk`, and an unknown key is a hard load error (so match the schema exactly; don't invent conditions). This is what raises the one-shot ship rate. |
 | Specs keep omitting the same section | **Sharpen the spec-writing skill** (`write-product-spec` / `write-tech-spec` — usually its Structure or Behavior guidance). |
 | Humans keep asking for the same missing info to decide at a gate | **Edit `templates/REVIEW-PACKET.md`** — add the field the packet should always surface. |
 | Work is mis-routed | **Adjust `line.yml`** routing or triage heuristics (rare; be conservative). |
@@ -77,7 +77,7 @@ factory ledger list [--open]                                # ledger history or 
 
 ## Revising a proposal from human feedback
 A retro PR usually comes back with a tweak, not a demand to redo it. **Whatever the verdict, write it back to the ledger** (merged → `--status applied`, declined → `--status rejected`; see **Managing the ledger**) — so it tracks what actually happened, not just what was proposed. The main session handling the PR review does this; it takes seconds. Then match the response to the size of the change:
-- **Minor edit** (reword a rationale, narrow a policy's `when`, drop one proposal): the main session can make it directly — loading *this* skill is enough context, a fresh subagent isn't needed. Preserve the station's invariants: keep the dormant-policy shape valid (only `labels_any` / `labels_all` / `max_risk` under `when`), keep provenance in the PR (not inline), and push to the **same** PR and `retro/<date>/` folder — a revision of one batch is not a new retro.
+- **Minor edit** (reword a rationale, narrow a policy's `when`, drop one proposal): the main session can make it directly — loading *this* skill is enough context, a fresh subagent isn't needed. Preserve the station's invariants: keep the dormant-policy shape valid (only `classifiers_any` / `classifiers_all` / `max_risk` under `when`), keep provenance in the PR (not inline), and push to the **same** PR and `retro/<date>/` folder — a revision of one batch is not a new retro.
 - **Substantive rework** (re-cluster, re-derive the proposals): send it back to the retro station. If the original retro subagent is still available in this session, **resume it** (SendMessage) — it keeps the full context of the interventions it mined, which a fresh spawn would re-derive lossily from the briefing. Otherwise re-run the station fresh in clean, isolated context.
 
 ## Quality bar

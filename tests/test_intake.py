@@ -48,7 +48,7 @@ def test_intake_files_labeled_issues_as_work_items(factory_root: Path, gh_ok, ca
         ("Add health endpoint", "github", "9", "triage"),
     ]
     assert "Mirrors: https://github.com/o/r/issues/7" in items[0].body
-    assert items[0].labels == []
+    assert items[0].classifiers == []
     assert gh_ok == [("7", "triage"), ("9", "triage")]
     assert "2 ingested, 0 already on the line" in capsys.readouterr().out
 

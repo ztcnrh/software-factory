@@ -12,10 +12,15 @@ module only decides WHAT should happen next and records WHAT happened.
 from __future__ import annotations
 
 import hashlib
+import os
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from . import sweep
+from .checklist import DISPOSITIONS, Checklist, ChecklistError, row_label
+from .classifiers import Classifiers
 from .interventions import Interventions
 from .line import Line, LineError
 from .metrics import Metrics
@@ -30,10 +35,41 @@ from .model import (
 from .policies import Policies, PolicyState
 from .store import Store
 
+# Bounds on the git reads a gate binding makes. The local ones are instant; the
+# remote one is a single network round trip, generous enough for a slow link and
+# short enough that a human is never left waiting on a dead host.
+_GIT_TIMEOUT = 10.0
+_LS_REMOTE_TIMEOUT = 20.0
+
+
+def _short_sha(sha: str) -> str:
+    """A commit for a human to eyeball, or a word for the two non-commit cases."""
+    return sha[:9] if sha else "(absent)"
+
+
+def unreadable_tips(snap: dict) -> list[str]:
+    """Which branch tips a binding could not read.
+
+    The binding still holds for everything else; this is the part of its promise
+    that didn't, and a caller is expected to say so out loud rather than let the
+    human assume the whole review is pinned."""
+    out = []
+    for label, tips in (snap.get("tips") or {}).items():
+        for where in ("local", "remote"):
+            if tips and tips.get(where) is None:
+                out.append(f"{label} `{tips.get('ref')}` ({where})")
+    return out
+
 
 class GateDriftError(Exception):
     """A gate decision arrived after the reviewed content moved — the approval
     would bind to something the human never saw. Caught at the CLI boundary."""
+
+
+class ClassifierError(Exception):
+    """A retraction the engine refuses: the item doesn't carry the classifier,
+    it carries no reason, or a station tried to overrule a human's classification.
+    Raised before anything is written, so the call it arrived on applies nothing."""
 
 
 @dataclass
@@ -63,7 +99,10 @@ class Dispatcher:
     def __init__(self, root: str | Path):
         self.root = Path(root)
         self.line = Line.load(self.root / "line.yml")
-        self.policies = Policies.load(self.root / "policies.yml")
+        # One vocabulary per factory, shared by everything that consults it —
+        # policy matching, the station brief, status rendering.
+        self.classifiers = Classifiers.load(self.root / "classifiers.yml")
+        self.policies = Policies.load(self.root / "policies.yml", classifiers=self.classifiers)
         self.policy_state = PolicyState(self.root)
         self.store = Store(self.root)
         self.metrics = Metrics(self.root)
@@ -80,23 +119,25 @@ class Dispatcher:
         self,
         title: str,
         body: str = "",
-        labels: list[str] | None = None,
+        classifiers: list[str] | None = None,
         risk: str = "unknown",
         parent: str | None = None,
         source: str = "local",
         source_ref: str | None = None,
+        classifiers_by: str = "unknown",
     ) -> WorkItem:
         item = WorkItem(
             id=self.store.next_id(),
             title=title,
             body=body,
-            labels=labels or [],
             risk=risk,
             state=self.line.start,
             parent=parent,
             source=source,
             source_ref=source_ref,
         )
+        for name in classifiers or []:
+            item.add_classifier(name, by=classifiers_by)
         item.log(kind="created", to_state=item.state, actor="factory")
         # Deterministic risk floor: sensitive-sounding work enters at RISK_FLOOR
         # unless a human explicitly set a risk at creation (their call wins —
@@ -196,12 +237,81 @@ class Dispatcher:
                 return f"{who}{verdict}{note}"
         return None
 
+    # --- classifiers --------------------------------------------------------
+    def _is_station_actor(self, by: str) -> bool:
+        """Is this actor a station on the line? The one thing that decides whether
+        a retraction is authorized — a station name is a state; a human signs
+        ``human:<who>``, and an unattributed one carries ``unknown``. Neither is a state,
+        so neither is retractable by a station."""
+        return by in self.line.states and self.line.is_station(by)
+
+    def check_retraction(self, item: WorkItem, name: str, by: str, reason: str) -> None:
+        """Everything that must hold before a classifier comes off — raised, never
+        applied. Split from ``retract`` so a whole report's retractions can be
+        vetted before any of them (or the verdict carrying them) takes effect."""
+        if not (reason or "").strip():
+            raise ClassifierError(
+                f"retracting {name!r} needs a reason — the log's value is that the "
+                "correction says why the classification was wrong"
+            )
+        if name not in item.classifiers:
+            carried = ", ".join(item.classifiers) or "(none)"
+            raise ClassifierError(
+                f"{item.id} does not carry the classifier {name!r}; it has: {carried}"
+            )
+        if self._is_station_actor(by):
+            owner = item.provenance(name)
+            if not self._is_station_actor(owner or ""):
+                raise ClassifierError(
+                    f"{by!r} may not retract {name!r}: it was applied by {owner!r}, not by a "
+                    "station. A station may correct another station's classification, never a "
+                    f"human's — a human can, at the gate: factory gate {item.id} "
+                    f"--retract {name} --retract-reason '<why>'"
+                )
+
+    def retract(self, item: WorkItem, name: str, by: str, reason: str) -> None:
+        """Retract a classifier, validating first. ``by`` is both the recorded actor and
+        the authority: a station may retract only what a station applied; anyone
+        else may retract anything. The caller saves."""
+        self.check_retraction(item, name, by, reason)
+        item.retract_classifier(name, by=by, reason=reason)
+
+    # --- the invariant checklist --------------------------------------------
+    def _check_checklist(self, item: WorkItem, report: StationReport) -> None:
+        """Refuse a ``verified`` verdict that leaves invariants undisposed.
+
+        `blocked`/`accepted`/`out-of-scope` make an honest "didn't run it" cheap to
+        record, so the only thing this blocks is silence. Registering the checklist
+        is what arms the guard — the report's artifacts are absorbed first so a
+        station can register it and dispose its rows in one call."""
+        if report.verdict != "verified" or report.human_required:
+            return
+        path = Checklist.find(self.root, list(item.artifacts) + list(report.artifacts))
+        if not path:
+            return
+        pending = Checklist.load(path).undisposed()
+        if pending:
+            named = "\n  - ".join(row_label(r) for r in pending)
+            raise ChecklistError(
+                f"{item.id}: cannot report `verified` — {len(pending)} invariant(s) in "
+                f"{path.name} have no disposition:\n  - {named}\n"
+                f"Record one of {', '.join(DISPOSITIONS)} for each. `blocked` (out of reach), "
+                "`accepted` (low risk, didn't run it), and `out-of-scope` are all honest "
+                "answers; a blank row is the only one that isn't."
+            )
+
     # --- act (mutating) -----------------------------------------------------
     def advance(self, item: WorkItem, report: StationReport) -> str:
         """Record a station's report and route the item to its next state."""
         state = item.state
         if not self.line.is_station(state):
             raise LineError(f"{item.id} at {state!r} is not a station; cannot advance")
+        # Validate every retraction before touching the item: a refused retraction must
+        # take the whole report with it, or the verdict routes while the correction
+        # it depended on silently didn't apply.
+        for name, reason in report.retractions:
+            self.check_retraction(item, name, report.station, reason)
+        self._check_checklist(item, report)
         item.attempts[state] = item.attempts.get(state, 0) + 1
         item.cost += report.cost
         self._absorb(item, report)
@@ -277,7 +387,8 @@ class Dispatcher:
             child = self.new_item(
                 spec.get("title", "Untitled"),
                 spec.get("body", ""),
-                labels=spec.get("labels", []),
+                classifiers=spec.get("classifiers", []),
+                classifiers_by=report.station,
                 parent=item.id,
             )
             item.log(kind="spawn", actor=report.station, note=f"spawned {child.id}: {child.title}")
@@ -289,6 +400,7 @@ class Dispatcher:
                 steers=item.steers,
                 cost=item.cost,
             )
+        self._sweep_if_terminal(item)
         self.store.save(item)
         self.metrics.emit(
             kind="station",
@@ -302,25 +414,29 @@ class Dispatcher:
         )
         return item.state
 
-    def bind_gate(self, item: WorkItem, by: str, packet: str | None = None) -> dict:
-        """Bind the upcoming human decision to what is on disk right now.
+    def bind_gate(self, item: WorkItem, by: str) -> dict:
+        """Bind the upcoming human decision to what is being reviewed right now.
 
-        Snapshots the review packet, the item's artifact files, and the PR
-        pointer (content hashes, local files only — stays offline), so ``gate``
-        can refuse a decision if any of it moved between review and approval.
-        What the human approves is what the human saw. Binding says nothing
-        about the outcome — the gate still waits on the human."""
+        Snapshots three things: the item's artifact files (content-hashed), its
+        two PR pointers, and where its branches point — locally and on the remote
+        the human is reading the PR on. The branches are the reason this reaches
+        for the network at all: a pointer is only a name, so without the tips a
+        pass re-pushed under an open review would clear a gate the human gave to
+        different code. ``gate`` then refuses a decision if any of it moved.
+
+        Binding says nothing about the outcome — the gate still waits on the
+        human."""
         state = item.state
         if not self.line.is_gate(state):
             raise LineError(f"{item.id} is at {state!r}, not a human gate — nothing to bind")
         gate_name = self.line.gate_name(state) or state
-        snap = self._gate_snapshot(item, packet)
+        snap = self._gate_snapshot(item)
         item.log(
             kind="gate_bound",
             from_state=state,
             actor=by,
-            note=f"decision bound to {f'packet {packet}' if packet else 'no packet file'}"
-            f" + pr + {len(snap['artifacts'])} artifact(s)",
+            note=f"decision bound to {len(snap['artifacts'])} artifact(s), the item's PRs, "
+            "and its branch tips",
         )
         snap["gate"] = gate_name
         # Recorded after the bind event: ANY later history growth is drift.
@@ -335,18 +451,37 @@ class Dispatcher:
         decision: GateDecision,
         produced: str = "",
         accept_drift: bool = False,
+        retractions: list[tuple[str, str]] | None = None,
+        notices: list[str] | None = None,
     ) -> str:
         """Record a human's decision at a gate; capture an intervention if the
         human steered (revision / not-ready / park / explicit change). If the
         gate was bound (``bind_gate``), the decision is checked against the
-        bound snapshot and refused on drift unless ``accept_drift``."""
+        bound snapshot and refused on drift unless ``accept_drift``.
+
+        ``retractions`` ride along with the decision the human is already making —
+        the human's retraction path, unrestricted by provenance.
+
+        ``notices`` is an out-parameter: pass a list and this appends anything the
+        caller should show but that must not block the decision (today, checks the
+        binding couldn't complete). It stays out of the return value because every
+        other caller only wants the state it routed to."""
         state = item.state
         if not self.line.is_gate(state):
             raise LineError(f"{item.id} is at {state!r}, not a human gate")
         gate_name = self.line.gate_name(state) or state
+        # Vet before anything applies, same discipline as advance: a bad retraction
+        # name must not leave the decision recorded and the correction dropped.
+        actor = f"human:{decision.by}"
+        for name, reason in retractions or []:
+            self.check_retraction(item, name, actor, reason)
         bound = item.metadata.get("gate_binding")
-        if bound and bound.get("gate") == gate_name:
-            drift = self._gate_drift(item, bound)
+        # Only a binding made *at this gate* speaks for this decision — a leftover
+        # from an earlier one describes a different review.
+        if bound and bound.get("gate") != gate_name:
+            bound = None
+        if bound:
+            drift, unverifiable = self._gate_drift(item, bound)
             if drift and not accept_drift:
                 raise GateDriftError(
                     f"{item.id}: the content reviewed at {gate_name} moved since it was "
@@ -358,12 +493,21 @@ class Dispatcher:
                     actor="factory",
                     note="gate decision recorded despite drift: " + "; ".join(drift),
                 )
-            item.metadata.pop("gate_binding", None)
-        elif bound:
-            # A leftover binding from some other gate state — stale, not load-bearing.
-            item.metadata.pop("gate_binding", None)
+            if unverifiable:
+                # On the record as well as on screen: a decision taken with part of
+                # its binding unchecked should still say so a year later.
+                item.log(
+                    kind="note",
+                    actor="factory",
+                    note="gate binding partly unverified: " + "; ".join(unverifiable),
+                )
+                if notices is not None:
+                    notices.extend(unverifiable)
+        item.metadata.pop("gate_binding", None)  # used, or stale — either way it's spent
         nxt = self.line.route(state, decision.decision)
         item.human_touches += 1
+        for name, reason in retractions or []:
+            item.retract_classifier(name, by=actor, reason=reason)
         item.log(
             kind="gate",
             from_state=state,
@@ -389,6 +533,7 @@ class Dispatcher:
             self._suspend_clearing_rules(
                 item, f"human steer at {gate_name} ({decision.decision})"
             )
+        self._sweep_if_terminal(item)
         self.store.save(item)
         self.metrics.emit(
             kind="gate",
@@ -531,25 +676,94 @@ class Dispatcher:
             return "missing"
         return hashlib.sha256(p.read_bytes()).hexdigest()
 
-    def _gate_snapshot(self, item: WorkItem, packet: str | None) -> dict:
+    def _git(self, *args: str, timeout: float = _GIT_TIMEOUT) -> str | None:
+        """Run a read-only git command in the factory root, or ``None`` if it
+        couldn't run (no git, no repo, no network, a timeout, a non-zero exit).
+
+        ``GIT_TERMINAL_PROMPT=0`` is the load-bearing part: without it a remote
+        that wants credentials blocks on a password prompt, and the one command
+        that must never hang is the one a human is waiting at."""
+        try:
+            p = subprocess.run(
+                ["git", *args],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": ""},
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return p.stdout.strip() if p.returncode == 0 else None
+
+    def _branch_tips(self, branch: str | None) -> dict[str, Any]:
+        """Where ``branch`` points, locally and on the remote it tracks.
+
+        Three-valued on purpose: a SHA, ``""`` for "the branch isn't there", or
+        ``None`` for "couldn't read it". Collapsing the last two would let an
+        unreachable remote read as agreement, which is the one answer a binding
+        must never invent. The remote is asked with ``ls-remote`` — one round
+        trip, no objects fetched, nothing in the repo mutated."""
+        if not branch:
+            return {}
+        if self._git("rev-parse", "--git-dir") is None:
+            return {"ref": branch, "local": None, "remote": None, "via": None}
+        local = self._git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
+        via = self._git("config", "--get", f"branch.{branch}.remote") or "origin"
+        ls = self._git("ls-remote", "--heads", via, branch, timeout=_LS_REMOTE_TIMEOUT)
         return {
-            "packet": packet,
-            "packet_hash": self._hash_file(packet) if packet else None,
+            "ref": branch,
+            "local": local if local is not None else "",
+            "remote": None if ls is None else (ls.split()[0] if ls else ""),
+            "via": via,
+        }
+
+    def _gate_snapshot(self, item: WorkItem) -> dict:
+        return {
             "pr": item.pr,
+            "change_pr": item.change_pr,
+            # What the human is actually reading is the branch behind the PR, so
+            # the pointer alone is not the review — the tips are.
+            "tips": {
+                "feature branch": self._branch_tips(item.branch),
+                "change branch": self._branch_tips(item.change_branch),
+            },
             "artifacts": {a: self._hash_file(a) for a in sorted(item.artifacts)},
         }
 
-    def _gate_drift(self, item: WorkItem, bound: dict) -> list[str]:
-        """Everything that moved since ``bind_gate`` — named, so the refusal
-        tells the human exactly what to re-review."""
+    def _gate_drift(self, item: WorkItem, bound: dict) -> tuple[list[str], list[str]]:
+        """What moved since ``bind_gate``, and what couldn't be checked.
+
+        Two lists, because they deserve different answers: **drift** refuses the
+        decision (something the human reviewed is not what they're about to
+        approve), while **unverifiable** only warns (a remote we couldn't reach
+        proves nothing either way, and a gate that fails closed on a flaky network
+        is a gate nobody can use)."""
         drift: list[str] = []
+        unverifiable: list[str] = []
         grew = len(item.history) - int(bound.get("history_len", 0))
         if grew:
             drift.append(f"item history advanced by {grew} event(s) since the gate was bound")
         if item.pr != bound.get("pr"):
             drift.append(f"pr changed: {bound.get('pr')!r} → {item.pr!r}")
-        if bound.get("packet") and self._hash_file(bound["packet"]) != bound.get("packet_hash"):
-            drift.append(f"review packet changed: {bound['packet']}")
+        if item.change_pr != bound.get("change_pr"):
+            drift.append(f"change pr changed: {bound.get('change_pr')!r} → {item.change_pr!r}")
+        for label, was in (bound.get("tips") or {}).items():
+            if not was:
+                continue
+            now = self._branch_tips(was.get("ref"))
+            for where in ("local", "remote"):
+                before, after = was.get(where), now.get(where)
+                if before is None or after is None:
+                    unverifiable.append(
+                        f"{label} `{was.get('ref')}` ({where}) could not be read, so whether it "
+                        "moved since the gate was bound is unknown"
+                    )
+                elif before != after:
+                    drift.append(
+                        f"{label} `{was.get('ref')}` moved ({where}): "
+                        f"{_short_sha(before)} → {_short_sha(after)} — re-review the diff"
+                    )
         old = bound.get("artifacts", {})
         now = {a: self._hash_file(a) for a in sorted(item.artifacts)}
         for a, h in now.items():
@@ -558,7 +772,7 @@ class Dispatcher:
             elif h != old[a]:
                 drift.append(f"artifact changed since bind: {a}")
         drift += [f"artifact removed since bind: {a}" for a in old if a not in now]
-        return drift
+        return drift, unverifiable
 
     @staticmethod
     def _runs_this_epoch(item: WorkItem, state: str) -> int:
@@ -571,6 +785,24 @@ class Dispatcher:
             1 for ev in item.history[epoch:] if ev.kind == "station" and ev.from_state == state
         )
 
+    def _sweep_if_terminal(self, item: WorkItem) -> None:
+        """Reclaim the item's scratch once it comes off the line. Never fatal — a
+        failed cleanup must not take down the transition that finished the work."""
+        if not self.line.is_terminal(item.state):
+            return
+        try:
+            removed = sweep.run(self.root, item)
+        except (OSError, sweep.SweepError) as e:
+            item.log(kind="note", actor="factory", note=f"sweep skipped: {e}")
+            return
+        if removed:
+            item.log(
+                kind="note",
+                actor="factory",
+                note=f"swept {len(removed)} scratch file(s) on reaching {item.state} "
+                "(briefs regenerate; registered artifacts kept)",
+            )
+
     def _note_park(self, item: WorkItem, from_state: str, nxt: str) -> None:
         """Remember where a park came from (any route into a revivable terminal),
         so ``revive --resume`` can re-enter there instead of the top of the line."""
@@ -582,12 +814,15 @@ class Dispatcher:
         for a in report.artifacts:
             if a not in item.artifacts:
                 item.artifacts.append(a)
-        # Labels are additive: a station classifies an item, it never wipes labels
-        # set at intake or by an earlier station (policies match on the union).
-        for lab in report.labels:
-            if lab not in item.labels:
-                item.labels.append(lab)
+        # Append-only: adds, then the retractions `advance` already validated.
+        for name in report.classifiers:
+            item.add_classifier(name, by=report.station)
+        for name, reason in report.retractions:
+            item.retract_classifier(name, by=report.station, reason=reason)
         if report.risk:
             item.risk = report.risk
+        if report.branch:
+            item.branch = report.branch
         if report.pr:
             item.pr = report.pr
+        item.open_change_pass(report.change_branch, report.change_pr)

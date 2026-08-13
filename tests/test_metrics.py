@@ -111,6 +111,45 @@ def test_cost_is_counted_once_at_station_events_not_re_added_at_ship(factory_roo
     assert s["cost_per_shipped"] == 0.5
 
 
+def test_station_runs_count_every_run_including_blocked_ones(factory_root: Path):
+    """The structural cost proxy must count runs the engine already records, so it
+    has data even when no station reports --cost — and a run that ended blocked
+    still spent an agent, so it counts too."""
+    m = Metrics(factory_root)
+    m.emit(kind="station", item="WI-1", station="implement", verdict="implemented")
+    m.emit(kind="station", item="WI-1", station="code_review", verdict="changes_requested")
+    m.emit(kind="station", item="WI-1", station="implement", verdict="blocked")
+    m.emit(kind="gate", item="WI-1", gate="ship_review", required_human=True, changed=False)
+    s = m.summary()
+    assert s["station_runs"] == 3  # the gate event is not a station run
+    assert s["total_cost"] == 0.0  # and it needed nothing from the stations to say so
+
+
+def test_runs_per_shipped_is_the_cost_proxy_per_change(factory_root: Path):
+    """Cost per shipped change is the North Star's second half; runs_per_shipped
+    gives it a number that exists without station cooperation — 8 runs across 2
+    ships reads 4.0, against the line's 6-run minimum path per item."""
+    m = Metrics(factory_root)
+    for i in range(8):
+        m.emit(kind="station", item=f"WI-{i % 2}", station="implement", verdict="implemented")
+    m.emit(kind="shipped", item="WI-0", steers=0, cost=0.0)
+    m.emit(kind="shipped", item="WI-1", steers=0, cost=0.0)
+    s = m.summary()
+    assert s["runs_per_shipped"] == 4.0
+
+
+def test_self_reported_cost_survives_alongside_the_run_proxy(factory_root: Path):
+    """The proxy must not replace --cost: a station that does report a number still
+    has it counted and reported separately, so the two channels stay independent."""
+    m = Metrics(factory_root)
+    m.emit(kind="station", item="WI-1", station="spec", verdict="ready_for_review", cost=0.4)
+    m.emit(kind="station", item="WI-1", station="implement", verdict="implemented", cost=0.6)
+    m.emit(kind="shipped", item="WI-1", steers=0, cost=1.0)
+    s = m.summary()
+    assert (s["total_cost"], s["cost_per_shipped"]) == (1.0, 1.0)
+    assert (s["station_runs"], s["runs_per_shipped"]) == (2, 2.0)
+
+
 def test_a_torn_shard_line_is_skipped_with_a_warning_not_fatal(factory_root: Path):
     """A crash mid-append can leave one torn line; that must not take down every
     future metrics read — the line is skipped and reported, mirroring the retro

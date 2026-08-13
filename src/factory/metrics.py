@@ -99,10 +99,13 @@ class Metrics:
             key = f"{b.get('station', '?')} (blocked)"
             by_stage[key] = by_stage.get(key, 0) + 1
         total = len(shipped)
-        # Cost is counted once, at the station events that spent it. A `shipped`
-        # event repeats the item's *cumulative* cost (useful per-ship context);
-        # summing it here again would double-count every shipped item's spend.
-        cost = sum(e.get("cost", 0.0) for e in events if e.get("kind") == "station")
+        # Counted once, at the events that spent it: a `shipped` event repeats the
+        # item's cumulative cost, so summing that too would double-count.
+        station_events = [e for e in events if e.get("kind") == "station"]
+        cost = sum(e.get("cost", 0.0) for e in station_events)
+        # A cost proxy that needs nothing from the stations — one run, one agent.
+        # It counts runs, not tokens: a council inside a run still reads as one run.
+        station_runs = len(station_events)
         # Trend: the last `window` ships vs the `window` before them, in ledger
         # (append) order — so the North Star can be seen moving, not just its
         # lifetime average, which weights the factory's earliest runs forever.
@@ -124,6 +127,8 @@ class Metrics:
             "steers_by_stage": dict(sorted(by_stage.items(), key=lambda kv: -kv[1])),
             "total_cost": round(cost, 4),
             "cost_per_shipped": round(cost / total, 4) if total else 0.0,
+            "station_runs": station_runs,
+            "runs_per_shipped": round(station_runs / total, 2) if total else 0.0,
             "trend": {
                 "window": window,
                 "recent_ships": len(recent),
