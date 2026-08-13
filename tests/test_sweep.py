@@ -107,10 +107,10 @@ def test_a_binding_covers_both_of_the_items_prs(factory_root: Path):
     item = d.new_item("Feature")
     item.state = "ship_review"
     item.pr = "#41"
-    item.change_pr = "#42"
+    item.open_change_pass("change/x-1", "#42")
     d.store.save(item)
     d.bind_gate(item, by="tianchi")
-    item.change_pr = "#43"  # a new pass opened under the review
+    item.open_change_pass("change/x-2", "#43")  # a new pass opened under the review
     with pytest.raises(GateDriftError, match="change pr"):
         d.gate(item, GateDecision(gate="ship_review", decision="approved", by="tianchi"))
 

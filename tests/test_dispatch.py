@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -496,6 +497,110 @@ def test_history_growth_after_open_counts_as_drift(factory_root: Path):
     item.log(kind="note", actor="factory", note="something happened mid-review")
     with pytest.raises(GateDriftError, match="history advanced"):
         d.gate(item, GateDecision(gate="spec_review", decision="approved", by="alice"))
+
+
+def _git_repo(root: Path, branch: str) -> None:
+    """A real one-commit git repo at the factory root, checked out on `branch`.
+    No remote — so `ls-remote` fails locally and the suite never touches a network."""
+
+    def run(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+    run("init", "-q", "-b", "main")
+    run("config", "user.email", "test@example.com")
+    run("config", "user.name", "Test")
+    run("config", "commit.gpgsign", "false")
+    (root / "seed.txt").write_text("seed\n")
+    run("add", "seed.txt")
+    run("commit", "-qm", "seed")
+    run("checkout", "-qb", branch)
+
+
+def _at_ship_review(d: Dispatcher, branch: str) -> WorkItem:
+    item = d.new_item("Feature")
+    item.state = "ship_review"
+    item.open_change_pass(branch, "#42")
+    d.store.save(item)
+    return item
+
+
+def test_a_commit_on_the_change_branch_after_binding_is_drift(factory_root: Path):
+    """A pass re-pushed under an open review must not clear a gate the human gave to
+    different code. The PR pointer is only a name — the branch tip is what pins the
+    diff, so binding without it approved whatever happened to be there at decision time."""
+    from factory.dispatch import GateDriftError
+
+    _git_repo(factory_root, "change/WI-0001-x-1")
+    d = Dispatcher(factory_root)
+    item = _at_ship_review(d, "change/WI-0001-x-1")
+    d.bind_gate(item, by="alice")
+    (factory_root / "more.txt").write_text("a fix nobody reviewed\n")
+    subprocess.run(["git", "add", "more.txt"], cwd=factory_root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "sneaky"], cwd=factory_root, check=True, capture_output=True
+    )
+    with pytest.raises(GateDriftError, match="moved"):
+        d.gate(item, GateDecision(gate="ship_review", decision="approved", by="alice"))
+
+
+def test_a_tip_that_cannot_be_read_warns_instead_of_refusing(factory_root: Path):
+    """An unreachable remote proves nothing either way, and a gate that fails closed
+    on a flaky network is a gate nobody can use — so it warns, records the gap in the
+    item's history, and still lets the human decide."""
+    from factory.dispatch import unreadable_tips
+
+    _git_repo(factory_root, "change/WI-0001-x-1")
+    d = Dispatcher(factory_root)
+    item = _at_ship_review(d, "change/WI-0001-x-1")
+    snap = d.bind_gate(item, by="alice")
+    assert any("remote" in gap for gap in unreadable_tips(snap))  # no remote is configured
+    notices: list[str] = []
+    decision = GateDecision(gate="ship_review", decision="approved", by="alice")
+    assert d.gate(item, decision, notices=notices) == "deploy"
+    assert notices and "could not be read" in notices[0]
+    assert any("partly unverified" in (e.note or "") for e in item.history)
+
+
+def test_a_new_pass_never_overwrites_the_one_before_it(factory_root: Path):
+    """A send-back after the human merged the pass in flight opens a new branch. If
+    that overwrote the fields, the PR an earlier gate decision was bound to would be
+    gone from the record — a write-only field, which is the bug class we keep shipping."""
+    item = WorkItem(id="WI-0001", title="x")
+    item.open_change_pass("change/x-1", "#42")
+    item.open_change_pass("change/x-2", "#43")
+    assert [(p.branch, p.pr) for p in item.change_passes] == [
+        ("change/x-1", "#42"),
+        ("change/x-2", "#43"),
+    ]
+    assert (item.change_branch, item.change_pr) == ("change/x-2", "#43")
+
+
+def test_a_report_about_the_open_pass_stays_one_pass(factory_root: Path):
+    """Implement reports its branch, then its PR, then re-reports both on a re-push.
+    All of it is one pass — if each report appended, the pass count would lie and the
+    'is this branch still live' read would point at a phantom."""
+    item = WorkItem(id="WI-0001", title="x")
+    item.open_change_pass("change/x-1", None)
+    item.open_change_pass(None, "#42")
+    item.open_change_pass("change/x-1", "#42")
+    assert len(item.change_passes) == 1
+    assert (item.change_branch, item.change_pr) == ("change/x-1", "#42")
+
+
+def test_change_passes_survive_a_save_and_load(factory_root: Path):
+    """`change_branch`/`change_pr` are derived, so the pass log is the only thing on
+    disk — a broken round-trip empties the history without any other symptom."""
+    d = Dispatcher(factory_root)
+    item = d.new_item("Feature")
+    item.open_change_pass("change/x-1", "#42")
+    item.open_change_pass("change/x-2", "#43")
+    d.store.save(item)
+    reloaded = d.store.load(item.id)
+    assert [(p.branch, p.pr) for p in reloaded.change_passes] == [
+        ("change/x-1", "#42"),
+        ("change/x-2", "#43"),
+    ]
+    assert reloaded.change_branch == "change/x-2"
 
 
 def test_an_unbound_gate_decision_still_works(factory_root: Path):

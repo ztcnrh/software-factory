@@ -12,6 +12,8 @@ module only decides WHAT should happen next and records WHAT happened.
 from __future__ import annotations
 
 import hashlib
+import os
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -32,6 +34,31 @@ from .model import (
 )
 from .policies import Policies, PolicyState
 from .store import Store
+
+# Bounds on the git reads a gate binding makes. The local ones are instant; the
+# remote one is a single network round trip, generous enough for a slow link and
+# short enough that a human is never left waiting on a dead host.
+_GIT_TIMEOUT = 10.0
+_LS_REMOTE_TIMEOUT = 20.0
+
+
+def _short_sha(sha: str) -> str:
+    """A commit for a human to eyeball, or a word for the two non-commit cases."""
+    return sha[:9] if sha else "(absent)"
+
+
+def unreadable_tips(snap: dict) -> list[str]:
+    """Which branch tips a binding could not read.
+
+    The binding still holds for everything else; this is the part of its promise
+    that didn't, and a caller is expected to say so out loud rather than let the
+    human assume the whole review is pinned."""
+    out = []
+    for label, tips in (snap.get("tips") or {}).items():
+        for where in ("local", "remote"):
+            if tips and tips.get(where) is None:
+                out.append(f"{label} `{tips.get('ref')}` ({where})")
+    return out
 
 
 class GateDriftError(Exception):
@@ -388,13 +415,17 @@ class Dispatcher:
         return item.state
 
     def bind_gate(self, item: WorkItem, by: str) -> dict:
-        """Bind the upcoming human decision to what is on disk right now.
+        """Bind the upcoming human decision to what is being reviewed right now.
 
-        Snapshots the item's artifact files and its PR pointers (content hashes,
-        local files only — stays offline), so ``gate`` can refuse a decision if
-        any of it moved between review and approval. What the human approves is
-        what the human saw. Binding says nothing about the outcome — the gate
-        still waits on the human."""
+        Snapshots three things: the item's artifact files (content-hashed), its
+        two PR pointers, and where its branches point — locally and on the remote
+        the human is reading the PR on. The branches are the reason this reaches
+        for the network at all: a pointer is only a name, so without the tips a
+        pass re-pushed under an open review would clear a gate the human gave to
+        different code. ``gate`` then refuses a decision if any of it moved.
+
+        Binding says nothing about the outcome — the gate still waits on the
+        human."""
         state = item.state
         if not self.line.is_gate(state):
             raise LineError(f"{item.id} is at {state!r}, not a human gate — nothing to bind")
@@ -404,7 +435,8 @@ class Dispatcher:
             kind="gate_bound",
             from_state=state,
             actor=by,
-            note=f"decision bound to {len(snap['artifacts'])} artifact(s) + the item's PRs",
+            note=f"decision bound to {len(snap['artifacts'])} artifact(s), the item's PRs, "
+            "and its branch tips",
         )
         snap["gate"] = gate_name
         # Recorded after the bind event: ANY later history growth is drift.
@@ -420,6 +452,7 @@ class Dispatcher:
         produced: str = "",
         accept_drift: bool = False,
         retractions: list[tuple[str, str]] | None = None,
+        notices: list[str] | None = None,
     ) -> str:
         """Record a human's decision at a gate; capture an intervention if the
         human steered (revision / not-ready / park / explicit change). If the
@@ -427,7 +460,12 @@ class Dispatcher:
         bound snapshot and refused on drift unless ``accept_drift``.
 
         ``retractions`` ride along with the decision the human is already making —
-        the human's retraction path, unrestricted by provenance."""
+        the human's retraction path, unrestricted by provenance.
+
+        ``notices`` is an out-parameter: pass a list and this appends anything the
+        caller should show but that must not block the decision (today, checks the
+        binding couldn't complete). It stays out of the return value because every
+        other caller only wants the state it routed to."""
         state = item.state
         if not self.line.is_gate(state):
             raise LineError(f"{item.id} is at {state!r}, not a human gate")
@@ -443,7 +481,7 @@ class Dispatcher:
         if bound and bound.get("gate") != gate_name:
             bound = None
         if bound:
-            drift = self._gate_drift(item, bound)
+            drift, unverifiable = self._gate_drift(item, bound)
             if drift and not accept_drift:
                 raise GateDriftError(
                     f"{item.id}: the content reviewed at {gate_name} moved since it was "
@@ -455,6 +493,16 @@ class Dispatcher:
                     actor="factory",
                     note="gate decision recorded despite drift: " + "; ".join(drift),
                 )
+            if unverifiable:
+                # On the record as well as on screen: a decision taken with part of
+                # its binding unchecked should still say so a year later.
+                item.log(
+                    kind="note",
+                    actor="factory",
+                    note="gate binding partly unverified: " + "; ".join(unverifiable),
+                )
+                if notices is not None:
+                    notices.extend(unverifiable)
         item.metadata.pop("gate_binding", None)  # used, or stale — either way it's spent
         nxt = self.line.route(state, decision.decision)
         item.human_touches += 1
@@ -628,17 +676,71 @@ class Dispatcher:
             return "missing"
         return hashlib.sha256(p.read_bytes()).hexdigest()
 
+    def _git(self, *args: str, timeout: float = _GIT_TIMEOUT) -> str | None:
+        """Run a read-only git command in the factory root, or ``None`` if it
+        couldn't run (no git, no repo, no network, a timeout, a non-zero exit).
+
+        ``GIT_TERMINAL_PROMPT=0`` is the load-bearing part: without it a remote
+        that wants credentials blocks on a password prompt, and the one command
+        that must never hang is the one a human is waiting at."""
+        try:
+            p = subprocess.run(
+                ["git", *args],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": ""},
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return p.stdout.strip() if p.returncode == 0 else None
+
+    def _branch_tips(self, branch: str | None) -> dict[str, Any]:
+        """Where ``branch`` points, locally and on the remote it tracks.
+
+        Three-valued on purpose: a SHA, ``""`` for "the branch isn't there", or
+        ``None`` for "couldn't read it". Collapsing the last two would let an
+        unreachable remote read as agreement, which is the one answer a binding
+        must never invent. The remote is asked with ``ls-remote`` — one round
+        trip, no objects fetched, nothing in the repo mutated."""
+        if not branch:
+            return {}
+        if self._git("rev-parse", "--git-dir") is None:
+            return {"ref": branch, "local": None, "remote": None, "via": None}
+        local = self._git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
+        via = self._git("config", "--get", f"branch.{branch}.remote") or "origin"
+        ls = self._git("ls-remote", "--heads", via, branch, timeout=_LS_REMOTE_TIMEOUT)
+        return {
+            "ref": branch,
+            "local": local if local is not None else "",
+            "remote": None if ls is None else (ls.split()[0] if ls else ""),
+            "via": via,
+        }
+
     def _gate_snapshot(self, item: WorkItem) -> dict:
         return {
             "pr": item.pr,
             "change_pr": item.change_pr,
+            # What the human is actually reading is the branch behind the PR, so
+            # the pointer alone is not the review — the tips are.
+            "tips": {
+                "feature branch": self._branch_tips(item.branch),
+                "change branch": self._branch_tips(item.change_branch),
+            },
             "artifacts": {a: self._hash_file(a) for a in sorted(item.artifacts)},
         }
 
-    def _gate_drift(self, item: WorkItem, bound: dict) -> list[str]:
-        """Everything that moved since ``bind_gate`` — named, so the refusal
-        tells the human exactly what to re-review."""
+    def _gate_drift(self, item: WorkItem, bound: dict) -> tuple[list[str], list[str]]:
+        """What moved since ``bind_gate``, and what couldn't be checked.
+
+        Two lists, because they deserve different answers: **drift** refuses the
+        decision (something the human reviewed is not what they're about to
+        approve), while **unverifiable** only warns (a remote we couldn't reach
+        proves nothing either way, and a gate that fails closed on a flaky network
+        is a gate nobody can use)."""
         drift: list[str] = []
+        unverifiable: list[str] = []
         grew = len(item.history) - int(bound.get("history_len", 0))
         if grew:
             drift.append(f"item history advanced by {grew} event(s) since the gate was bound")
@@ -646,6 +748,22 @@ class Dispatcher:
             drift.append(f"pr changed: {bound.get('pr')!r} → {item.pr!r}")
         if item.change_pr != bound.get("change_pr"):
             drift.append(f"change pr changed: {bound.get('change_pr')!r} → {item.change_pr!r}")
+        for label, was in (bound.get("tips") or {}).items():
+            if not was:
+                continue
+            now = self._branch_tips(was.get("ref"))
+            for where in ("local", "remote"):
+                before, after = was.get(where), now.get(where)
+                if before is None or after is None:
+                    unverifiable.append(
+                        f"{label} `{was.get('ref')}` ({where}) could not be read, so whether it "
+                        "moved since the gate was bound is unknown"
+                    )
+                elif before != after:
+                    drift.append(
+                        f"{label} `{was.get('ref')}` moved ({where}): "
+                        f"{_short_sha(before)} → {_short_sha(after)} — re-review the diff"
+                    )
         old = bound.get("artifacts", {})
         now = {a: self._hash_file(a) for a in sorted(item.artifacts)}
         for a, h in now.items():
@@ -654,7 +772,7 @@ class Dispatcher:
             elif h != old[a]:
                 drift.append(f"artifact changed since bind: {a}")
         drift += [f"artifact removed since bind: {a}" for a in old if a not in now]
-        return drift
+        return drift, unverifiable
 
     @staticmethod
     def _runs_this_epoch(item: WorkItem, state: str) -> int:
@@ -707,7 +825,4 @@ class Dispatcher:
             item.branch = report.branch
         if report.pr:
             item.pr = report.pr
-        if report.change_branch:
-            item.change_branch = report.change_branch
-        if report.change_pr:
-            item.change_pr = report.change_pr
+        item.open_change_pass(report.change_branch, report.change_pr)

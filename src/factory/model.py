@@ -95,6 +95,19 @@ class ClassifierEvent:
 
 
 @dataclass
+class ChangePass:
+    """One implementation pass: a change branch off the item's feature branch,
+    and the pull request carrying it back into that branch.
+
+    Passes accumulate rather than replace. A send-back after the human has merged
+    the pass in flight opens a new numbered branch, and the one before it is still
+    what a prior gate decision was bound to."""
+
+    branch: str | None = None
+    pr: str | None = None
+
+
+@dataclass
 class WorkItem:
     """A unit of work. The local JSON of this object is the source of truth;
     GitHub issues (if used) are a mirror."""
@@ -111,9 +124,9 @@ class WorkItem:
     # spec station opens both; everything the item produces ends up here.
     branch: str | None = None
     pr: str | None = None
-    # The implementation pass in flight: a branch off `branch`, and its PR into it.
-    change_branch: str | None = None
-    change_pr: str | None = None
+    # Every implementation pass, oldest first; `change_branch`/`change_pr` derive
+    # from the last one.
+    change_passes: list[ChangePass] = field(default_factory=list)
     source: str = "local"  # local | github
     source_ref: str | None = None  # e.g. github issue number
     attempts: dict[str, int] = field(default_factory=dict)  # per-state run counts
@@ -139,6 +152,30 @@ class WorkItem:
             elif ev.name in active:
                 active.remove(ev.name)
         return active
+
+    @property
+    def change_branch(self) -> str | None:
+        """The pass in flight — the most recently opened one. Derived, never
+        stored, so it can't drift from the log the way an overwritten field would."""
+        return self.change_passes[-1].branch if self.change_passes else None
+
+    @property
+    def change_pr(self) -> str | None:
+        return self.change_passes[-1].pr if self.change_passes else None
+
+    def open_change_pass(self, branch: str | None = None, pr: str | None = None) -> None:
+        """Record what a station reported about its implementation pass.
+
+        A report naming the branch already in flight (or naming none at all) fills
+        in that pass; a different branch opens a new one. That single rule is what
+        keeps a re-push from forking the log and a new numbered branch from
+        overwriting the pass before it."""
+        tip = self.change_passes[-1] if self.change_passes else None
+        if tip is not None and (branch is None or tip.branch in (None, branch)):
+            tip.branch = branch or tip.branch
+            tip.pr = pr or tip.pr
+        elif branch or pr:
+            self.change_passes.append(ChangePass(branch=branch, pr=pr))
 
     def provenance(self, name: str) -> str | None:
         """Who applied ``name`` most recently — the fact that decides who may
@@ -177,6 +214,7 @@ class WorkItem:
         d = dict(d)
         d["history"] = [Event(**e) for e in d.get("history", [])]
         d["classifier_log"] = [ClassifierEvent(**e) for e in d.get("classifier_log", [])]
+        d["change_passes"] = [ChangePass(**c) for c in d.get("change_passes", [])]
         return cls(**d)
 
 

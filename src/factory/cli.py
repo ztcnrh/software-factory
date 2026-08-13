@@ -27,7 +27,7 @@ from pathlib import Path
 
 from . import brief as brief_mod
 from . import sweep as sweep_mod
-from .dispatch import Action, Dispatcher, GateDriftError
+from .dispatch import Action, Dispatcher, GateDriftError, unreadable_tips
 from .ledger import CLOSED, STATUSES, Ledger
 from .line import Line
 from .model import GateDecision, StationReport, WorkItem
@@ -460,8 +460,15 @@ def cmd_gate(args: argparse.Namespace) -> int:
         snap = d.bind_gate(item, by=_resolve_actor(args))
         print(
             f"✓ {item.id}: {snap['gate']} still waits on the human — the decision is now bound "
-            f"to what is on disk ({len(snap['artifacts'])} artifact(s) + the item's PRs)"
+            f"to what is under review ({len(snap['artifacts'])} artifact(s), the item's PRs, "
+            "and its branch tips)"
         )
+        sys.stdout.flush()  # so the warnings below land after the ✓, not before it
+        for gap in unreadable_tips(snap):
+            print(
+                f"⚠ couldn't read {gap} — the binding can't tell you if that branch moves",
+                file=sys.stderr,
+            )
         print(f"  decide with: factory gate {item.id} --decision <verdict> ...")
         return 0
     if not args.decision:
@@ -513,6 +520,9 @@ def cmd_gate(args: argparse.Namespace) -> int:
             for r in d.interventions.records()
             if (c := r.get("category")) and c != "uncategorized"
         }
+    # Filled in by gate(): things worth showing the human that must not block the
+    # decision (a branch tip the binding couldn't read). Printed after the ✓.
+    notices: list[str] = []
     try:
         new_state = d.gate(
             item,
@@ -520,6 +530,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
             produced=produced,
             accept_drift=args.accept_drift,
             retractions=retractions,
+            notices=notices,
         )
     except GateDriftError as e:
         print(f"✗ {e}", file=sys.stderr)
@@ -530,6 +541,9 @@ def cmd_gate(args: argparse.Namespace) -> int:
         )
         return 1
     print(f"✓ {item.id}: gate {gate} → {new_state}  (decision: {args.decision})")
+    sys.stdout.flush()
+    for notice in notices:
+        print(f"⚠ {notice}", file=sys.stderr)
     for name, reason in retractions:
         print(f"  ↩ classifier {name!r} retracted: {reason}")
     if decision.category and decision.category not in known_categories:
@@ -723,7 +737,13 @@ def _render_item(d: Dispatcher, item_id: str) -> None:
         print(
             f"  change branch: {item.change_branch}"
             + (f"  →  pr: {item.change_pr}" if item.change_pr else "")
+            + (f"  (pass {len(item.change_passes)})" if len(item.change_passes) > 1 else "")
         )
+        # Superseded passes stay on the record: their PRs are where the review of
+        # each earlier attempt happened, and a merged one is history you can't
+        # reconstruct from the branch that's live now.
+        for n, p in enumerate(item.change_passes[:-1], start=1):
+            print(f"    pass {n}: {p.branch or '(no branch)'}" + (f"  →  {p.pr}" if p.pr else ""))
     # What each run was fed. Briefs are scratch and vanish when the item finishes.
     home = d.store.dir / item.id
     traces = sorted(home.glob("runs/*-brief.md"))

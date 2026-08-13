@@ -2,7 +2,7 @@
 
 > The shape the `/factory` driver (or a cloud station commenting on an issue) renders when the line stops at a human gate. The goal is **orientation in ten seconds** — everything worth reviewing is one link away, nothing to hunt for. The review itself takes as long as it deserves: the spec gate merits a real read (plan quality decides outcome quality), and the ship gate merits a real diff-plus-evidence review. The packet's job is that none of that time is spent assembling context.
 >
-> The packet is a message in the conversation, not a file — everything in it renders from state already on disk. The driver runs `factory gate <id> --bind` before presenting, which content-hashes the item's artifacts and its PR pointers, so the decision below is checked against exactly what was reviewed and refused if any of it moved first.
+> The packet is a message in the conversation, not a file — everything in it renders from state already on disk. The driver runs `factory gate <id> --bind` before presenting, which content-hashes the item's artifacts and records both PR pointers and both branch tips (local and remote), so the decision below is checked against exactly what was reviewed — down to the commit — and refused if any of it moved first.
 
 **Item:** <title> — one paragraph: what it is and what the station produced. **Artifacts:** <links: spec files / PR / diff / screenshot> **Confidence:** <0..1>   ·   **Risk:** <low | medium | high>
 
