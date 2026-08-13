@@ -79,10 +79,10 @@ class Event:
 
 
 @dataclass
-class LabelEvent:
-    """One application or retraction of a label.
+class ClassifierEvent:
+    """One application or retraction of a classifier.
 
-    Labels are gate-policy inputs, so a classification has to be correctable —
+    Classifiers are gate-policy inputs, so a classification has to be correctable —
     and *who* applied one decides who may take it off (a station may correct
     another station, never the human). The log is append-only: a retraction is a
     new entry, never an edit of the entry that applied it."""
@@ -104,12 +104,16 @@ class WorkItem:
     body: str = ""
     state: str = "triage"
     risk: str = "unknown"  # low | medium | high | unknown (triage assigns this)
-    label_log: list[LabelEvent] = field(default_factory=list)  # `labels` is derived from this
+    # `classifiers` is derived from this log
+    classifier_log: list[ClassifierEvent] = field(default_factory=list)
     artifacts: list[str] = field(default_factory=list)  # files produced (specs, etc.)
-    # The item's feature branch: spec and every implementation pass land here, and
-    # it merges into the integration branch at the ship gate as one unit.
+    # The item's own branch and its pull request into the integration branch. The
+    # spec station opens both; everything the item produces ends up here.
     branch: str | None = None
-    pr: str | None = None  # the open change PR, targeting `branch`
+    pr: str | None = None
+    # The implementation pass in flight: a branch off `branch`, and its PR into it.
+    change_branch: str | None = None
+    change_pr: str | None = None
     source: str = "local"  # local | github
     source_ref: str | None = None  # e.g. github issue number
     attempts: dict[str, int] = field(default_factory=dict)  # per-state run counts
@@ -123,12 +127,12 @@ class WorkItem:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
-    def labels(self) -> list[str]:
-        """The labels currently applied, derived from the log — a name is active
-        if its most recent entry is an ``add``. Never stored (``to_dict`` emits
-        only ``label_log``), so the two can't drift apart."""
+    def classifiers(self) -> list[str]:
+        """The classifiers currently applied, derived from the log — a name is
+        active if its most recent entry is an ``add``. Never stored (``to_dict``
+        emits only ``classifier_log``), so the two can't drift apart."""
         active: list[str] = []
-        for ev in self.label_log:
+        for ev in self.classifier_log:
             if ev.action == "add":
                 if ev.name not in active:
                     active.append(ev.name)
@@ -139,24 +143,24 @@ class WorkItem:
     def provenance(self, name: str) -> str | None:
         """Who applied ``name`` most recently — the fact that decides who may
         retract it. ``None`` if the item has never carried it."""
-        for ev in reversed(self.label_log):
+        for ev in reversed(self.classifier_log):
             if ev.name == name and ev.action == "add":
                 return ev.by
         return None
 
-    def add_label(self, name: str, by: str) -> LabelEvent | None:
-        """Apply a label. Idempotent: re-asserting an active one records nothing."""
-        if name in self.labels:
+    def add_classifier(self, name: str, by: str) -> ClassifierEvent | None:
+        """Apply a classifier. Idempotent: re-asserting an active one records nothing."""
+        if name in self.classifiers:
             return None
-        ev = LabelEvent(name=name, action="add", by=by)
-        self.label_log.append(ev)
+        ev = ClassifierEvent(name=name, action="add", by=by)
+        self.classifier_log.append(ev)
         return ev
 
-    def retract_label(self, name: str, by: str, reason: str) -> LabelEvent:
-        """Take a label back off. Callers validate first (see ``Dispatcher.unlabel``,
-        which owns the authority rule) — this only records."""
-        ev = LabelEvent(name=name, action="retract", by=by, reason=reason)
-        self.label_log.append(ev)
+    def retract_classifier(self, name: str, by: str, reason: str) -> ClassifierEvent:
+        """Take a classifier back off. Callers validate first (see
+        ``Dispatcher.retract``, which owns the authority rule) — this only records."""
+        ev = ClassifierEvent(name=name, action="retract", by=by, reason=reason)
+        self.classifier_log.append(ev)
         return ev
 
     def log(self, **kwargs: Any) -> Event:
@@ -172,7 +176,7 @@ class WorkItem:
     def from_dict(cls, d: dict[str, Any]) -> WorkItem:
         d = dict(d)
         d["history"] = [Event(**e) for e in d.get("history", [])]
-        d["label_log"] = [LabelEvent(**e) for e in d.get("label_log", [])]
+        d["classifier_log"] = [ClassifierEvent(**e) for e in d.get("classifier_log", [])]
         return cls(**d)
 
 
@@ -195,14 +199,16 @@ class StationReport:
     human_reason: str = ""
     notes: str = ""
     risk: str | None = None
-    pr: str | None = None
     branch: str | None = None
+    pr: str | None = None
+    change_branch: str | None = None
+    change_pr: str | None = None
     ran: str = ""  # how the station ran (inline | subagent | resumed | cloud) — trace metadata
-    labels: list[str] = field(default_factory=list)  # classifying labels to add
+    classifiers: list[str] = field(default_factory=list)  # classifiers to add
     # Classifications this station disproved: (name, why). A station may retract
     # only what a station applied — the dispatcher enforces that and refuses the
     # whole report otherwise, so a bad retraction can't half-apply a verdict.
-    unlabels: list[tuple[str, str]] = field(default_factory=list)
+    retractions: list[tuple[str, str]] = field(default_factory=list)
     spawn: list[dict[str, Any]] = field(default_factory=list)  # new items → triage
 
 

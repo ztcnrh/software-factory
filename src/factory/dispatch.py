@@ -17,8 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from . import sweep
-from .checklist import DISPOSITIONS, Checklist, ChecklistError
-from .checklist import label as checklist_label
+from .checklist import DISPOSITIONS, Checklist, ChecklistError, row_label
 from .classifiers import Classifiers
 from .interventions import Interventions
 from .line import Line, LineError
@@ -40,8 +39,8 @@ class GateDriftError(Exception):
     would bind to something the human never saw. Caught at the CLI boundary."""
 
 
-class LabelError(Exception):
-    """A label retraction the engine refuses: the item doesn't carry the label,
+class ClassifierError(Exception):
+    """A retraction the engine refuses: the item doesn't carry the classifier,
     it carries no reason, or a station tried to overrule a human's classification.
     Raised before anything is written, so the call it arrived on applies nothing."""
 
@@ -93,12 +92,12 @@ class Dispatcher:
         self,
         title: str,
         body: str = "",
-        labels: list[str] | None = None,
+        classifiers: list[str] | None = None,
         risk: str = "unknown",
         parent: str | None = None,
         source: str = "local",
         source_ref: str | None = None,
-        labels_by: str = "unknown",
+        classifiers_by: str = "unknown",
     ) -> WorkItem:
         item = WorkItem(
             id=self.store.next_id(),
@@ -110,8 +109,8 @@ class Dispatcher:
             source=source,
             source_ref=source_ref,
         )
-        for name in labels or []:
-            item.add_label(name, by=labels_by)
+        for name in classifiers or []:
+            item.add_classifier(name, by=classifiers_by)
         item.log(kind="created", to_state=item.state, actor="factory")
         # Deterministic risk floor: sensitive-sounding work enters at RISK_FLOOR
         # unless a human explicitly set a risk at creation (their call wins —
@@ -211,44 +210,44 @@ class Dispatcher:
                 return f"{who}{verdict}{note}"
         return None
 
-    # --- labels -------------------------------------------------------------
+    # --- classifiers --------------------------------------------------------
     def _is_station_actor(self, by: str) -> bool:
         """Is this actor a station on the line? The one thing that decides whether
         a retraction is authorized — a station name is a state; a human signs
-        ``human:<who>``, and a pre-log label carries ``unknown``. Neither is a state,
+        ``human:<who>``, and an unattributed one carries ``unknown``. Neither is a state,
         so neither is retractable by a station."""
         return by in self.line.states and self.line.is_station(by)
 
-    def check_unlabel(self, item: WorkItem, name: str, by: str, reason: str) -> None:
-        """Everything that must hold before a label comes off — raised, never
-        applied. Split from ``unlabel`` so a whole report's retractions can be
+    def check_retraction(self, item: WorkItem, name: str, by: str, reason: str) -> None:
+        """Everything that must hold before a classifier comes off — raised, never
+        applied. Split from ``retract`` so a whole report's retractions can be
         vetted before any of them (or the verdict carrying them) takes effect."""
         if not (reason or "").strip():
-            raise LabelError(
+            raise ClassifierError(
                 f"retracting {name!r} needs a reason — the log's value is that the "
                 "correction says why the classification was wrong"
             )
-        if name not in item.labels:
-            carried = ", ".join(item.labels) or "(none)"
-            raise LabelError(
-                f"{item.id} does not carry the label {name!r}; it has: {carried}"
+        if name not in item.classifiers:
+            carried = ", ".join(item.classifiers) or "(none)"
+            raise ClassifierError(
+                f"{item.id} does not carry the classifier {name!r}; it has: {carried}"
             )
         if self._is_station_actor(by):
             owner = item.provenance(name)
             if not self._is_station_actor(owner or ""):
-                raise LabelError(
+                raise ClassifierError(
                     f"{by!r} may not retract {name!r}: it was applied by {owner!r}, not by a "
                     "station. A station may correct another station's classification, never a "
                     f"human's — a human can, at the gate: factory gate {item.id} "
-                    f"--unlabel {name} --unlabel-reason '<why>'"
+                    f"--retract {name} --retract-reason '<why>'"
                 )
 
-    def unlabel(self, item: WorkItem, name: str, by: str, reason: str) -> None:
-        """Retract a label, validating first. ``by`` is both the recorded actor and
+    def retract(self, item: WorkItem, name: str, by: str, reason: str) -> None:
+        """Retract a classifier, validating first. ``by`` is both the recorded actor and
         the authority: a station may retract only what a station applied; anyone
         else may retract anything. The caller saves."""
-        self.check_unlabel(item, name, by, reason)
-        item.retract_label(name, by=by, reason=reason)
+        self.check_retraction(item, name, by, reason)
+        item.retract_classifier(name, by=by, reason=reason)
 
     # --- the invariant checklist --------------------------------------------
     def _check_checklist(self, item: WorkItem, report: StationReport) -> None:
@@ -265,7 +264,7 @@ class Dispatcher:
             return
         pending = Checklist.load(path).undisposed()
         if pending:
-            named = "\n  - ".join(checklist_label(r) for r in pending)
+            named = "\n  - ".join(row_label(r) for r in pending)
             raise ChecklistError(
                 f"{item.id}: cannot report `verified` — {len(pending)} invariant(s) in "
                 f"{path.name} have no disposition:\n  - {named}\n"
@@ -280,11 +279,11 @@ class Dispatcher:
         state = item.state
         if not self.line.is_station(state):
             raise LineError(f"{item.id} at {state!r} is not a station; cannot advance")
-        # Validate every retraction before touching the item: a refused label must
+        # Validate every retraction before touching the item: a refused retraction must
         # take the whole report with it, or the verdict routes while the correction
         # it depended on silently didn't apply.
-        for name, reason in report.unlabels:
-            self.check_unlabel(item, name, report.station, reason)
+        for name, reason in report.retractions:
+            self.check_retraction(item, name, report.station, reason)
         self._check_checklist(item, report)
         item.attempts[state] = item.attempts.get(state, 0) + 1
         item.cost += report.cost
@@ -361,8 +360,8 @@ class Dispatcher:
             child = self.new_item(
                 spec.get("title", "Untitled"),
                 spec.get("body", ""),
-                labels=spec.get("labels", []),
-                labels_by=report.station,
+                classifiers=spec.get("classifiers", []),
+                classifiers_by=report.station,
                 parent=item.id,
             )
             item.log(kind="spawn", actor=report.station, note=f"spawned {child.id}: {child.title}")
@@ -388,25 +387,24 @@ class Dispatcher:
         )
         return item.state
 
-    def bind_gate(self, item: WorkItem, by: str, packet: str | None = None) -> dict:
+    def bind_gate(self, item: WorkItem, by: str) -> dict:
         """Bind the upcoming human decision to what is on disk right now.
 
-        Snapshots the review packet, the item's artifact files, and the PR
-        pointer (content hashes, local files only — stays offline), so ``gate``
-        can refuse a decision if any of it moved between review and approval.
-        What the human approves is what the human saw. Binding says nothing
-        about the outcome — the gate still waits on the human."""
+        Snapshots the item's artifact files and its PR pointers (content hashes,
+        local files only — stays offline), so ``gate`` can refuse a decision if
+        any of it moved between review and approval. What the human approves is
+        what the human saw. Binding says nothing about the outcome — the gate
+        still waits on the human."""
         state = item.state
         if not self.line.is_gate(state):
             raise LineError(f"{item.id} is at {state!r}, not a human gate — nothing to bind")
         gate_name = self.line.gate_name(state) or state
-        snap = self._gate_snapshot(item, packet)
+        snap = self._gate_snapshot(item)
         item.log(
             kind="gate_bound",
             from_state=state,
             actor=by,
-            note=f"decision bound to {f'packet {packet}' if packet else 'no packet file'}"
-            f" + pr + {len(snap['artifacts'])} artifact(s)",
+            note=f"decision bound to {len(snap['artifacts'])} artifact(s) + the item's PRs",
         )
         snap["gate"] = gate_name
         # Recorded after the bind event: ANY later history growth is drift.
@@ -421,28 +419,27 @@ class Dispatcher:
         decision: GateDecision,
         produced: str = "",
         accept_drift: bool = False,
-        unlabels: list[tuple[str, str]] | None = None,
+        retractions: list[tuple[str, str]] | None = None,
     ) -> str:
         """Record a human's decision at a gate; capture an intervention if the
         human steered (revision / not-ready / park / explicit change). If the
         gate was bound (``bind_gate``), the decision is checked against the
         bound snapshot and refused on drift unless ``accept_drift``.
 
-        ``unlabels`` rides along with the decision the human is already making —
+        ``retractions`` ride along with the decision the human is already making —
         the human's retraction path, unrestricted by provenance."""
         state = item.state
         if not self.line.is_gate(state):
             raise LineError(f"{item.id} is at {state!r}, not a human gate")
         gate_name = self.line.gate_name(state) or state
-        # Vet before anything applies, same discipline as advance: a bad label
+        # Vet before anything applies, same discipline as advance: a bad retraction
         # name must not leave the decision recorded and the correction dropped.
         actor = f"human:{decision.by}"
-        for name, reason in unlabels or []:
-            self.check_unlabel(item, name, actor, reason)
+        for name, reason in retractions or []:
+            self.check_retraction(item, name, actor, reason)
         bound = item.metadata.get("gate_binding")
         # Only a binding made *at this gate* speaks for this decision — a leftover
-        # from an earlier one is stale, and promoting its packet would file the
-        # wrong render as the record of what the human just approved.
+        # from an earlier one describes a different review.
         if bound and bound.get("gate") != gate_name:
             bound = None
         if bound:
@@ -461,8 +458,8 @@ class Dispatcher:
         item.metadata.pop("gate_binding", None)  # used, or stale — either way it's spent
         nxt = self.line.route(state, decision.decision)
         item.human_touches += 1
-        for name, reason in unlabels or []:
-            item.retract_label(name, by=actor, reason=reason)
+        for name, reason in retractions or []:
+            item.retract_classifier(name, by=actor, reason=reason)
         item.log(
             kind="gate",
             from_state=state,
@@ -473,7 +470,6 @@ class Dispatcher:
         )
         item.state = nxt
         self._note_park(item, state, nxt)
-        self._promote_packet(item, bound, gate_name)
         # A human decision opens a fresh attempt epoch: new guidance deserves a
         # fresh loop budget, and the lifetime `attempts` map keeps the full churn
         # history for the retro regardless.
@@ -632,11 +628,10 @@ class Dispatcher:
             return "missing"
         return hashlib.sha256(p.read_bytes()).hexdigest()
 
-    def _gate_snapshot(self, item: WorkItem, packet: str | None) -> dict:
+    def _gate_snapshot(self, item: WorkItem) -> dict:
         return {
-            "packet": packet,
-            "packet_hash": self._hash_file(packet) if packet else None,
             "pr": item.pr,
+            "change_pr": item.change_pr,
             "artifacts": {a: self._hash_file(a) for a in sorted(item.artifacts)},
         }
 
@@ -649,8 +644,8 @@ class Dispatcher:
             drift.append(f"item history advanced by {grew} event(s) since the gate was bound")
         if item.pr != bound.get("pr"):
             drift.append(f"pr changed: {bound.get('pr')!r} → {item.pr!r}")
-        if bound.get("packet") and self._hash_file(bound["packet"]) != bound.get("packet_hash"):
-            drift.append(f"review packet changed: {bound['packet']}")
+        if item.change_pr != bound.get("change_pr"):
+            drift.append(f"change pr changed: {bound.get('change_pr')!r} → {item.change_pr!r}")
         old = bound.get("artifacts", {})
         now = {a: self._hash_file(a) for a in sorted(item.artifacts)}
         for a, h in now.items():
@@ -670,37 +665,6 @@ class Dispatcher:
         epoch = item.metadata.get("epoch_len", 0)
         return sum(
             1 for ev in item.history[epoch:] if ev.kind == "station" and ev.from_state == state
-        )
-
-    def _promote_packet(self, item: WorkItem, bound: dict | None, gate: str) -> None:
-        """Copy the render a decision bound to into ``decisions/``.
-
-        A render is rebuildable scratch until a human decides against it; then it
-        becomes the record of what they were looking at. Best-effort — a missing
-        render must never block a decision."""
-        packet = (bound or {}).get("packet")
-        if not packet:
-            return
-        src = self.root / packet
-        if not src.is_file():
-            item.log(
-                kind="note",
-                actor="factory",
-                note=f"gate decision recorded, but the bound packet {packet} is gone — "
-                "no durable copy kept",
-            )
-            return
-        dst = self.store.dir / item.id / "decisions" / Path(packet).name
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        dst.write_bytes(src.read_bytes())
-        rel = str(dst.relative_to(self.root))
-        recorded = item.metadata.setdefault("decisions", [])
-        if rel not in recorded:
-            recorded.append(rel)
-        item.log(
-            kind="note",
-            actor="factory",
-            note=f"{gate} decision recorded against {rel} (packet promoted — it's what you saw)",
         )
 
     def _sweep_if_terminal(self, item: WorkItem) -> None:
@@ -733,13 +697,17 @@ class Dispatcher:
             if a not in item.artifacts:
                 item.artifacts.append(a)
         # Append-only: adds, then the retractions `advance` already validated.
-        for lab in report.labels:
-            item.add_label(lab, by=report.station)
-        for name, reason in report.unlabels:
-            item.retract_label(name, by=report.station, reason=reason)
+        for name in report.classifiers:
+            item.add_classifier(name, by=report.station)
+        for name, reason in report.retractions:
+            item.retract_classifier(name, by=report.station, reason=reason)
         if report.risk:
             item.risk = report.risk
-        if report.pr:
-            item.pr = report.pr
         if report.branch:
             item.branch = report.branch
+        if report.pr:
+            item.pr = report.pr
+        if report.change_branch:
+            item.change_branch = report.change_branch
+        if report.change_pr:
+            item.change_pr = report.change_pr

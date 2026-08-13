@@ -174,7 +174,6 @@ def test_install_plants_the_scratch_ignore_rules_idempotently(tmp_path: Path):
     assert text.count("# factory:begin") == 1
     assert "node_modules/" in text  # the project's own rules survive
     assert ".factory/work-items/*/runs/" in text
-    assert ".factory/work-items/*/review-packets/" in text
 
 
 def test_install_keeps_factory_bookkeeping_out_of_the_review_surface(tmp_path: Path):

@@ -2,9 +2,9 @@
 
 **Memory** is anything nothing else holds — the specs, the checklist, the review
 conversation, the decisions a human made. **Scratch** is anything the engine can
-rebuild or that has no reader left: per-run briefs, station scratchpads, and gate
-renders nobody decided against. Only memory is committed, and only memory survives
-an item finishing.
+rebuild or that has no reader left: per-run briefs and station scratchpads (working
+notes, council memos, verification transcripts). Only memory is committed, and only
+memory survives an item finishing.
 
 Two rules make the sweep safe to run unattended: a file is kept because the item
 **registered it as an artifact** (never because of its name), and any path
@@ -17,9 +17,7 @@ from pathlib import Path
 
 from .model import WorkItem
 
-# `decisions/` is deliberately absent: a promoted gate render is the record of a
-# call a human made, and nothing else holds it.
-SCRATCH_DIRS = ("runs", "review-packets")
+SCRATCH_DIRS = ("runs",)
 
 
 class SweepError(Exception):

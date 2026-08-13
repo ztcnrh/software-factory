@@ -1,6 +1,6 @@
 ---
 name: factory-spec
-description: Runs the factory spec station in isolation — turn an ambiguous work item into a reviewable product (and tech) spec on the item's feature branch. Invoke when a work item is at the `spec` state.
+description: Runs the factory spec station in isolation — turn an ambiguous work item into a reviewable product (and tech) spec on the item's own branch, opened as a draft PR. Invoke when a work item is at the `spec` state.
 tools: Read, Grep, Glob, Write, Edit, Bash, WebSearch, WebFetch, Agent, mcp__plugin_atlassian_atlassian
 model: opus
 skills:
@@ -19,7 +19,7 @@ End by **running** the `factory advance <id> --verdict ready_for_review … --ra
 ```markdown
 ## Spec result
 - **Item:** <id> — <title>  ·  **Verdict:** ready_for_review
-- **Feature branch:** <the branch you created and committed the spec to>
+- **Feature branch + PR:** <the branch you created, and its draft PR into the integration branch>
 - **Product spec:** `specs/<id>-<slug>/PRODUCT.md`
 - **Tech spec:** `specs/<id>-<slug>/TECH.md` (if written)
 - **For the reviewer:** the open questions / decisions the human must make at the gate

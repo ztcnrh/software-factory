@@ -98,22 +98,34 @@ def compose(
         "",
         f"- **Item:** {item.id} — {item.title}",
         f"- **Risk:** {item.risk}"
-        + (f"  ·  **Labels:** {classifiers.mark(item.labels)}" if item.labels else ""),
+        + (
+            f"  ·  **Classifiers:** {classifiers.mark(item.classifiers)}"
+            if item.classifiers
+            else ""
+        ),
         # Shown at the moment a station picks a label — what stops `docs-update`
         # and `doc-update` becoming two terms for one idea.
         f"- **Classifiers in use:** {', '.join(classifiers.names)} "
-        "(anything else is recorded but matches no gate policy — propose additions to "
-        "`classifiers.yml` rather than coining a near-duplicate)",
+        "(anything else is recorded and flagged, and matches no gate policy until a human "
+        "promotes it — coin a new one when it names a kind of work this list is missing, "
+        "never a synonym for a term already on it)",
     ]
     if item.parent:
         lines.append(f"- **Parent:** {item.parent}")
     if item.source_ref:
         lines.append(f"- **Source:** {item.source} {item.source_ref}")
     if item.branch:
-        lines.append(f"- **Feature branch:** `{item.branch}` — the item's branch; the spec and "
-                     "every implementation pass land here")
-    if item.pr:
-        lines.append(f"- **Open change PR:** {item.pr}")
+        lines.append(
+            f"- **Feature branch:** `{item.branch}`"
+            + (f" — PR {item.pr} into the integration branch" if item.pr else "")
+            + " · the item's unit of delivery; everything it produces lands here"
+        )
+    if item.change_branch:
+        lines.append(
+            f"- **Change branch:** `{item.change_branch}`"
+            + (f" — PR {item.change_pr} into the feature branch" if item.change_pr else "")
+            + " · the implementation pass in flight"
+        )
     if action.last_return:
         lines.append(f"- **Routed here by:** {action.last_return}")
     body = item.body.strip() or "_(no body — the title is the whole request)_"

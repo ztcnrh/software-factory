@@ -94,7 +94,7 @@ def test_policy_list_and_reinstate_flow(factory_root: Path, capsys):
                 "version": 1,
                 "rules": [
                     {"id": "r-docs", "gate": "spec_review", "decision": "approved",
-                     "when": {"labels_any": ["docs"]}, "approved_by": "johndoe"},
+                     "when": {"classifiers_any": ["docs"]}, "approved_by": "johndoe"},
                     {"id": "r-dormant", "gate": "ship_review", "decision": "approved",
                      "when": "all", "approved_by": None},
                 ],
@@ -214,34 +214,22 @@ def test_gate_requires_a_decision_or_an_open(factory_root: Path, capsys):
     assert "--decision is required" in capsys.readouterr().err
 
 
-def test_gate_packet_flag_requires_open(factory_root: Path, capsys):
-    """--packet outside --bind would be silently dropped; the caller meant to
-    bind a review, so say so."""
-    item_id = _item_at(factory_root, "spec_review")
-    rc = main(
-        ["--root", str(factory_root), "gate", item_id, "--decision", "approved",
-         "--packet", "nowhere.md"]
-    )
-    assert rc == 1
-    assert "--packet only means something with --bind" in capsys.readouterr().err
-
-
-def test_labels_repo_without_github_is_rejected(factory_root: Path, capsys):
+def test_github_labels_repo_without_github_is_rejected(factory_root: Path, capsys):
     """--repo is only ever forwarded to `gh label create`, so without --github it
     would be silently dropped while the command still exited 0 — the caller asked
     to touch a specific repo and must not be told nothing happened."""
-    rc = main(["--root", str(factory_root), "labels", "--repo", "owner/name"])
+    rc = main(["--root", str(factory_root), "github-labels", "--repo", "owner/name"])
     assert rc == 1
     assert "--repo only means something with --github" in capsys.readouterr().err
 
 
-def test_labels_lists_without_touching_github(factory_root: Path, capsys):
-    """A bare `factory labels` stays a read-only inspect (the CLI's convention for
+def test_github_labels_list_without_touching_github(factory_root: Path, capsys):
+    """A bare `factory github-labels` stays a read-only inspect (the CLI's convention for
     status/metrics/doctor) — it prints the set and points at --github to create."""
     (factory_root / "github-labels.yml").write_text(
         "labels:\n  - name: factory:triage\n    color: ededed\n    description: In triage\n"
     )
-    rc = main(["--root", str(factory_root), "labels"])
+    rc = main(["--root", str(factory_root), "github-labels"])
     assert rc == 0
     out = capsys.readouterr().out
     assert "factory:triage" in out
@@ -249,7 +237,7 @@ def test_labels_lists_without_touching_github(factory_root: Path, capsys):
 
 
 def test_gate_bind_decide_drift_flow_end_to_end(factory_root: Path, capsys):
-    """The full CLI arc: open binds (with a packet file), a post-review edit is
+    """The full CLI arc: --bind records what is under review, a post-review edit is
     refused with the culprit named, and --accept-drift records it — the codex
     TOCTOU guard as an operator actually drives it."""
     d = Dispatcher(factory_root)
@@ -258,12 +246,8 @@ def test_gate_bind_decide_drift_flow_end_to_end(factory_root: Path, capsys):
     item.artifacts = ["evidence.md"]
     d.store.save(item)
     (factory_root / "evidence.md").write_text("all tests green")
-    packet = factory_root / "packet.md"
-    packet.write_text("# Review packet\nAll good.")
 
-    rc = main(
-        ["--root", str(factory_root), "gate", item.id, "--bind", "--packet", str(packet)]
-    )
+    rc = main(["--root", str(factory_root), "gate", item.id, "--bind"])
     assert rc == 0
     assert "still waits on the human" in capsys.readouterr().out
 
@@ -373,10 +357,10 @@ def test_advance_label_flag_lands_on_the_item(factory_root: Path):
     item_id = _item_at(factory_root, "triage")
     rc = main(
         ["--root", str(factory_root), "advance", item_id,
-         "--verdict", "needs_spec", "--label", "read-only", "--label", "docs"]
+         "--verdict", "needs_spec", "--classifier", "read-only", "--classifier", "docs"]
     )
     assert rc == 0
-    assert Dispatcher(factory_root).store.load(item_id).labels == ["read-only", "docs"]
+    assert Dispatcher(factory_root).store.load(item_id).classifiers == ["read-only", "docs"]
 
 
 def test_advance_label_conflicts_with_report(factory_root: Path, capsys):
@@ -387,10 +371,10 @@ def test_advance_label_conflicts_with_report(factory_root: Path, capsys):
     report.write_text(json.dumps({"station": "triage", "verdict": "needs_spec"}))
     rc = main(
         ["--root", str(factory_root), "advance", item_id,
-         "--report", str(report), "--label", "read-only"]
+         "--report", str(report), "--classifier", "read-only"]
     )
     assert rc == 1
-    assert "--label" in capsys.readouterr().err
+    assert "--classifier" in capsys.readouterr().err
 
 
 def test_advance_report_conflicts_with_inline_flags(factory_root: Path, capsys):

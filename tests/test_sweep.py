@@ -1,5 +1,5 @@
-"""The artifact lifecycle: one brief per state, promoted decisions, and the sweep
-that tells memory from scratch."""
+"""The artifact lifecycle: one brief per state, gate bindings, and the sweep that
+tells memory from scratch."""
 
 from pathlib import Path
 
@@ -8,7 +8,7 @@ import pytest
 from factory import brief as brief_mod
 from factory import sweep as sweep_mod
 from factory.cli import main
-from factory.dispatch import Dispatcher
+from factory.dispatch import Dispatcher, GateDriftError
 from factory.model import GateDecision, StationReport, WorkItem
 
 
@@ -17,13 +17,11 @@ def _home(root: Path, item_id: str) -> Path:
 
 
 def _scratch(root: Path, item: WorkItem) -> None:
-    """The scratch a real run leaves behind: a brief, a scratchpad file, a render."""
+    """The scratch a real run leaves behind: a brief and a scratchpad file."""
     home = _home(root, item.id)
     (home / "runs" / "scratchpad").mkdir(parents=True, exist_ok=True)
     (home / "runs" / "verify-brief.md").write_text("# brief")
     (home / "runs" / "scratchpad" / "partial.md").write_text("halfway through")
-    (home / "review-packets").mkdir(parents=True, exist_ok=True)
-    (home / "review-packets" / "ship_review-1.md").write_text("# packet")
 
 
 # --- one brief per state ----------------------------------------------------
@@ -101,74 +99,34 @@ def test_the_latest_review_conversation_wins(factory_root: Path):
 # --- promotion and sweeping -------------------------------------------------
 
 
-def test_a_decision_promotes_the_render_it_was_bound_to(factory_root: Path):
-    """A packet is a render — rebuildable, so not worth keeping — right up until a
-    human decides against it. Then it's the record of what they were looking at."""
+def test_a_binding_covers_both_of_the_items_prs(factory_root: Path):
+    """The ship gate reviews the item's PR and the pass's PR together, so a change
+    to either after the human reviewed has to be caught — binding only the first
+    would let a re-pushed implementation pass slip under an approval."""
     d = Dispatcher(factory_root)
     item = d.new_item("Feature")
     item.state = "ship_review"
+    item.pr = "#41"
+    item.change_pr = "#42"
     d.store.save(item)
-    home = _home(factory_root, item.id)
-    (home / "review-packets").mkdir(parents=True, exist_ok=True)
-    rel = f".factory/work-items/{item.id}/review-packets/ship_review-1.md"
-    (factory_root / rel).write_text("# what the human read")
-    d.bind_gate(item, by="tianchi", packet=rel)
-    d.gate(item, GateDecision(gate="ship_review", decision="approved", by="tianchi"))
-    promoted = home / "decisions" / "ship_review-1.md"
-    assert promoted.read_text() == "# what the human read"
-    assert str(promoted.relative_to(factory_root)) in item.metadata["decisions"]
+    d.bind_gate(item, by="tianchi")
+    item.change_pr = "#43"  # a new pass opened under the review
+    with pytest.raises(GateDriftError, match="change pr"):
+        d.gate(item, GateDecision(gate="ship_review", decision="approved", by="tianchi"))
 
 
-def test_binding_a_packet_resolves_it_against_the_factory_root(factory_root: Path, monkeypatch):
-    """Regression: `--bind --packet` checked the path against the process's CWD
-    while the engine hashes and promotes it relative to --root, so binding failed
-    on a valid path whenever the two differed. Caught driving the real CLI."""
-    d = Dispatcher(factory_root)
-    item = d.new_item("Feature")
-    item.state = "ship_review"
-    d.store.save(item)
-    rel = f".factory/work-items/{item.id}/review-packets/ship_review-1.md"
-    (factory_root / rel).parent.mkdir(parents=True, exist_ok=True)
-    (factory_root / rel).write_text("# packet")
-    monkeypatch.chdir(factory_root.parent)  # drive from anywhere but the root
-    assert main(["--root", str(factory_root), "gate", item.id, "--bind", "--packet", rel]) == 0
-
-
-def test_an_undecided_render_is_swept_and_a_promoted_one_is_kept(factory_root: Path):
-    """The rule that makes the whole split work: only what a decision bound to is
-    durable, so an abandoned render costs nothing and a real one survives."""
-    d = Dispatcher(factory_root)
-    item = d.new_item("Feature")
-    item.state = "ship_review"
-    d.store.save(item)
-    home = _home(factory_root, item.id)
-    (home / "review-packets").mkdir(parents=True, exist_ok=True)
-    (home / "review-packets" / "ship_review-1.md").write_text("# superseded, never decided")
-    rel = f".factory/work-items/{item.id}/review-packets/ship_review-2.md"
-    (factory_root / rel).write_text("# the one they read")
-    d.bind_gate(item, by="t", packet=rel)
-    d.gate(item, GateDecision(gate="ship_review", decision="park", by="t", notes="later"))
-    assert item.state == "parked"  # terminal → swept automatically
-    assert not (home / "review-packets").exists()
-    assert (home / "decisions" / "ship_review-2.md").read_text() == "# the one they read"
-
-
-def test_a_binding_from_another_gate_promotes_nothing(factory_root: Path):
-    """A leftover binding was already treated as stale for drift; it must be stale
-    for promotion too, or the record of "what the human approved at the ship gate"
-    would be a render they read at the spec gate."""
+def test_a_binding_from_another_gate_is_ignored(factory_root: Path):
+    """A leftover binding describes a different review, so it must not drift-check
+    this one — otherwise a spec-gate binding could refuse a valid ship decision."""
     d = Dispatcher(factory_root)
     item = d.new_item("Feature")
     item.state = "spec_review"
+    item.pr = "#41"
     d.store.save(item)
-    rel = f".factory/work-items/{item.id}/review-packets/spec_review-1.md"
-    (factory_root / rel).parent.mkdir(parents=True, exist_ok=True)
-    (factory_root / rel).write_text("# the spec packet")
-    d.bind_gate(item, by="t", packet=rel)
+    d.bind_gate(item, by="t")
     item.state = "ship_review"  # the binding is now from a gate we've moved past
-    d.gate(item, GateDecision(gate="ship_review", decision="approved", by="t"))
-    assert not (_home(factory_root, item.id) / "decisions").exists()
-    assert "decisions" not in item.metadata
+    item.pr = "#99"  # would be drift, if the stale binding still counted
+    assert d.gate(item, GateDecision(gate="ship_review", decision="approved", by="t")) == "deploy"
 
 
 def test_the_sweep_keeps_every_registered_artifact(factory_root: Path):
@@ -193,7 +151,7 @@ def test_the_sweep_reports_what_it_removed_and_is_idempotent(factory_root: Path)
     item = d.new_item("Feature")
     _scratch(factory_root, item)
     removed = sweep_mod.run(factory_root, item)
-    assert len(removed) == 3 and all(line.startswith("removed: ") for line in removed)
+    assert len(removed) == 2 and all(line.startswith("removed: ") for line in removed)
     assert sweep_mod.run(factory_root, item) == []
 
 
@@ -204,7 +162,7 @@ def test_the_sweep_dry_run_removes_nothing(factory_root: Path):
     item = d.new_item("Feature")
     _scratch(factory_root, item)
     lines = sweep_mod.run(factory_root, item, dry_run=True)
-    assert len(lines) == 3 and all(line.startswith("would remove: ") for line in lines)
+    assert len(lines) == 2 and all(line.startswith("would remove: ") for line in lines)
     assert (_home(factory_root, item.id) / "runs" / "verify-brief.md").exists()
 
 

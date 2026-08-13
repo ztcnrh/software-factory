@@ -9,10 +9,10 @@ from factory.policies import Policies, PolicyError, PolicyState
 from factory.retro import briefing
 
 
-def _item(labels: list[str] | None = None, **kw) -> WorkItem:
+def _item(classifiers: list[str] | None = None, **kw) -> WorkItem:
     item = WorkItem(id="WI-0001", title="t", **kw)
-    for name in labels or []:
-        item.add_label(name, by="triage")
+    for name in classifiers or []:
+        item.add_classifier(name, by="triage")
     return item
 
 
@@ -26,13 +26,13 @@ def test_dormant_rule_is_ignored():
                     "id": "r",
                     "gate": "spec_review",
                     "decision": "approved",
-                    "when": {"labels_any": ["docs"]},
+                    "when": {"classifiers_any": ["docs"]},
                     "approved_by": None,
                 }
             ]
         }
     )
-    assert pol.auto_decision("spec_review", _item(labels=["docs"], risk="low")) is None
+    assert pol.auto_decision("spec_review", _item(classifiers=["docs"], risk="low")) is None
 
 
 def test_approved_rule_respects_labels_gate_and_risk_ceiling():
@@ -42,13 +42,13 @@ def test_approved_rule_respects_labels_gate_and_risk_ceiling():
         "id": "r",
         "gate": "spec_review",
         "decision": "approved",
-        "when": {"labels_any": ["docs"], "max_risk": "low"},
+        "when": {"classifiers_any": ["docs"], "max_risk": "low"},
         "approved_by": "johndoe",
     }
     pol = Policies({"rules": [rule]})
-    assert pol.auto_decision("spec_review", _item(labels=["docs"], risk="low")) == rule
-    assert pol.auto_decision("spec_review", _item(labels=["docs"], risk="high")) is None
-    assert pol.auto_decision("ship_review", _item(labels=["docs"], risk="low")) is None
+    assert pol.auto_decision("spec_review", _item(classifiers=["docs"], risk="low")) == rule
+    assert pol.auto_decision("spec_review", _item(classifiers=["docs"], risk="high")) is None
+    assert pol.auto_decision("ship_review", _item(classifiers=["docs"], risk="low")) is None
 
 
 def test_approved_policy_clears_gate_with_no_human_touch(factory_root: Path):
@@ -65,7 +65,7 @@ def test_approved_policy_clears_gate_with_no_human_touch(factory_root: Path):
                         "id": "auto-docs-spec",
                         "gate": "spec_review",
                         "decision": "approved",
-                        "when": {"labels_any": ["docs"], "max_risk": "low"},
+                        "when": {"classifiers_any": ["docs"], "max_risk": "low"},
                         "approved_by": "johndoe",
                     }
                 ],
@@ -73,7 +73,7 @@ def test_approved_policy_clears_gate_with_no_human_touch(factory_root: Path):
         )
     )
     d = Dispatcher(factory_root)
-    item = d.new_item("Docs change", labels=["docs"], risk="low")
+    item = d.new_item("Docs change", classifiers=["docs"], risk="low")
     d.advance(item, StationReport(station="triage", verdict="needs_spec"))
     d.advance(item, StationReport(station="spec", verdict="ready_for_review"))
     assert item.state == "spec_review"
@@ -99,7 +99,7 @@ def _write_docs_rule(factory_root: Path) -> None:
                         "id": "auto-docs-spec",
                         "gate": "spec_review",
                         "decision": "approved",
-                        "when": {"labels_any": ["docs"], "max_risk": "low"},
+                        "when": {"classifiers_any": ["docs"], "max_risk": "low"},
                         "approved_by": "johndoe",
                     }
                 ],
@@ -109,7 +109,7 @@ def _write_docs_rule(factory_root: Path) -> None:
 
 
 def _auto_clear_to_implement(d: Dispatcher) -> WorkItem:
-    item = d.new_item("Docs change", labels=["docs"], risk="low")
+    item = d.new_item("Docs change", classifiers=["docs"], risk="low")
     d.advance(item, StationReport(station="triage", verdict="needs_spec"))
     d.advance(item, StationReport(station="spec", verdict="ready_for_review"))
     rule = d.active_auto_rule("spec_review", item)
@@ -132,7 +132,7 @@ def test_a_steer_on_an_auto_cleared_item_suspends_the_rule(factory_root: Path):
     assert "auto-docs-spec" in d.policy_state.suspended()
     assert any("suspended" in (e.note or "") for e in item.history)
 
-    second = d.new_item("Another docs change", labels=["docs"], risk="low")
+    second = d.new_item("Another docs change", classifiers=["docs"], risk="low")
     d.advance(second, StationReport(station="triage", verdict="needs_spec"))
     d.advance(second, StationReport(station="spec", verdict="ready_for_review"))
     assert d.next_action(second).type == "human_gate"  # the gate is human again
@@ -160,7 +160,7 @@ def test_reinstate_rearms_a_suspended_rule(factory_root: Path):
     _write_docs_rule(factory_root)
     d = Dispatcher(factory_root)
     d.policy_state.suspend("auto-docs-spec", "WI-0001", "steer at ship_review")
-    item = d.new_item("Docs change", labels=["docs"], risk="low")
+    item = d.new_item("Docs change", classifiers=["docs"], risk="low")
     d.advance(item, StationReport(station="triage", verdict="needs_spec"))
     d.advance(item, StationReport(station="spec", verdict="ready_for_review"))
     assert d.next_action(item).type == "human_gate"
@@ -252,13 +252,13 @@ def test_when_all_is_a_deliberate_match_everything():
     rule = _rule(when="all", approved_by="johndoe")
     pol = Policies({"rules": [rule]})
     assert pol.auto_decision("spec_review", _item(risk="high")) == rule
-    assert pol.auto_decision("spec_review", _item(labels=[], risk="unknown")) == rule
+    assert pol.auto_decision("spec_review", _item(classifiers=[], risk="unknown")) == rule
 
 
-def test_labels_all_requires_every_listed_label():
-    """`labels_all` (the newly-documented key) matches only when the item carries
-    every listed label — a stricter conjunction than `labels_any`."""
-    rule = _rule(when={"labels_all": ["docs", "chore"]}, approved_by="johndoe")
+def test_classifiers_all_requires_every_listed_label():
+    """`classifiers_all` (the newly-documented key) matches only when the item carries
+    every listed label — a stricter conjunction than `classifiers_any`."""
+    rule = _rule(when={"classifiers_all": ["docs", "chore"]}, approved_by="johndoe")
     pol = Policies({"rules": [rule]})
-    assert pol.auto_decision("spec_review", _item(labels=["docs", "chore"])) == rule
-    assert pol.auto_decision("spec_review", _item(labels=["docs"])) is None
+    assert pol.auto_decision("spec_review", _item(classifiers=["docs", "chore"])) == rule
+    assert pol.auto_decision("spec_review", _item(classifiers=["docs"])) is None

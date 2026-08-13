@@ -154,12 +154,12 @@ def test_station_report_spawns_child_at_triage(factory_root: Path):
 def test_advance_labels_are_additive_and_deduped(factory_root: Path):
     """A station classifies via labels the gate policies match on; the merge must be
     append-only (never wipe intake or earlier-station labels) and dedup, so a policy
-    keyed on `labels_any` has a durable channel to be fed. Regression: triage's skill
+    keyed on `classifiers_any` has a durable channel to be fed. Regression: triage's skill
     told it to 'add labels' when advance had no label channel at all."""
     d = Dispatcher(factory_root)
-    item = d.new_item("Read-only endpoint", risk="low", labels=["intake"])
-    _advance(d, item, "needs_spec", labels=["read-only", "intake"])
-    assert item.labels == ["intake", "read-only"]  # existing kept, new added, no duplicate
+    item = d.new_item("Read-only endpoint", risk="low", classifiers=["intake"])
+    _advance(d, item, "needs_spec", classifiers=["read-only", "intake"])
+    assert item.classifiers == ["intake", "read-only"]  # existing kept, new added, no duplicate
 
 
 def test_park_is_terminal_but_revivable(factory_root: Path):
@@ -444,7 +444,7 @@ def test_binding_a_gate_and_a_clean_decision_consumes_the_binding(factory_root: 
     spec.write_text("v1")
     d = Dispatcher(factory_root)
     item = _to_spec_review(d, artifacts=["spec.md"])
-    d.bind_gate(item, by="alice", packet=None)
+    d.bind_gate(item, by="alice")
     assert item.metadata["gate_binding"]["gate"] == "spec_review"
     d.gate(item, GateDecision(gate="spec_review", decision="approved", by="alice"))
     assert item.state == "implement"

@@ -42,6 +42,6 @@ Or let your agent drive it: in a Claude Code session in this repo, say *"install
 2. `factory init` in your repo — validates config, creates state dirs.
 3. **Commit the installed files.** `.claude/` and `.factory/` are dot-directories — some IDE file explorers hide them by default, so check they're visible and *not* gitignored. They're meant to live in version control: `.factory/` is the factory's durable memory, and `.claude/` skills evolve as the retro station learns — the repo history is both the audit trail and your revert path.
 4. `factory new "..."` then `/factory` in Claude Code — drive the line.
-5. (Optional) `factory labels --github` — create the conveyor labels in GitHub.
+5. (Optional) `factory github-labels --github` — create the conveyor labels in GitHub.
 
 The local source of truth is `.factory/`. GitHub is an optional mirror; the cloud workflows are off until you rename them, add an `ANTHROPIC_API_KEY` secret, and set the `FACTORY_TOOLKIT_GIT` repo variable they install the CLI from (see `docs/CLOUD-AUTONOMY.md`).

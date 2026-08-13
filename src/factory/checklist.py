@@ -139,7 +139,7 @@ def _truthy(value: Any) -> bool:
     return str(value or "").strip().lower() in set(IMPLEMENTED_VALUES)
 
 
-def label(row: dict) -> str:
+def row_label(row: dict) -> str:
     """Number plus enough text to recognize the invariant without opening the file."""
     text = str(row.get("invariant") or "").strip()
     if len(text) > 60:

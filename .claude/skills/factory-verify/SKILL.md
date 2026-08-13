@@ -13,7 +13,7 @@ You are the **verification station**. Code review reads the diff; you check the 
 
 ## Verify
 
-Work on the item's **feature branch** (its `branch` field, shown in your brief) — the passed change has already been merged into it, so that branch is the whole item as it would ship, not one pass of it. Check it out before you run anything.
+Check out the item's **change branch** (`change_branch` in your brief) before you run anything — it was cut from the feature branch, so it carries the spec, the code, and any spec edits the implementer made: the whole package as it would ship. (An `automatable` item has no change branch; use `branch`.) Nothing has been merged, and nothing will be until the human decides at the ship gate.
 
 `specs/<id>-<slug>/CHECKLIST.md` is your worklist and your report. One row per in-scope invariant; code review has filled **Implemented** by reading. You fill **Holds**, by running — and the engine will refuse a `verified` verdict while any row is blank, so every row gets an answer.
 
@@ -38,7 +38,7 @@ Each row's **Holds** is exactly one of:
 
 `blocked` and `accepted` are honest answers, not failures — a row you couldn't reach costs nothing to say so, and the ship gate shows the human exactly which invariants they're taking on trust. The only dishonest row is a blank one. Use `blocked` rather than `accepted` whenever the reason is environmental: the human can clear it and send the item straight back for re-verification, which is cheap, and it's also the signal a retro needs to fix the access gap for good.
 
-The row's **Evidence** column is free prose the engine never parses — the command you ran, the output you saw, or a pointer into a longer transcript. Keep it to what fits a cell. When a run produces more than that (a full transcript, logs, screenshots), write it beside the spec as `specs/<id>-<slug>/VERIFY-EVIDENCE.md` with numbered entries, point the cells at those numbers, and register it with `--artifact` — otherwise the sweep is right to treat it as scratch.
+The row's **Evidence** column is free prose the engine never parses — the command you ran, the output you saw, the invariant it proves. It is also the only part of your run that outlives the item, because `CHECKLIST.md` is committed and nothing else you write is. So **make every cell stand on its own**: "`todo list --overdue` → 1 row, WI-3 (due 2026-08-01)" is evidence; "verified, see transcript" is a pointer to nothing. When a run produces more than a cell can hold (a long transcript, logs), keep it in `runs/scratchpad/verify-evidence.md` and cite the entry number — the human can open it at the gate, and it's swept when the item finishes, which is why the cell can't lean on it. For a screenshot or recording, comment it on the change PR and point the cell at that URL: the PR is where the human already is, and it survives a cloud run's checkout being thrown away.
 
 ### When you're re-running under `recheck`
 
@@ -50,15 +50,15 @@ Scope it to what the gate decision named (your brief carries it under **Routed h
 ```
 factory advance <id> --verdict verified \
   --summary "<what you confirmed + evidence pointer>" \
-  [--notes "<per-invariant evidence: 1) ... 2) ...>"] \
-  --artifact <screenshot/log path> --confidence <0..1>
+  [--notes "<what the checklist can't hold: blocked rows, judgment calls>"] \
+  --artifact specs/<id>-<slug>/CHECKLIST.md --confidence <0..1>
 # or, if behavior doesn't match the spec:
 factory advance <id> --verdict failed \
   --summary "<criterion that failed + observed vs expected>" \
   [--notes "<per-invariant results, including the ones that passed>"] \
-  [--artifact <failure evidence path>] --confidence <0..1>
+  --artifact specs/<id>-<slug>/CHECKLIST.md --confidence <0..1>
 ```
-Register the checklist with `--artifact` if it isn't on the item already. Both verdicts route to the **ship_review** human gate (the human sees your evidence and decides). `verified` means "I confirmed it works"; `failed` means "I confirmed it doesn't" — say which invariant and what you actually observed.
+The checklist is the only file you register — everything else you wrote is scratch. **Commit your filled rows to the change branch and push**, then register the checklist with `--artifact` if it isn't on the item already — an uncommitted column survives only because this run happened to share a checkout, and a cloud run won't. Both verdicts route to the **ship_review** human gate (the human sees your evidence and decides). `verified` means "I confirmed it works"; `failed` means "I confirmed it doesn't" — say which invariant and what you actually observed.
 
 With the checklist filled in, per-invariant evidence lives in the file, so keep `--summary` to the headline and `--notes` to what the file can't hold. If any row is `blocked`, say which and what would unblock it: the human can resolve it and send the item back for re-verification alone (`--decision recheck`), which costs one station run instead of a rebuild.
 

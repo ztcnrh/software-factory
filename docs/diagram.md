@@ -1,6 +1,6 @@
 # The factory loop
 
-This is the line encoded in [`line.yml`](../line.yml). **Stations are blue rectangles** (`deploy` is green-tinted because it's external — post-merge CI/CD, not an agent — and green means shipped), **human gates are soft-yellow ✋ diamonds**, **terminals are cylinders**. Solid green edges are the forward happy path; thin gray dashed edges are everything off it — the backward loops the learning loop tries to eliminate, plus the `park` shelving edges. `ship_review` approval means *merging the PR*, which triggers the post-merge CI/CD `deploy` — a green deploy (health-wait baked in) is the ship point, so the item is *done* when it ships. Continuous monitoring is deferred; new work arrives via `factory new` or the **`factory intake`** sensor, which files GitHub issues labeled `intake` into triage (see [OPTIMIZATION-AREAS.md](OPTIMIZATION-AREAS.md)).
+This is the line encoded in [`line.yml`](../line.yml). **Stations are blue rectangles** (`deploy` is green-tinted because it's external — post-merge CI/CD, not an agent — and green means shipped), **human gates are soft-yellow ✋ diamonds**, **terminals are cylinders**. Solid green edges are the forward happy path; thin gray dashed edges are everything off it — the backward loops the learning loop tries to eliminate, plus the `park` shelving edges. `ship_review` approval is the human's go-ahead; **they** merge the item's PR, and that merge triggers the post-merge CI/CD `deploy` — a green deploy (health-wait baked in) is the ship point, so the item is *done* when it ships. No station or driver ever merges. Continuous monitoring is deferred; new work arrives via `factory new` or the **`factory intake`** sensor, which files GitHub issues labeled `intake` into triage (see [OPTIMIZATION-AREAS.md](OPTIMIZATION-AREAS.md)).
 
 A pre-rendered copy lives at [`diagram.png`](diagram.png) — regenerate it with `scripts/render-diagram.sh` after editing the diagram below.
 
@@ -17,7 +17,7 @@ flowchart TD
     impl --> review[Code-review station]:::station
     review -- "pass" --> verify[Verification station]:::station
     verify -- "verified" --> shiprev{✋ Ready to ship?}:::gate
-    shiprev -- "approved = merge PR" --> deploy[Deploy · post-merge CI/CD]:::external
+    shiprev -- "approved · human merges" --> deploy[Deploy · post-merge CI/CD]:::external
     deploy -- "succeeded" --> done[(Done)]
     triage -- "needs human clarification" --> clar{✋ Human clarification}:::gate
     clar -- "provided" --> triage

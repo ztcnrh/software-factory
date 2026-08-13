@@ -145,10 +145,9 @@ _GIT_BLOCK_END = "# factory:end"
 
 GITIGNORE_BLOCK = (
     f"{_GIT_BLOCK_BEGIN}\n"
-    "# Factory scratch: rebuildable, so not worth committing. A gate render is\n"
-    "# scratch until a decision binds to it; that promotes it to decisions/, kept.\n"
+    "# Factory scratch: station briefs and scratchpads, rebuildable with\n"
+    "# `factory brief`, so not worth committing.\n"
     ".factory/work-items/*/runs/\n"
-    ".factory/work-items/*/review-packets/\n"
     f"{_GIT_BLOCK_END}\n"
 )
 

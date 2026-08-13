@@ -11,8 +11,9 @@
 #   implement -> code_review -> verify -> ship_review(human) -> deploy -> done
 #
 # An item lives on one feature branch: the spec is committed there and each
-# implementation pass merges into it. `ship_review` approval merges that branch
-# into the integration branch, which triggers the project's post-merge CI/CD
+# implementation pass is PR'd into it. The factory never merges — `ship_review`
+# approval clears the human to merge that feature branch into the integration
+# branch themselves, which triggers the project's post-merge CI/CD
 # (build + deploy, with a health-wait baked in). `deploy` is the single external
 # station that watches that workflow: green == shipped -> done.
 # Continuous monitoring + auto-spawn is deferred (see docs/OPTIMIZATION-AREAS.md);
@@ -105,7 +106,7 @@ routing:
     verified: ship_review
     failed: ship_review            # verification output always goes to the human gate
   ship_review:
-    approved: deploy               # approve == merge the PR, which kicks off CI/CD
+    approved: deploy               # approved; the human's own merge kicks off CI/CD
     not_ready: code_review         # the diagram's "Not ready" loop — something's wrong with the code
     recheck: verify                # nothing's wrong with the code: the human cleared a blocker
                                    # verification hit (access, an environment) and sends it back
