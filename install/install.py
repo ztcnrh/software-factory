@@ -550,23 +550,44 @@ def uninstall(target: Path, prior: dict | None, dry: bool) -> int:
 
 
 def copy(src: Path, dst: Path, force: bool, dry: bool = False) -> str:
-    if dst.exists() and not force:
+    """Copy one shipped path into the target.
+
+    The return verb is load-bearing: only `copied:` feeds the manifest's `created`
+    list, so `--force` overwriting a path that was already there reports
+    `overwrote:` instead. Otherwise force-installing into a repo that happens to
+    own a same-named path (a `templates/` of its own) would enrol it as
+    factory-created, and uninstall would take the user's files with it."""
+    existed = dst.exists()
+    if existed and not force:
         return f"skip (exists): {dst}"
     if dry:
-        return f"would copy: {dst}"
+        return f"would {'overwrite' if existed else 'copy'}: {dst}"
     dst.parent.mkdir(parents=True, exist_ok=True)
     if src.is_dir():
         shutil.copytree(src, dst, dirs_exist_ok=True)
     else:
         shutil.copy2(src, dst)
-    return f"copied: {dst}"
+    return f"overwrote: {dst}" if existed else f"copied: {dst}"
+
+
+# The factory's own hook entries are recognised by the scripts they run — the one
+# stable marker in a Claude Code hook entry, which carries no name or id of its own.
+_HOOK_MARKERS = ("factory_board.py", "record_intervention.py")
+
+
+def _is_factory_hook(entry: object) -> bool:
+    return any(m in json.dumps(entry) for m in _HOOK_MARKERS)
 
 
 def merge_settings(target: Path, dry: bool = False) -> str:
     """Merge the factory's hooks + permission allowlist into the repo's existing
     settings.json rather than clobbering it. settings.json is shared real estate
     (the project's own hooks/permissions live there too), so even --force never
-    replaces it wholesale — the merge already refreshes the factory's entries."""
+    replaces it wholesale — the merge already refreshes the factory's entries.
+
+    Hooks merge *within* each event, not by replacing it: a repo with its own
+    `SessionStart` hook keeps it and gains ours. Replacing the event wholesale
+    silently deleted the project's hook on a plain install."""
     src = FACTORY / ".claude" / "settings.json"
     dst = target / ".claude" / "settings.json"
     new = json.loads(src.read_text())
@@ -583,7 +604,14 @@ def merge_settings(target: Path, dry: bool = False) -> str:
     for a in new.get("permissions", {}).get("allow", []):
         if a not in allow:
             allow.append(a)
-    existing.setdefault("hooks", {}).update(new.get("hooks", {}))
+    hooks = existing.setdefault("hooks", {})
+    for event, incoming in (new.get("hooks") or {}).items():
+        current = hooks.get(event)
+        current = current if isinstance(current, list) else []
+        incoming = incoming if isinstance(incoming, list) else [incoming]
+        # Drop our previous entries before re-adding, so a reinstall refreshes
+        # rather than stacking a second copy of the same hook.
+        hooks[event] = [e for e in current if not _is_factory_hook(e)] + incoming
     dst.write_text(json.dumps(existing, indent=2) + "\n")
     return f"merged: {dst}"
 
@@ -598,10 +626,13 @@ def _hollow(value: object) -> bool:
 
 
 def unmerge_settings(target: Path, dry: bool) -> str | None:
-    """Reverse merge_settings: remove the factory's own hook groups, permission
+    """Reverse merge_settings: remove the factory's own hook entries, permission
     entries, and comment from the repo's settings.json, leaving everything else
     untouched. If nothing but empty husks remain (we created the file and the
-    user never added to it), remove the file itself."""
+    user never added to it), remove the file itself.
+
+    Hooks are removed entry by entry, matching how they were merged — an event
+    the project also hooks keeps its own entries and simply loses ours."""
     dst = target / ".claude" / "settings.json"
     if not dst.exists():
         return None
@@ -614,15 +645,33 @@ def unmerge_settings(target: Path, dry: bool) -> str | None:
             allow.remove(a)
             changed = True
     hooks = cur.get("hooks", {})
-    for k, v in fact.get("hooks", {}).items():
-        if hooks.get(k) == v:
-            del hooks[k]
-            changed = True
+    for event in list(fact.get("hooks") or {}):
+        current = hooks.get(event)
+        if not isinstance(current, list):
+            continue
+        kept = [e for e in current if not _is_factory_hook(e)]
+        if len(kept) == len(current):
+            continue
+        changed = True
+        if kept:
+            hooks[event] = kept
+        else:
+            del hooks[event]
     if cur.get("$comment") == fact.get("$comment"):
         del cur["$comment"]
         changed = True
     if not changed:
         return None
+    # Drop containers we emptied. A repo that keeps its own settings shouldn't be
+    # left holding `"hooks": {}` as the visible residue of having tried the factory.
+    if isinstance(hooks, dict) and not hooks:
+        cur.pop("hooks", None)
+    perms = cur.get("permissions")
+    if isinstance(perms, dict):
+        if not perms.get("allow"):
+            perms.pop("allow", None)
+        if not perms:
+            cur.pop("permissions", None)
     if _hollow(cur):
         if dry:
             return f"would remove: {dst} (holds only factory settings)"

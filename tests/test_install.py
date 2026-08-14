@@ -163,6 +163,65 @@ def test_force_merges_settings_instead_of_clobbering(tmp_path: Path):
     assert settings.get("hooks")  # factory hooks arrived via merge
 
 
+def _project_hook(cmd: str) -> dict:
+    return {"hooks": [{"type": "command", "command": cmd}]}
+
+
+def test_install_keeps_the_projects_own_hook_on_an_event_we_also_hook(tmp_path: Path):
+    """Regression: merging hooks with dict.update replaced the whole SessionStart
+    entry, silently deleting the project's own hook on a plain install. A repo must
+    keep every hook it had and simply gain ours."""
+    claude = tmp_path / ".claude"
+    claude.mkdir()
+    (claude / "settings.json").write_text(
+        json.dumps({"hooks": {"SessionStart": [_project_hook("python3 ./scripts/banner.py")]}})
+    )
+    _install(tmp_path)
+    hooks = json.loads((claude / "settings.json").read_text())["hooks"]["SessionStart"]
+    commands = json.dumps(hooks)
+    assert "./scripts/banner.py" in commands
+    assert "factory_board.py" in commands
+
+
+def test_reinstall_refreshes_our_hook_rather_than_stacking_a_second_copy(tmp_path: Path):
+    """The merge drops our previous entries before re-adding them; without that,
+    every upgrade would append another factory_board hook and the board would print
+    once per install."""
+    _install(tmp_path)
+    _install(tmp_path)
+    hooks = json.loads((tmp_path / ".claude" / "settings.json").read_text())["hooks"]
+    assert json.dumps(hooks["SessionStart"]).count("factory_board.py") == 1
+
+
+def test_uninstall_removes_only_our_entry_from_a_shared_hook_event(tmp_path: Path):
+    """The exit has to be as non-destructive as the entry: opting out takes the
+    factory's hook off SessionStart and leaves the project's own hook running."""
+    claude = tmp_path / ".claude"
+    claude.mkdir()
+    (claude / "settings.json").write_text(
+        json.dumps({"hooks": {"SessionStart": [_project_hook("python3 ./scripts/banner.py")]}})
+    )
+    _install(tmp_path)
+    _install(tmp_path, "--uninstall")
+    hooks = json.loads((claude / "settings.json").read_text())["hooks"]["SessionStart"]
+    commands = json.dumps(hooks)
+    assert "./scripts/banner.py" in commands
+    assert "factory_board.py" not in commands
+
+
+def test_force_does_not_enrol_a_preexisting_path_as_factory_created(tmp_path: Path):
+    """Regression: --force reported an overwrite as `copied:`, so a repo with its
+    own templates/ had it recorded in the manifest — and uninstall then deleted the
+    user's files. Only paths the installer actually created may be manifest-owned."""
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "MY-TEMPLATE.md").write_text("mine\n")
+    _install(tmp_path, "--force")
+    created = json.loads((tmp_path / ".factory" / "install-manifest.json").read_text())["created"]
+    assert "templates" not in created
+    _install(tmp_path, "--uninstall")
+    assert (tmp_path / "templates" / "MY-TEMPLATE.md").read_text() == "mine\n"
+
+
 def test_install_plants_the_scratch_ignore_rules_idempotently(tmp_path: Path):
     """The factory writes scratch into every adopting repo; if the install doesn't
     plant the ignore rules, a work item's PR arrives buried in briefs. Reinstall
