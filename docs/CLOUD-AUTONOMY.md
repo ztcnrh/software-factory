@@ -1,38 +1,38 @@
 # Cloud autonomy (opt-in)
 
-This is the "factory runs while you sleep" layer. It's **off by default** and the least battle-tested part of the system — turn it on deliberately, on a sandbox repo first, and supervise the first runs. Everything works fully without it; this only adds *unattended* operation.
+The "runs while you sleep" layer. It's **off by default** and the least battle-tested part of the system — turn it on deliberately, on a sandbox repo first, and supervise the first runs. Everything else works fully without it.
 
 ## What it does
 
-GitHub becomes the conveyor. When an issue gets a `factory:<state>` label, a workflow runs the matching station headlessly with Claude Code (`claude -p`), which does the work, calls `factory advance`, commits the updated `.factory/` state, and re-labels the issue to the next state — which triggers the next run. The line moves itself. Human-gate labels (`factory:spec-review`, `factory:ship-review`) deliberately **don't** auto-run: the workflow comments the review packet on the issue and waits for you.
+GitHub becomes the conveyor. A `factory:<state>` label on an issue triggers a workflow that runs that station headlessly (`claude -p`), calls `factory advance`, commits the updated `.factory/` state, and re-labels the issue — which triggers the next run. The line moves itself.
 
-Two workflows ship (as `.disabled`):
-- **`factory-station.yml`** — the per-station runner, triggered by issue labels.
-- **`factory-retro.yml`** — the learning loop on a schedule (weekly) plus on-demand, opening improvement PRs.
+Human-gate labels (`factory:spec-review`, `factory:ship-review`) deliberately **don't** auto-run: the workflow comments the review packet on the issue and waits for you.
+
+Two workflows ship, both as `.disabled`: **`factory-station.yml`** (the per-station runner, triggered by issue labels) and **`factory-retro.yml`** (the learning loop, weekly plus on-demand, opening improvement PRs).
 
 ## Enabling it
 
-1. **Install with the cloud layer:** `python3 install/install.py /path/to/repo --with-cloud`. This drops the workflows under `.github/workflows/` (still `.disabled`).
-2. **Add the API secret:** repo *Settings → Secrets and variables → Actions →* `ANTHROPIC_API_KEY` (or `CLAUDE_CODE_OAUTH_TOKEN`).
-3. **Point at the toolkit:** repo *Settings → Secrets and variables → Actions → Variables →* `FACTORY_TOOLKIT_GIT`, a pip-installable ref to the factory toolkit (e.g. `git+https://github.com/<you>/software-factory@main`). The adopted repo carries only the `.claude` layer and config — the workflow installs the `factory` CLI from this ref, and fails fast with a clear message if it's unset. A private toolkit repo needs a token in the URL or its own checkout step.
-4. **Create the labels:** `factory github-labels --github` (uses your `gh` CLI). Or `factory github-labels` to print them first.
-5. **Flip the switch:** rename `factory-station.yml.disabled` → `factory-station.yml` (and the retro one if you want scheduled learning).
-6. **Shake it down:** open an issue, add `factory:triage`, and *watch* the Actions run. Keep a hand on the wheel for the first several items.
+1. **Install with the cloud layer** — `python3 install/install.py /path/to/repo --with-cloud` drops the workflows under `.github/workflows/`, still `.disabled`.
+2. **Add the API secret** — `ANTHROPIC_API_KEY` (or `CLAUDE_CODE_OAUTH_TOKEN`) under *Settings → Secrets and variables → Actions*.
+3. **Point at the toolkit** — an Actions *variable* `FACTORY_TOOLKIT_GIT`, a pip-installable ref like `git+https://github.com/<you>/software-factory@main`. An adopted repo carries only the `.claude` layer and config, so the workflow installs the CLI from this ref; it fails fast with a clear message if unset. A private toolkit repo needs a token in the URL or its own checkout step.
+4. **Create the labels** — `factory github-labels --github` (or without the flag to print them first).
+5. **Flip the switch** — rename `factory-station.yml.disabled` → `factory-station.yml`, and the retro one if you want scheduled learning.
+6. **Shake it down** — open an issue, add `factory:triage`, and *watch* the Actions run. Keep a hand on the wheel for the first several items.
 
 ## How it stays safe
 
-- **Human gates never auto-run.** The `if:` guard only fires for station labels, never gate labels. A spec or ship decision always waits for you, in cloud mode too.
-- **Local and cloud share one source of truth.** State lives in `.factory/`, committed back by each run, so you can switch between driving locally and letting the cloud run without divergence.
+- **Human gates never auto-run.** The `if:` guard fires only for station labels. A spec or ship decision always waits for you, cloud or not.
+- **One source of truth.** State lives in `.factory/`, committed back by each run, so you can switch between driving locally and letting the cloud run without divergence.
 - **It's reversible.** Rename the workflows back to `.disabled` and you're fully local again, having lost nothing.
-- **Policies still gate themselves.** Auto-approval only happens for rules you've signed (`approved_by`), the same as local.
+- **Policies still gate themselves.** Auto-approval happens only for rules you've signed, exactly as it does locally.
 
-## Known rough edges (be honest with yourself here)
+## Known rough edges
 
-This layer is a solid, well-commented **template**, not a turnkey product. Before relying on it:
+A well-commented **template**, not a turnkey product. Before relying on it:
 
-- **Issue ↔ work-item mapping.** The workflow hands the agent the issue number and trusts it to find/create the matching work item in `.factory/` and re-label correctly. That works because the agent is capable, but it's the seam most likely to need tightening for your repo's conventions. The deterministic half already exists: `factory intake` files every open issue labeled `intake` as a work item (dedupes on the issue number, applies `factory:triage`) — a small `issues: opened`/scheduled workflow that runs it, or a local cron/`/loop`, makes GitHub issues the intake surface with no agent in the loop.
-- **Concurrency.** Two stations committing `.factory/` state at once can race. For low volume it's fine; at higher throughput add a concurrency group or a queue.
-- **Cost and loops.** Headless runs cost tokens and a mis-configured route could loop. Start conservatively — watch the metrics/cost ledger and set GitHub Actions spending limits before going unattended. (The `monitor` station, which would run continuously, is deferred in v1, so there's no perpetual watcher to budget for yet.)
-- **Permissions.** The workflow runs with `acceptEdits` and broad tools by design (it's unattended). Scope the `GITHUB_TOKEN` permissions to the repo and keep it on a sandbox until you trust it.
+- **Issue ↔ work-item mapping** is the seam most likely to need tightening for your conventions — the workflow hands the agent an issue number and trusts it to find or create the matching work item and re-label correctly. The deterministic half already exists: `factory intake` files every open `intake`-labeled issue as a work item, deduped on issue number. A small `issues: opened` workflow (or a local cron) running that makes issues the intake surface with no agent in the loop.
+- **Concurrency** — two stations committing `.factory/` at once can race. Fine at low volume; add a concurrency group or a queue above that.
+- **Cost and loops** — headless runs cost tokens, and a mis-configured route could loop. Watch the cost ledger and set Actions spending limits before going unattended.
+- **Permissions** — the workflow runs with `acceptEdits` and broad tools by design. Scope `GITHUB_TOKEN` to the repo, and stay on a sandbox until you trust it.
 
-The local loop is production-quality for personal use today. The cloud loop is where you and I will iterate next — see [EXTENDING.md](EXTENDING.md).
+The local loop is production-quality for personal use today; this one is the least exercised. Known gaps and the ideas for closing them are logged in [OPTIMIZATION-AREAS.md](OPTIMIZATION-AREAS.md).

@@ -62,7 +62,7 @@ You don't need any cloud accounts to start — it's fully local. Wire up [cloud 
 - **[FACTORY-MANUAL.md](FACTORY-MANUAL.md)** — start here. What *you* do: setup, driving the line day to day, the gate playbook, and the homework checklist (accounts/secrets).
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — how it all fits: the stations, the dispatcher/state machine, the conveyor, the triggers.
 - **[docs/CODE-TOUR.md](docs/CODE-TOUR.md)** — want to peek under the hood? The code-reading path: which files first, and the handful of functions that make everything else click.
-- **[docs/LEARNING-LOOP.md](docs/LEARNING-LOOP.md)** — the crown jewel: interventions → retro → self-improvement, with a worked example.
+- **[docs/LEARNING-LOOP.md](docs/LEARNING-LOOP.md)** — the crown jewel: interventions → retro → self-improvement, in one diagram.
 - **[docs/CLOUD-AUTONOMY.md](docs/CLOUD-AUTONOMY.md)** — enabling the unattended GitHub Actions layer (opt-in).
 - **[docs/EXTENDING.md](docs/EXTENDING.md)** — adding stations, language/tracker adapters, and a candid take on what's still hard.
 - **[docs/OPTIMIZATION-AREAS.md](docs/OPTIMIZATION-AREAS.md)** — a living log of deliberate v1 tradeoffs and the ideas for improving them later.
