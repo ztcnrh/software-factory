@@ -6,9 +6,11 @@ friendly (``WI-0001``)."""
 from __future__ import annotations
 
 import json
-import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
+from .io import atomic_write_json, file_lock
 from .model import WorkItem
 
 
@@ -24,21 +26,8 @@ class Store:
         self.dir.mkdir(parents=True, exist_ok=True)
 
     def save(self, item: WorkItem) -> None:
-        # Atomic: write a sibling temp file, fsync, then rename over the real one.
-        # A crash mid-write must never leave a half-written (corrupt) item — the
-        # store is the source of truth, so the old version stays intact until the
-        # new one is fully on disk.
         self.ensure()
-        path = self._path(item.id)
-        tmp = path.with_name(path.name + ".tmp")
-        try:
-            with open(tmp, "w") as f:
-                json.dump(item.to_dict(), f, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, path)
-        finally:
-            tmp.unlink(missing_ok=True)
+        atomic_write_json(self._path(item.id), item.to_dict())
 
     def load(self, item_id: str) -> WorkItem:
         with open(self._path(item_id)) as f:
@@ -56,5 +45,21 @@ class Store:
         return [self.load(i) for i in self.list_ids()]
 
     def next_id(self) -> str:
+        """The next free id. Call this inside :meth:`allocating` — on its own it
+        only reads, so two callers get the same answer."""
         nums = [int(i.split("-")[-1]) for i in self.list_ids() if i.split("-")[-1].isdigit()]
         return f"WI-{(max(nums) + 1) if nums else 1:04d}"
+
+    @contextmanager
+    def allocating(self) -> Iterator[None]:
+        """Hold the id lock across allocate-*and*-save.
+
+        Locking `next_id` alone would fix nothing: the race is the gap between
+        reading the highest id on disk and the new file existing, so both have to
+        happen inside one critical section. Two `factory new` calls that land in
+        that gap mint the same id, and the second save silently overwrites the
+        first item.
+        """
+        self.ensure()
+        with file_lock(self.dir / ".id.lock"):
+            yield

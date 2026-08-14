@@ -126,43 +126,46 @@ class Dispatcher:
         source_ref: str | None = None,
         classifiers_by: str = "unknown",
     ) -> WorkItem:
-        item = WorkItem(
-            id=self.store.next_id(),
-            title=title,
-            body=body,
-            risk=risk,
-            state=self.line.start,
-            parent=parent,
-            source=source,
-            source_ref=source_ref,
-        )
-        for name in classifiers or []:
-            item.add_classifier(name, by=classifiers_by)
-        item.log(kind="created", to_state=item.state, actor="factory")
-        # Deterministic risk floor: sensitive-sounding work enters at RISK_FLOOR
-        # unless a human explicitly set a risk at creation (their call wins —
-        # recorded either way, so the audit trail says why).
-        matches = risk_floor_matches(f"{title}\n{body}")
-        if matches:
-            if risk == "unknown":
-                item.risk = RISK_FLOOR
-                item.metadata["risk_floor"] = RISK_FLOOR
-                item.metadata["risk_floor_matches"] = matches
-                item.log(
-                    kind="note",
-                    actor="factory",
-                    note=f"risk floored to {RISK_FLOOR}: touches {', '.join(matches)} "
-                    "(stations may raise it, never lower it; an explicit risk at "
-                    "creation overrides)",
-                )
-            elif RISK_ORDER.get(risk, 3) < RISK_ORDER[RISK_FLOOR]:
-                item.log(
-                    kind="note",
-                    actor="factory",
-                    note=f"risk floor bypassed by explicit risk={risk} "
-                    f"(matched: {', '.join(matches)})",
-                )
-        self.store.save(item)
+        # Allocate and persist under one lock: the id is only reserved once the
+        # file exists, so two concurrent creations can't land on the same number.
+        with self.store.allocating():
+            item = WorkItem(
+                id=self.store.next_id(),
+                title=title,
+                body=body,
+                risk=risk,
+                state=self.line.start,
+                parent=parent,
+                source=source,
+                source_ref=source_ref,
+            )
+            for name in classifiers or []:
+                item.add_classifier(name, by=classifiers_by)
+            item.log(kind="created", to_state=item.state, actor="factory")
+            # Deterministic risk floor: sensitive-sounding work enters at RISK_FLOOR
+            # unless a human explicitly set a risk at creation (their call wins —
+            # recorded either way, so the audit trail says why).
+            matches = risk_floor_matches(f"{title}\n{body}")
+            if matches:
+                if risk == "unknown":
+                    item.risk = RISK_FLOOR
+                    item.metadata["risk_floor"] = RISK_FLOOR
+                    item.metadata["risk_floor_matches"] = matches
+                    item.log(
+                        kind="note",
+                        actor="factory",
+                        note=f"risk floored to {RISK_FLOOR}: touches {', '.join(matches)} "
+                        "(stations may raise it, never lower it; an explicit risk at "
+                        "creation overrides)",
+                    )
+                elif RISK_ORDER.get(risk, 3) < RISK_ORDER[RISK_FLOOR]:
+                    item.log(
+                        kind="note",
+                        actor="factory",
+                        note=f"risk floor bypassed by explicit risk={risk} "
+                        f"(matched: {', '.join(matches)})",
+                    )
+            self.store.save(item)
         self.metrics.emit(kind="created", item=item.id)
         return item
 

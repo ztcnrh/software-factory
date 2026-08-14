@@ -17,7 +17,8 @@ A small, dependency-light Python package (the `factory` CLI).
 | `line.py` | Every question about the line's shape — station, gate or terminal? which skill runs it? given a verdict, where next? `line.yml` is the **single source of truth** for the conveyor; reshape the factory by editing it. |
 | `model.py` | The three records that flow through the system: a **WorkItem**, a **StationReport** (its `verdict` drives routing), and a **GateDecision** (a human's call, with the structured *why* the learning loop needs). |
 | `dispatch.py` | The motor — see below. |
-| `store.py` | Work items as JSON under `.factory/work-items/`. Local is the source of truth, and writes are atomic (temp + fsync + rename) so a crash can't corrupt it. |
+| `io.py` | The disk primitives every durable write goes through: atomic replace (unique staging name + fsync + rename) and a portable file lock. One home for the two hazards — a crash mid-write, and two writers at once. |
+| `store.py` | Work items as JSON under `.factory/work-items/`. Local is the source of truth. Id allocation holds a lock until the new file exists, since the race is the gap between reading the highest id and that file appearing. |
 | `brief.py` | The deterministic half of a station run's context packet. |
 | `policies.py` | Evaluates gate policies, and owns **`PolicyState`** — the engine-written overlay that *suspends* a signed rule when an item it auto-cleared later needed a human. |
 | `metrics.py`, `interventions.py`, `retro.py` | The North Star ledger; one record per human steer; the briefing that assembles them for the retro station. |

@@ -930,7 +930,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         except Exception as e:  # noqa: BLE001
             errors.append(f"work item {iid}: unreadable ({e})")
     print(f"✓ {len(items)} work item(s) parse")
-    for leftover in sorted(store.dir.glob("*.tmp")) if store.dir.exists() else []:
+    # Staging files are named `.<item>.json.<unique>.tmp`, so the dot-prefixed
+    # glob is the one that matches; the bare one still catches pre-0.6.2 leftovers.
+    leftovers = (
+        sorted({*store.dir.glob("*.tmp"), *store.dir.glob(".*.tmp")}) if store.dir.exists() else []
+    )
+    for leftover in leftovers:
         warns.append(f"leftover temp file in the store: {leftover.name} (crashed save?)")
     for iid, item in sorted(items.items()):
         if item.id != iid:
