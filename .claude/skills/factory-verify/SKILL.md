@@ -21,7 +21,7 @@ Check out the item's **change branch** (`change_branch` in your brief) before yo
 2. Work the checklist row by row, against the running software rather than the source, and record each row's disposition and its evidence as you go — not in a final pass. The rows are durable: a row you settle survives a context that dies before you report, and whoever picks the item up next doesn't repeat it.
    - CLI/library: run it with real inputs.
    - HTTP service: start it, hit the endpoints, check responses/status codes.
-   - Web UI: drive it in the browser (the Claude-in-Chrome tools) and capture a screenshot or a short recording of the new behavior working.
+   - Web UI: drive it in a real browser with whatever browser-automation tools your run carries, and capture a screenshot or a short recording of the new behavior working.
 3. Probe the obvious failure modes the spec names (bad input, empty state, the edge cases). A change that only works on the happy path is not verified.
 
 **Scale your depth to the checklist.** Three rows deserve three demonstrations; twenty rows deserve triage — demonstrate what carries risk, and `accepted` the rest honestly.

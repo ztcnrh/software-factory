@@ -30,7 +30,7 @@ And budget **one council per decision**: a well-framed council either settles th
 
 ## Who convenes it
 
-Anyone with the `Agent` tool: a human asking directly, a main session mid-task, or a subagent embedded in a larger process (its seats then run as nested subagents). When a human is driving interactively, tell them which seats you plan to launch and what each will investigate before spawning. When running autonomously, proceed without asking — carry the synthesis in your output so it reaches the human at their next review point.
+Anyone who can spawn subagents: a human asking directly, a main session mid-task, or a subagent embedded in a larger process (its seats then run as nested subagents). When a human is driving interactively, tell them which seats you plan to launch and what each will investigate before spawning. When running autonomously, proceed without asking — carry the synthesis in your output so it reaches the human at their next review point.
 
 ## Workflow
 
