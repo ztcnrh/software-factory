@@ -23,8 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      # Pinned exactly: setup-uv stopped publishing floating major tags after v7,
+      # so there is no `@v9` that picks up patches. Bump by hand.
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           python-version: "3.13"
           enable-cache: true
@@ -39,8 +41,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4 # shallow is fine: the upgrade scenario builds its own toolkit repo
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7 # shallow is fine: the upgrade scenario builds its own toolkit repo
+      # Pinned exactly: setup-uv stopped publishing floating major tags after v7,
+      # so there is no `@v9` that picks up patches. Bump by hand.
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           python-version: "3.13"
           enable-cache: true
