@@ -281,26 +281,40 @@ class Dispatcher:
 
     # --- the invariant checklist --------------------------------------------
     def _check_checklist(self, item: WorkItem, report: StationReport) -> None:
-        """Refuse a ``verified`` verdict that leaves invariants undisposed.
+        """Refuse a checking station's clean verdict that leaves invariants unanswered.
 
-        `blocked`/`accepted`/`out-of-scope` make an honest "didn't run it" cheap to
-        record, so the only thing this blocks is silence. Registering the checklist
-        is what arms the guard — the report's artifacts are absorbed first so a
-        station can register it and dispose its rows in one call."""
-        if report.verdict != "verified" or report.human_required:
+        Each checker owns one column: `pass` needs every `implemented`, `verified`
+        every `holds`. Both have cheap honest answers, so only silence is blocked.
+        Registering the checklist arms the guard — the report's artifacts are
+        absorbed first so a station can register and grade in one call."""
+        if report.human_required:
+            return
+        if report.verdict == "pass":
+            column = "implemented"
+            fix = (
+                "Record `yes` or `no` for each. `no` is an honest answer — an invariant "
+                "the diff misses is a finding to rank, not a row to leave blank."
+            )
+        elif report.verdict == "verified":
+            column = "holds"
+            fix = (
+                f"Record one of {', '.join(DISPOSITIONS)} for each. `blocked` (out of "
+                "reach), `accepted` (low risk, didn't run it), and `out-of-scope` are "
+                "all honest answers."
+            )
+        else:
             return
         path = Checklist.find(self.root, list(item.artifacts) + list(report.artifacts))
         if not path:
             return
-        pending = Checklist.load(path).undisposed()
+        checklist = Checklist.load(path)
+        pending = checklist.ungraded() if column == "implemented" else checklist.undisposed()
         if pending:
             named = "\n  - ".join(row_label(r) for r in pending)
             raise ChecklistError(
-                f"{item.id}: cannot report `verified` — {len(pending)} invariant(s) in "
-                f"{path.name} have no disposition:\n  - {named}\n"
-                f"Record one of {', '.join(DISPOSITIONS)} for each. `blocked` (out of reach), "
-                "`accepted` (low risk, didn't run it), and `out-of-scope` are all honest "
-                "answers; a blank row is the only one that isn't."
+                f"{item.id}: cannot report `{report.verdict}` — {len(pending)} invariant(s) "
+                f"in {path.name} have no `{column}` value:\n  - {named}\n"
+                f"{fix} A blank row is the only answer that isn't one."
             )
 
     # --- act (mutating) -----------------------------------------------------

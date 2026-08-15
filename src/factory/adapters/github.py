@@ -63,13 +63,6 @@ def sync_label(
     return _run_msg(args)
 
 
-def comment(issue: str, body: str, repo: str | None = None) -> tuple[int, str]:
-    args = ["issue", "comment", issue, "--body", body]
-    if repo:
-        args += ["--repo", repo]
-    return _run_msg(args)
-
-
 def list_issues(
     label: str, repo: str | None = None, limit: int = 50
 ) -> tuple[int, list[dict], str]:

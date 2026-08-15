@@ -113,11 +113,17 @@ def test_the_escape_hatch_is_never_blocked_by_an_open_row(factory_root: Path):
 
 def test_an_unreadable_checklist_fails_loudly_rather_than_stopping_guarding(factory_root: Path):
     """A checklist the engine can't parse must raise, not silently wave the verdict
-    through — a guard that fails open is worse than no guard, because it's trusted."""
+    through — a guard that fails open is worse than none. `pass` reads it first."""
     d = Dispatcher(factory_root)
-    item, _ = _at_verify(d, "# Checklist\n\nno machine block here\n")
+    item = d.new_item("Rate limiting")
+    arts = [_write(d.root, item, "# Checklist\n\nno machine block here\n")]
+    d.advance(item, StationReport(station="triage", verdict="needs_spec"))
+    d.advance(item, StationReport(station="spec", verdict="ready_for_review", artifacts=arts))
+    d.gate(item, GateDecision(gate="spec_review", decision="approved", by="t"))
+    d.advance(item, StationReport(station="implement", verdict="implemented"))
     with pytest.raises(ChecklistError, match="no machine-readable block"):
-        d.advance(item, StationReport(station="verify", verdict="verified"))
+        d.advance(item, StationReport(station="code_review", verdict="pass"))
+    assert d.store.load(item.id).state == "code_review"  # nothing routed
 
 
 def test_the_machine_block_is_read_past_fences_in_the_prose(factory_root: Path):
@@ -130,6 +136,87 @@ def test_the_machine_block_is_read_past_fences_in_the_prose(factory_root: Path):
     )
     c = Checklist.parse(text)
     assert [r["n"] for r in c.rows] == [1]
+
+
+def _at_code_review(d: Dispatcher, checklist: str) -> WorkItem:
+    """An item walked to the code-review station, carrying a checklist."""
+    item = d.new_item("Rate limiting")
+    arts = [_write(d.root, item, checklist)]
+    d.advance(item, StationReport(station="triage", verdict="needs_spec"))
+    d.advance(item, StationReport(station="spec", verdict="ready_for_review", artifacts=arts))
+    d.gate(item, GateDecision(gate="spec_review", decision="approved", by="t"))
+    d.advance(item, StationReport(station="implement", verdict="implemented"))
+    return item
+
+
+ROW_UNGRADED = (
+    '  - n: 2\n    invariant: "The limit is per-key"\n    implemented: ""\n    holds: ""\n'
+)
+ROW_MISSED = (
+    '  - n: 2\n    invariant: "The limit is per-key"\n    implemented: no\n    holds: ""\n'
+)
+
+
+def test_pass_is_refused_while_any_invariant_is_ungraded(factory_root: Path):
+    """Code review's column used to be advisory: `pass` never read the checklist, so a
+    run could grade nothing and route on. Both checkers now owe an answer per row."""
+    d = Dispatcher(factory_root)
+    item = _at_code_review(d, _checklist(ROW_DONE + ROW_UNGRADED))
+    with pytest.raises(ChecklistError, match="2 \\(The limit is per-key\\)"):
+        d.advance(item, StationReport(station="code_review", verdict="pass"))
+    assert d.store.load(item.id).state == "code_review"  # nothing routed
+
+
+def test_an_explicit_no_is_an_answer_and_lets_pass_through(factory_root: Path):
+    """`no` has to be sayable, or the guard forces a reviewer to either lie with `yes`
+    or stall. Only silence is blocked — an invariant the diff misses is a finding."""
+    d = Dispatcher(factory_root)
+    item = _at_code_review(d, _checklist(ROW_DONE + ROW_MISSED))
+    assert d.advance(item, StationReport(station="code_review", verdict="pass")) == "verify"
+
+
+def test_changes_requested_does_not_demand_a_complete_column(factory_root: Path):
+    """A send-back is already routing the item back for rework; demanding a full column
+    there would tax the loop the guard exists to keep honest, not shorten it."""
+    d = Dispatcher(factory_root)
+    item = _at_code_review(d, _checklist(ROW_DONE + ROW_UNGRADED))
+    assert (
+        d.advance(item, StationReport(station="code_review", verdict="changes_requested"))
+        == "implement"
+    )
+
+
+def test_the_headline_names_invariants_the_diff_misses(factory_root: Path):
+    """A row code review marked `no` is a gap the ship gate is being asked to accept, and
+    it reads differently from one nobody graded — the headline has to distinguish them."""
+    c = Checklist.parse(_checklist(ROW_DONE + ROW_MISSED))
+    assert c.unimplemented() and not c.ungraded()
+    assert "1 not implemented (2)" in c.headline()
+
+
+def test_only_yes_and_no_grade_a_row(factory_root: Path):
+    """`yes`/`no` are the only two the skill teaches, so a typo and a once-accepted
+    synonym both read as ungraded — a third spelling is drift to surface, not absorb."""
+    c = Checklist.parse(
+        _checklist(
+            '  - n: 1\n    implemented: probably\n'
+            '  - n: 2\n    implemented: done\n'
+            '  - n: 3\n    implemented: "✅"\n'
+        )
+    )
+    assert len(c.ungraded()) == 3
+    assert not c.unimplemented()  # unanswered is not the same as answered "no"
+
+
+def test_a_bare_yes_grades_the_same_as_a_quoted_one(factory_root: Path):
+    """YAML 1.1 resolves an unquoted `yes`/`no` to a bool before the engine sees it.
+    Without the bool branch, `implemented: yes` — the obvious form — reads as ungraded."""
+    bare = _checklist('  - n: 1\n    implemented: yes\n  - n: 2\n    implemented: no\n')
+    quoted = _checklist('  - n: 1\n    implemented: "yes"\n  - n: 2\n    implemented: "no"\n')
+    for text in (bare, quoted):
+        c = Checklist.parse(text)
+        assert not c.ungraded()
+        assert [r["n"] for r in c.unimplemented()] == [2]
 
 
 def test_an_unknown_disposition_counts_as_undisposed(factory_root: Path):

@@ -27,6 +27,7 @@ from pathlib import Path
 
 from . import brief as brief_mod
 from . import sweep as sweep_mod
+from .checklist import Checklist, ChecklistError
 from .dispatch import Action, Dispatcher, GateDriftError, unreadable_tips
 from .ledger import CLOSED, STATUSES, Ledger
 from .line import Line
@@ -731,6 +732,14 @@ def _render_item(d: Dispatcher, item_id: str) -> None:
         print(f"  source: {item.source} {item.source_ref}")
     if item.artifacts:
         print(f"  artifacts: {', '.join(item.artifacts)}")
+    # The line the ship-gate packet leads with. An unparseable checklist says so
+    # rather than reading as an item that has none.
+    chk = Checklist.find(d.root, item.artifacts)
+    if chk:
+        try:
+            print(f"  checklist: {Checklist.load(chk).headline()}")
+        except ChecklistError as e:
+            print(f"  checklist: ⚠ unreadable — {e}")
     if item.branch:
         print(f"  branch: {item.branch}" + (f"  →  pr: {item.pr}" if item.pr else ""))
     if item.change_branch:

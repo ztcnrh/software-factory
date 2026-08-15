@@ -67,6 +67,39 @@ def next_action(root: Path, item: str) -> dict:
     return json.loads(lines[0][len("NEXT: ") :])
 
 
+class Graded:
+    """An item at code_review with a registered checklist, and a way to grade it."""
+
+    def __init__(self, root: Path, item: str, rel: str):
+        self.root, self.item, self.rel = root, item, rel
+
+    def grade(self, implemented: str = "", holds: str = "") -> None:
+        (self.root / self.rel).write_text(
+            "# Invariant checklist\n\n"
+            "| # | Invariant | Implemented | Holds |\n| - | - | - | - |\n\n"
+            "<!-- machine-readable: the factory engine parses this block -->\n"
+            "```yaml\nrows:\n"
+            '  - n: 1\n    invariant: "Over the limit returns 429"\n'
+            f'    implemented: "{implemented}"\n    holds: "{holds}"\n'
+            "```\n"
+        )
+
+
+def walk_to_code_review(root: Path) -> Graded:
+    """A second item taken to code_review carrying an ungraded checklist."""
+    out = factory(root, "new", "checklist guard item")
+    item = next(w for w in out.split() if w.startswith("WI-")).strip(":.,")
+    rel = f"specs/{item}-x/CHECKLIST.md"
+    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+    g = Graded(root, item, rel)
+    g.grade()  # both columns blank — the state the spec station leaves behind
+    factory(root, "advance", item, "--verdict", "needs_spec")
+    factory(root, "advance", item, "--verdict", "ready_for_review", "--artifact", rel)
+    factory(root, "gate", item, "--decision", "approved", "--by", "drive-script")
+    factory(root, "advance", item, "--verdict", "implemented")
+    return g
+
+
 def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="factory-drive-"))
     try:
@@ -137,6 +170,22 @@ def main() -> int:
         check("metrics count the ship", "1/1" in m, m)
         check("metrics report a clean one-shot rate", "100%" in m, m)
         check("doctor is clean on a healthy root", "✓" in factory(tmp, "doctor"))
+
+        print("\n=== the checklist guards, through the real CLI ===")
+        # The unit tests drive the dispatcher directly; only here is the refusal
+        # exercised as an exit code, which is all a driver sees.
+        chk = walk_to_code_review(tmp)
+        factory(tmp, "advance", chk.item, "--verdict", "pass", expect_rc=1)
+        check("pass is refused while a row is ungraded", True)
+        check("nothing routed", "state: code_review" in factory(tmp, "status", chk.item))
+        chk.grade(implemented="no")
+        factory(tmp, "advance", chk.item, "--verdict", "pass")
+        check("an explicit `no` is an answer and lets pass through", True)
+        out = factory(tmp, "status", chk.item)
+        check("status carries the checklist headline", "checklist:" in out, out)
+        check("the headline names the invariant the diff misses", "not implemented" in out, out)
+        factory(tmp, "advance", chk.item, "--verdict", "verified", expect_rc=1)
+        check("verified is refused while a row is undisposed", True)
 
         print("\n=== rejections are refusals, not crashes ===")
         factory(tmp, "advance", item, "--verdict", "not-a-real-verdict", expect_rc=1)

@@ -34,10 +34,10 @@ _MACHINE_BLOCK = re.compile(r"```yaml\n(.*?)\n```", re.S)
 #   out-of-scope  the spec assigned this invariant to another work item
 DISPOSITIONS = ("verified", "failed", "blocked", "accepted", "out-of-scope")
 
-# What code review may record in a row's `implemented`. Anything else reads as
-# "not yet" — there is no third state, so a doubt belongs in `evidence`, which is
-# prose for the human and is never parsed.
-IMPLEMENTED_VALUES = ("yes", "y", "true", "done", "✅")
+# What code review may record in a row's `implemented`. `no` has to be sayable, or
+# "the diff misses this" and "nobody read this row" are the same blank cell and
+# neither is detectable. Anything else leaves the row ungraded, blocking a `pass`.
+IMPLEMENTED = {"yes": True, "no": False}
 
 # Dispositions that mean "settled without being demonstrated" — the gap the ship
 # gate's headline has to show, because they are what the human is accepting.
@@ -112,9 +112,20 @@ class Checklist:
                 out.setdefault(d, []).append(r)
         return out
 
+    def grade(self, row: dict) -> bool | None:
+        """Code review's answer — True implemented, False not, None ungraded."""
+        value = row.get("implemented")
+        if isinstance(value, bool):
+            return value  # YAML 1.1 resolved a bare `yes`/`no` before we saw it
+        return IMPLEMENTED.get(str(value or "").strip().lower())
+
+    def ungraded(self) -> list[dict]:
+        """Rows code review left without an answer — what blocks a `pass`."""
+        return [r for r in self.rows if self.grade(r) is None]
+
     def unimplemented(self) -> list[dict]:
-        """Rows code review read and did not mark implemented."""
-        return [r for r in self.rows if not _truthy(r.get("implemented"))]
+        """Rows marked *not* implemented — a finding, not a row nobody graded."""
+        return [r for r in self.rows if self.grade(r) is False]
 
     def headline(self) -> str:
         """The one line the ship-gate packet leads with: how much of the spec was
@@ -127,16 +138,12 @@ class Checklist:
             if groups.get(name):
                 ns = ", ".join(str(r.get("n", "?")) for r in groups[name])
                 parts.append(f"{len(groups[name])} {name} ({ns})")
-        if self.undisposed():
-            ns = ", ".join(str(r.get("n", "?")) for r in self.undisposed())
-            parts.append(f"{len(self.undisposed())} undisposed ({ns})")
+        gaps = (("not implemented", self.unimplemented()), ("undisposed", self.undisposed()))
+        for label, rows in gaps:
+            if rows:
+                ns = ", ".join(str(r.get("n", "?")) for r in rows)
+                parts.append(f"{len(rows)} {label} ({ns})")
         return "; ".join(parts)
-
-
-def _truthy(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    return str(value or "").strip().lower() in set(IMPLEMENTED_VALUES)
 
 
 def row_label(row: dict) -> str:

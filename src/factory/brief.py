@@ -152,6 +152,9 @@ def compose(
                 "Fill **your** column and leave the other alone: code review records whether "
                 "each invariant is implemented (judged by reading), verify records whether it "
                 "holds (judged by running).",
+                "Every row needs an answer in your column — a clean verdict is refused while "
+                "any is blank, and both columns have honest answers for a row you can't "
+                "settle, so only silence is blocked.",
                 "Rows are durable — work finished before your context ends survives, and a "
                 "station replacing you does not repeat it.",
             ]
