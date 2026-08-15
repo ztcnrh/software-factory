@@ -69,6 +69,6 @@ You don't need any cloud accounts to start — it's fully local. Wire up [cloud 
 
 ## Status
 
-v1, built and proven end-to-end — a full feature driven through the whole line, one human intervention captured, and the Retro station then auto-cleared that class of work. The engine has unit tests (`uv run pytest`); the cloud layer is the least-exercised part and ships disabled. It is meant to be used, stress-tested on real projects, and improved — by you, and increasingly by itself.
+v1, built and proven end-to-end — a full feature driven through the whole line, one human intervention captured, and the Retro station then auto-cleared that class of work. The engine has unit tests plus drives that exercise the real installer and CLI (`make check`, `make drive`; CI runs both); the cloud layer is the least-exercised part and ships disabled. It is meant to be used, stress-tested on real projects, and improved — by you, and increasingly by itself.
 
 *Inspired by Zach Lloyd's "factory engineering" thesis and the patterns in [warpdotdev/common-skills](https://github.com/warpdotdev/common-skills) (the council and cross-critique review patterns, spec-driven implementation).*
