@@ -39,6 +39,7 @@ When surveying would flood your context — a wide usage sweep, long logs, sever
 2. Implement to PRODUCT.md's numbered Behavior invariants — they are the acceptance criteria. Where the spec grants **Latitude**, that's your judgment being invited on purpose: meet the quality bar it names, don't hunt for a rule to follow.
 3. **Tests ship with the change** — a regression test for every bug fix, unit tests for non-trivial logic, following the repo's framework and layout.
 4. Keep the diff cohesive: the minimum surface area that satisfies the spec, with no unrelated refactors, formatting churn, dependency upgrades, or opportunistic cleanup riding along. Work worth doing that isn't this item's belongs in its own work item.
+5. **Comments outlive the paperwork.** `specs/` and `.factory/` are working state the human prunes; the code isn't. So nothing you write into the repo's own tree — code, comments, docstrings, test names — cites a work item id, `PRODUCT.md`/`TECH.md`/`CHECKLIST.md`, an invariant number, or a gate directive. State the reason instead of pointing at it — a comment has to read correctly with the spec deleted. A tracker issue (GitHub, Jira, Linear) does outlive the spec, so it may be cited, sparingly, at a decision a reader would otherwise re-litigate. Provenance belongs in the commit message, the PR body, and `--notes`.
 
 ### Keep the spec true
 

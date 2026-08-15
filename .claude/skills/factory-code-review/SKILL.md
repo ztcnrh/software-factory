@@ -35,7 +35,7 @@ When findings compete for your attention, they rank in this order: **correctness
 - **Scope** — does it do exactly the spec, nothing extra, nothing missing? Areas the spec marks as **Latitude** are the implementer's call: judge them against the quality bar the spec set, not against the mechanism you'd have chosen.
 - **Tests** — present, meaningful, and actually exercising the change? A bug fix without a regression test is an automatic `changes_requested`. Ask for new tests only for distinct paths or edge cases nothing already covers; "add more tests" is not a finding.
 - **Security & data safety** — input handling, authz, secrets, migrations, irreversible operations.
-- **Fit** — matches surrounding conventions; no needless complexity.
+- **Fit** — matches surrounding conventions; no needless complexity; nothing in the repo's own tree cites a work item id, a spec file, or an invariant number, since that paperwork gets pruned and the reference rots. Raise those as `🧹 [NIT]` with the self-contained wording attached — a comment that reads correctly without the spec open.
 - **Spec currency** — does `specs/<id>-<slug>/` still describe this change? Implementation may drift *within the approved intent* if it updated the spec in the same PR; a stale spec is a `changes_requested` (it ships misinformation to the ship gate and everyone after). Drift *beyond* the approved intent is a scope finding, not a spec-edit request.
 
 Three things bound what you may raise:
