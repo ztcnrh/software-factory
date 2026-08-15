@@ -1,0 +1,53 @@
+name: ci
+
+# Day-to-day work lands straight on main, and reviewed batches arrive by PR — so
+# those two events are the whole signal. Deliberately not `push:` on every branch:
+# a branch that later opens a PR would run the same commit twice.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A rapid series of pushes only needs the last one checked.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_FROZEN: "1" # fail on a stale uv.lock rather than silently re-resolving
+
+jobs:
+  # Fast feedback: the two commands a local session runs before handing off.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # Pinned exactly: setup-uv stopped publishing floating major tags after v7,
+      # so there is no `@v9` that picks up patches. Bump by hand.
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: make dep
+      - run: make check # same target a local session runs — one definition of the bar
+
+  # The other half of the bar: `install/` and `cli.py` changes aren't done when
+  # the suite is green, because the last several real bugs in both were invisible
+  # to it. These drive the actual commands against throwaway repos.
+  drive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7 # shallow is fine: the upgrade scenario builds its own toolkit repo
+      # Pinned exactly: setup-uv stopped publishing floating major tags after v7,
+      # so there is no `@v9` that picks up patches. Bump by hand.
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: make dep
+      - run: make drive

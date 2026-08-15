@@ -18,7 +18,6 @@ observed-outcome record the engine may write.
 from __future__ import annotations
 
 import json
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -26,6 +25,7 @@ from typing import Any
 import yaml
 
 from .classifiers import Classifiers
+from .io import atomic_write_json
 from .model import RISK_ORDER as _RISK_ORDER
 from .model import WorkItem
 
@@ -173,10 +173,7 @@ class PolicyState:
         return data
 
     def _save(self, data: dict) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_name(self.path.name + ".tmp")
-        tmp.write_text(json.dumps(data, indent=2))
-        os.replace(tmp, self.path)
+        atomic_write_json(self.path, data)
 
     def suspended(self) -> dict[str, dict]:
         """rule id → {ts, item, why} for every currently-suspended rule."""
