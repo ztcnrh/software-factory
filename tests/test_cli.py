@@ -492,9 +492,9 @@ def test_new_rejects_a_dangling_parent(factory_root: Path, capsys):
 
 
 def test_new_source_ref_defaults_source_to_github(factory_root: Path, capsys):
-    """--source-ref alone must mark the item as a github mirror (the one adapter
-    that exists) while an explicit --source wins — the mirror link is what makes
-    an issue-ingested item recognizable and deduplicatable."""
+    """A bare numeric --source-ref unambiguously names a GitHub issue, so it infers
+    the source — the mirror link is what makes an issue-ingested item recognizable
+    and deduplicatable."""
     rc = main(["--root", str(factory_root), "new", "From issue", "--source-ref", "42"])
     assert rc == 0
     d = Dispatcher(factory_root)
@@ -502,6 +502,32 @@ def test_new_source_ref_defaults_source_to_github(factory_root: Path, capsys):
     assert (item.source, item.source_ref) == ("github", "42")
     main(["--root", str(factory_root), "status", item.id])
     assert "source: github 42" in capsys.readouterr().out
+
+
+def test_new_records_an_explicit_tracker_source_verbatim(factory_root: Path, monkeypatch, capsys):
+    """The source field is free-form so any tracker can be named; only github has an
+    adapter, so a jira-sourced item must record its key without firing label syncs."""
+    calls = _capture_label_syncs(monkeypatch)
+    rc = main([
+        "--root", str(factory_root), "new", "From Jira",
+        "--source", "jira", "--source-ref", "AMPS-94",
+    ])
+    assert rc == 0
+    item = Dispatcher(factory_root).store.list_items()[0]
+    assert (item.source, item.source_ref) == ("jira", "AMPS-94")
+    assert calls == []  # no gh side effects for a non-github source
+    main(["--root", str(factory_root), "status", item.id])
+    assert "source: jira AMPS-94" in capsys.readouterr().out
+
+
+def test_new_refuses_a_non_numeric_ref_without_a_source(factory_root: Path, capsys):
+    """Regression: a Jira-shaped ref used to be silently recorded as a github mirror
+    and fire a doomed label sync — a misclassification at the boundary. Refusing with
+    the fix named beats persisting the wrong provenance."""
+    rc = main(["--root", str(factory_root), "new", "From Jira", "--source-ref", "AMPS-94"])
+    assert rc == 1
+    assert "--source jira" in capsys.readouterr().err
+    assert Dispatcher(factory_root).store.list_ids() == []  # nothing half-created
 
 
 def _capture_label_syncs(monkeypatch) -> list[tuple]:
