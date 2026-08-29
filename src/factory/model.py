@@ -127,8 +127,8 @@ class WorkItem:
     # Every implementation pass, oldest first; `change_branch`/`change_pr` derive
     # from the last one.
     change_passes: list[ChangePass] = field(default_factory=list)
-    source: str = "local"  # local | github
-    source_ref: str | None = None  # e.g. github issue number
+    source: str = "local"  # local | github | jira | … (free-form; only github has an adapter)
+    source_ref: str | None = None  # e.g. a github issue number, a jira key
     attempts: dict[str, int] = field(default_factory=dict)  # per-state run counts
     human_touches: int = 0  # times a human was present at a gate (attention proxy)
     steers: int = 0  # times a human had to rework the line: gate send-back/correction, or unblock

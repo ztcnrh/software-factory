@@ -196,6 +196,15 @@ def cmd_init(args: argparse.Namespace) -> int:
 # --- new: intake ------------------------------------------------------------
 
 
+def _infer_source(source_ref: str | None) -> str | None:
+    """The source a bare --source-ref implies: none means local, and only a numeric
+    ref safely means GitHub. Anything else is a tracker key the engine won't guess
+    at — None tells the caller to demand an explicit --source."""
+    if not source_ref:
+        return "local"
+    return "github" if source_ref.lstrip("#").isdigit() else None
+
+
 def cmd_new(args: argparse.Namespace) -> int:
     d = _disp(args)
     body = args.body or ""
@@ -206,7 +215,16 @@ def cmd_new(args: argparse.Namespace) -> int:
         # would silently break the origin thread the retro later mines.
         print(f"✗ parent {args.parent!r} is not a known work item", file=sys.stderr)
         return 1
-    source = args.source or ("github" if args.source_ref else "local")
+    source = args.source or _infer_source(args.source_ref)
+    if source is None:
+        # A Jira/Linear-shaped key recorded as a github mirror would silently
+        # mislabel the item and fire doomed label syncs — name the tracker instead.
+        print(
+            f"✗ --source-ref {args.source_ref!r} is not a GitHub issue number — "
+            "say which tracker it names (e.g. --source jira)",
+            file=sys.stderr,
+        )
+        return 1
     item = d.new_item(
         args.title,
         body=body,
@@ -1152,12 +1170,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument(
         "--source-ref",
         metavar="REF",
-        help="Tracker reference this item mirrors (e.g. a GitHub issue number); "
-        "sets --source to 'github' unless given explicitly",
+        help="Tracker reference this item mirrors — a bare issue number implies "
+        "--source github; any other key (e.g. a Jira AMPS-94) needs an explicit --source",
     )
     s.add_argument(
         "--source",
-        help="Where the item came from (default: 'local'; 'github' when --source-ref is set)",
+        help="Tracker the item came from: local (default), github, jira, … — free-form; "
+        "only 'github' has an adapter today (issue label sync)",
     )
     s.set_defaults(func=cmd_new)
 

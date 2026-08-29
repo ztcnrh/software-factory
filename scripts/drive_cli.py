@@ -122,6 +122,14 @@ def main() -> int:
         check("item file on disk", (tmp / ".factory" / "work-items" / f"{item}.json").exists())
         factory(tmp, "status", "WI-9999", expect_rc=1)
         check("unknown id exits 1", True)
+        out = factory(
+            tmp, "new", "jira-sourced item", "--source", "jira", "--source-ref", "AMPS-104"
+        )
+        jitem = next(w for w in out.split() if w.startswith("WI-")).strip(":.,")
+        jstatus = factory(tmp, "status", jitem)
+        check("a jira-sourced item records its ticket", "jira AMPS-104" in jstatus)
+        factory(tmp, "new", "mystery ref", "--source-ref", "AMPS-105", expect_rc=1)
+        check("a non-numeric ref without --source is refused", True)
 
         print("\n=== walk the line ===")
         seen: list[str] = []
