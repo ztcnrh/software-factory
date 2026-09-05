@@ -15,7 +15,7 @@ You are the **code-review station**. Judge the diff against the spec and the rep
 
 ## Read first
 - `factory status <id>`, the spec under `specs/<id>-<slug>/` (exact paths in the item's artifacts), and the change under review: the item's `change_pr`, which targets the feature branch — equivalently `git diff <branch>...<change_branch>`. Review **that pass**, not the feature branch's whole history; earlier passes were reviewed on their own PRs. An `automatable` item has no change branch, so its `pr` against the integration branch is the diff.
-- `.factory/work-items/<id>/code-review-*.md`, when present — the review conversation so far: earlier send-back worklists, their rationale, and the implementer's responses. If any exist, this is a re-review; read **Re-reviews** below before you start.
+- `factory feedback <id>` — the review conversation so far, straight from the change PR: your earlier reviews (labeled `[factory:code-review]`), the implementer's replies, and anything a human added. Unlabeled words are a human's — treat them as gate input, not as one more reviewer's opinion. If your own unresolved threads exist, this is a re-review; read **Re-reviews** below before you start.
 - The intervention history at `.factory/interventions/` for this kind of change — past human corrections tell you what reviewers here actually care about.
 - The diff itself you read inline, always. But a question that reaches *beyond* it — how an API you're judging is used across the repo, what a touched subsystem actually does — is survey noise: read this repo's `research` skill (`.claude/skills/research/SKILL.md`) and let a subagent absorb it, so your context stays on the change under review.
 
@@ -74,8 +74,8 @@ That threshold is deliberately low, and it only works because a send-back is *bo
 
 Work comes back to you two ways. A `not_ready` from the ship gate arrives with **no implement run in between**, so the diff is the one that already passed: nothing is wrong with your earlier verdict, the human is asking for something it didn't cover. Take their ask as the finding, confirm the diff hasn't moved under you, and write the worklist as you would for any send-back. Otherwise the implementer has reworked, and the rules below apply.
 
-- **Read the delta; use the full diff only for context.** Your last review file opens with the sha it reviewed — diff from it (`git diff <that-sha>...HEAD`) to see what actually changed. Don't restart a broad scan of code you already cleared. If no sha was recorded, fall back to the whole change diff, and record one this time.
-- **Give every earlier finding a disposition** — addressed, still open, or declined. A claimed fix is a claim: check each against the code. A *reasoned* decline is a product decision and stands; overturn it only with concrete correctness or security evidence, not a restated preference.
+- **Read the delta; use the full diff only for context.** Your last posted review opens with the sha it reviewed (**Reviewed at**) — diff from it (`git diff <that-sha>...HEAD`) to see what actually changed. Don't restart a broad scan of code you already cleared. If no sha was recorded, fall back to the whole change diff, and record one this time.
+- **Give every earlier finding a disposition, in its own thread.** A claimed fix is a claim: check each against the code, then reply in that thread — a fix you verified gets a one-line confirmation and you **resolve the thread** (you raised it; you close it); one still open gets a reply saying exactly what's missing. A *reasoned* decline is a product decision and stands — acknowledge it and resolve; overturn it only with concrete correctness or security evidence, not a restated preference. Threads a *human* opened are theirs to resolve, never yours — reply only. (`factory feedback` prints the reply/resolve one-liners.)
 - **Don't invent new suggestions about old code.** A new `💡 [SUGGESTION]` is legitimate only about code the rework introduced or changed. If something sat in the diff at an earlier pass and you didn't flag it then, it is settled — a fresh opinion is not a new finding, and it now costs a full loop. `🚨 [CRITICAL]` and `⚠️ [IMPORTANT]` you may raise at any pass, anywhere in the diff — another loop costs less than a shipped defect.
 
 ## Output contract
@@ -87,19 +87,24 @@ factory advance <id> --verdict pass --summary "<why it's sound>" --confidence <0
 ```
 Notes are optional on a pass — use them when the ship-gate human needs context beyond the headline (a council ran, you accepted a debatable judgment call). If the item looped, mention what the loop was about — the ship gate reads the review files but deserves the one-line arc.
 
-On a **send-back**, your reasoning must survive your context ending — write the handoff file first: `.factory/work-items/<id>/code-review-<n>.md`, where `<n>` is one past the highest existing review number (so the first send-back is `code-review-1.md`). It sits at the item root, not under `runs/`: it's the review conversation, which nothing else holds, so it's kept rather than swept — **commit and push it with the checklist**. Its sections:
-- **Reviewed at** — one line at the very top: the change branch head you read (`git rev-parse HEAD`). The next pass diffs from it.
-- **Worklist** — numbered, concrete, `file:line` where you can, each ask opening with its severity tag and carrying its *why*. Order it by severity, hardest first. This is what the implementer works from; a worklist item without a why invites a mechanical fix that misses the point.
-- **Rationale** — the reasoning a one-line summary can't hold: what you traced, what convinced you, why each severity is what it is.
-- **Checked and sound** — what you examined and found fine, so the next review doesn't re-litigate it.
+On a **send-back**, the review lives on the change PR — where review conversations belong, and where your reasoning survives your context ending. Post **one review per pass** via the API, so the summary and the inline findings land together (build the payload in your scratchpad):
+
+```
+gh api repos/{owner}/{repo}/pulls/<change-pr>/reviews --input review.json
+```
+
+- `review.json`: `{"event": "COMMENT", "body": "<summary>", "comments": [{"path": …, "line": …, "side": "RIGHT", "body": "<finding>"}, …]}`. `event` is always `COMMENT` — never `REQUEST_CHANGES`/`APPROVE`, which GitHub refuses on a PR your own token opened, and which would be redundant anyway: routing is the engine's job (`--verdict` is what sends work back), not GitHub review state's.
+- The **body** opens with `Reviewed at <sha>` — the change-branch head you read; the next pass diffs from it — then the rationale a one-liner can't hold (what you traced, why each severity is what it is) and a **Checked and sound** list, so the next pass doesn't re-litigate what you cleared. End it with `<!-- factory:code-review -->` on its own line, the marker that tells `factory feedback` a machine wrote it.
+- Each **inline comment** anchors one finding to the line it's about (`side: "RIGHT"`; `"LEFT"` for a deleted line), opens with its severity tag, and carries its *why* — a finding without a why invites a mechanical fix that misses the point. `🧹 [NIT]`s ride along here with their ```suggestion``` blocks. End each with the marker too.
+- Only a line that appears in **this pass's diff** can anchor an inline comment, and the POST is all-or-nothing: one bad `path`/`line` rejects the whole review (HTTP 422), usually without naming the offender. So a finding about an untouched line goes in the review **body** with its `file:line` quoted from the start; if the POST still 422s, move the finding you suspect into the body — or all inline findings, if the error doesn't say — and retry. Degrade the anchor, never drop the finding.
+- **No remote, or no `gh`:** the same content — `Reviewed at` sha, numbered severity-tagged worklist, rationale, checked-and-sound — goes in `--notes` instead.
 
 Then:
 ```
 factory advance <id> --verdict changes_requested --summary "<headline>" \
-  --artifact .factory/work-items/<id>/code-review-<n>.md --confidence <0..1> \
-  [--notes "<anything the file doesn't carry>"]
+  --confidence <0..1> --notes "<the review's URL, plus anything it doesn't carry>"
 ```
-`changes_requested` routes back to implementation. The implementer appends its response (what changed and why) to the same file, so the loop accumulates as one readable conversation instead of evaporating with each fresh context. Vague asks cause loops.
+`changes_requested` routes back to implementation. The implementer answers each finding in its own thread, so the loop accumulates as one readable conversation on the PR instead of evaporating with each fresh context. Vague asks cause loops.
 
 ## Quality bar
 - Findings must be concrete, actionable, and open with their severity tag. "Looks good" without having traced the criteria is not a review.

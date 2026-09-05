@@ -19,16 +19,6 @@
           }
         ]
       }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/record_intervention.py\""
-          }
-        ]
-      }
     ]
   }
 }

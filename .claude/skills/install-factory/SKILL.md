@@ -49,7 +49,7 @@ The low-cost exit — worth naming even at install time, it lowers the cost of t
 1. `uv tool install <toolkit-path>` — puts the `factory` CLI on PATH (skip if already installed). You can run this.
 2. `cd <target> && factory init` — validates config, creates state dirs. You can run this.
 3. Tell them to **commit the installed files.** `.claude/` and `.factory/` are dot-directories some IDE explorers hide — confirm they're visible and not gitignored. They belong in version control: `.factory/` is the factory's memory, `.claude/` skills evolve as the retro learns, and git history is the revert path if a `--force` ever overwrites a local improvement. The install also plants ignore rules for the factory's *scratch* (per-run briefs, station scratchpads, undecided gate renders) and marks `.factory/` generated so it collapses in PR diffs — mention it if they ask why their work-item PRs stay readable.
-4. On their first Claude Code session in the repo, Claude Code will ask to trust the project's hooks — they should say yes (the factory's board + steering capture). This one's theirs, not yours.
+4. On their first Claude Code session in the repo, Claude Code will ask to trust the project's hooks — they should say yes (the factory's board hook). This one's theirs, not yours.
 5. If you planted `DIRECTION.md`, nudge them to spend ten minutes filling it in (north star, Now/Next/Later, non-negotiables) — the spec station anchors to it from the first item.
 6. First drive: `factory new "<something small>"` then `/factory` in a Claude Code session in that repo.
 

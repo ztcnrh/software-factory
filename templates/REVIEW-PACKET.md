@@ -2,7 +2,7 @@
 
 > The shape the `/factory` driver (or a cloud station commenting on an issue) renders when the line stops at a human gate. The goal is **orientation in ten seconds** — everything worth reviewing is one link away, nothing to hunt for. The review itself takes as long as it deserves: the spec gate merits a real read (plan quality decides outcome quality), and the ship gate merits a real diff-plus-evidence review. The packet's job is that none of that time is spent assembling context.
 >
-> The packet is a message in the conversation, not a file — everything in it renders from state already on disk. The driver runs `factory gate <id> --bind` before presenting, which content-hashes the item's artifacts and records both PR pointers and both branch tips (local and remote), so the decision below is checked against exactly what was reviewed — down to the commit — and refused if any of it moved first.
+> The packet is a message in the conversation, not a file — everything in it renders from state already on disk. When the item has a PR, its headline (the verification counts and the decision being asked) also lands there as a comment, so the ask is visible where the review actually happens; inline comments the human leaves in return are gate input, read back with `factory feedback <id>`. The driver runs `factory gate <id> --bind` before presenting, which content-hashes the item's artifacts and records both PR pointers and both branch tips (local and remote), so the decision below is checked against exactly what was reviewed — down to the commit — and refused if any of it moved first.
 
 **Item:** <title> — one paragraph: what it is and what the station produced. **Artifacts:** <links: spec files / PR / diff / screenshot> **Confidence:** <0..1>   ·   **Risk:** <low | medium | high>
 
@@ -10,7 +10,7 @@
 
 **Evidence:**
 - `spec_review` → the spec's key decisions + open questions, and the item's PR (the feature branch against the integration branch — carrying only the spec so far). Approving means *build against this plan*; nothing lands here.
-- `ship_review` → the filled checklist (`specs/<id>-<slug>/CHECKLIST.md` — per-invariant evidence lives there), the test results, both PRs (the pass under review and the item's own), and if it looped through code review, the latest `.factory/work-items/<id>/code-review-*.md` — the review↔implement conversation, with each ask and its resolution.
+- `ship_review` → the filled checklist (`specs/<id>-<slug>/CHECKLIST.md` — per-invariant evidence lives there), the test results, both PRs (the pass under review and the item's own), and if it looped through code review, the change PR's review threads — the review↔implement conversation, each ask answered in place.
 - If a station convened a `council` on the item (check its notes) → fold in the synthesis and any split. Councils are rare by design, so most packets won't have one.
 
 ## Your decision

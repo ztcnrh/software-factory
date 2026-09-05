@@ -9,7 +9,6 @@ class of problem stops reaching the human next time. The guiding line:
 
 from __future__ import annotations
 
-import json
 import re
 import time
 from pathlib import Path
@@ -137,8 +136,8 @@ class Interventions:
         (item, gate, decision, category, changed, state_before) plus an ISO
         timestamp recovered from the filename, for mechanical joins like the
         ledger's recurrence check. Best-effort: a file that doesn't parse still
-        contributes its path and timestamp, flagged ``malformed`` like a bad
-        ``signals()`` line so ``factory doctor`` can report the loss."""
+        contributes its path and timestamp, flagged ``malformed`` so
+        ``factory doctor`` can report the loss."""
         out = []
         for path in self.list():
             rec: dict = {}
@@ -157,23 +156,4 @@ class Interventions:
                 # strings — so restore the colons or every comparison skews.
                 rec["ts"] = f"{m.group(1)}T{m.group(2)}:{m.group(3)}:{m.group(4)}Z"
             out.append(rec)
-        return out
-
-    def signals(self) -> list[dict]:
-        """Chat steering captured by the UserPromptSubmit hook (_signals.jsonl).
-        Best-effort by design: the hook appends blindly, so an unparseable line
-        becomes a ``{"malformed": True}`` marker in place (order preserved) rather
-        than vanishing — the reader should know a signal existed even if its
-        content is lost."""
-        path = self.dir / "_signals.jsonl"
-        if not path.exists():
-            return []
-        out = []
-        for line in path.read_text().splitlines():
-            if not line.strip():
-                continue
-            try:
-                out.append(json.loads(line))
-            except json.JSONDecodeError:
-                out.append({"malformed": True})
         return out

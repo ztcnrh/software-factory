@@ -131,8 +131,8 @@ check(
     "./guard.py" in json.dumps(s["hooks"]["PreToolUse"]),
 )
 check(
-    "factory UserPromptSubmit hook added",
-    "record_intervention.py" in json.dumps(s["hooks"]["UserPromptSubmit"]),
+    "no retired steering-capture hook installed",
+    "record_intervention.py" not in json.dumps(s["hooks"]),
 )
 claude_md = (d / "CLAUDE.md").read_text()
 check("project's CLAUDE.md prose survives", "Rules that matter to me." in claude_md)
@@ -319,9 +319,24 @@ d13 = fresh("retired")
 run(d13)
 (d13 / "templates/PRODUCT.md").write_text("stale from 0.1\n")
 (d13 / "labels.yml").write_text("stale from 0.5\n")
+(d13 / ".claude/hooks/record_intervention.py").write_text("# stale from 0.6.2\n")
+stale_settings = json.loads((d13 / ".claude/settings.json").read_text())
+stale_settings["hooks"]["UserPromptSubmit"] = [
+    {"hooks": [{"type": "command", "command": "python3 hooks/record_intervention.py"}]}
+]
+(d13 / ".claude/settings.json").write_text(json.dumps(stale_settings, indent=2))
 out = run(d13)
 check("retired templates/PRODUCT.md pruned", not (d13 / "templates/PRODUCT.md").exists())
 check("retired labels.yml pruned", not (d13 / "labels.yml").exists())
+check(
+    "retired steering-capture hook pruned",
+    not (d13 / ".claude/hooks/record_intervention.py").exists(),
+)
+s13 = json.loads((d13 / ".claude/settings.json").read_text())
+check(
+    "its stale settings entry stripped on upgrade",
+    "record_intervention.py" not in json.dumps(s13.get("hooks", {})),
+)
 
 print("\n=== 14. malformed settings.json hook shapes don't crash the merge ===")
 d14 = fresh("weird")

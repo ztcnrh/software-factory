@@ -312,6 +312,46 @@ def cmd_brief(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- feedback: what people said on the item's PRs ----------------------------
+
+
+def cmd_feedback(args: argparse.Namespace) -> int:
+    from . import feedback
+    from .adapters import github
+
+    d = _disp(args)
+    item = d.store.load(args.id)
+    numbers, bad_refs = feedback.pr_numbers(item)
+    if not numbers and not bad_refs:
+        print(f"{item.id} has no pull requests recorded — nothing to fetch.")
+        return 0
+    # A recorded ref that parses as nothing is a failure to report, never an
+    # absence — otherwise a mangled ref reads as "no feedback".
+    failures = [(ref, "recorded PR reference didn't parse") for ref in bad_refs]
+    prs = []
+    if numbers:
+        if not github.available():
+            print("✗ gh not found — reading PR feedback needs the GitHub CLI", file=sys.stderr)
+            return 1
+        rc, slug = feedback.repo_slug()
+        if rc != 0 or "/" not in slug:
+            print(f"✗ couldn't resolve this repo on GitHub: {slug}", file=sys.stderr)
+            return 1
+        for n in numbers:
+            data, why = feedback.fetch_pr(slug, n)
+            if data is None:
+                failures.append((n, why))
+            else:
+                prs.append(data)
+    print(feedback.render(item.id, prs, failures))
+    if prs or not failures:
+        return 0
+    # Nothing could be read at all: that's an error, not an empty answer — a
+    # station must not mistake "couldn't look" for "no feedback".
+    print("✗ no PR could be fetched — feedback is unknown, not absent", file=sys.stderr)
+    return 1
+
+
 # --- advance: a station finished --------------------------------------------
 
 
@@ -1339,6 +1379,15 @@ def build_parser() -> argparse.ArgumentParser:
         "context in it; earlier attempts' sections are kept)",
     )
     s.set_defaults(func=cmd_brief)
+
+    # -- feedback --
+    s = sub.add_parser(
+        "feedback",
+        help="Print an item's PR feedback: unresolved review threads, review summaries, and "
+        "conversation comments, verbatim (machine posts labeled)",
+    )
+    s.add_argument("id", help="Work item id (WI-####)")
+    s.set_defaults(func=cmd_feedback)
 
     # -- sweep --
     s = sub.add_parser(

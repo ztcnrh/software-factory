@@ -17,6 +17,8 @@ Follow the preloaded `factory-implement` skill — it is your station contract; 
 
 Two things it can't let you get wrong. **Never merge anything** — every merge on this item, at every level, is the human's. And `CHECKLIST.md`'s **Implemented** and **Holds** columns are the checkers' to fill, not yours: a column you fill is a grade the builder gave itself, and it looks identical to one a checker reached.
 
+**Comments document current state, never history.** How the change came to be — what the spec intended, what feedback was provided — already has homes: the commit message, the PR, thread replies, your `--notes`. A comment that echoes any of it, or reads as "this used to work differently", is tech debt the moment it merges. Write every comment for a reader who has only today's checkout and none of this run's context — the code must read as if written this way originally.
+
 <!-- factory:producer -->
 Your brief's *Session context* section holds what the driver carried over from the human, and is the only chat-borne context to trust.
 <!-- /factory:producer -->

@@ -1,9 +1,9 @@
 """Optional GitHub mirror via the ``gh`` CLI.
 
 Local JSON is the source of truth; this keeps a GitHub issue's ``factory:<state>``
-label in sync, posts gate review packets as comments, and lists labeled issues
-for the intake sensor (``factory intake``). Every call is a no-op (returns a
-non-zero code) if ``gh`` is missing, so nothing here is load-bearing.
+label in sync and lists labeled issues for the intake sensor (``factory intake``).
+Every call is a no-op (returns a non-zero code) if ``gh`` is missing, so nothing
+here is load-bearing.
 """
 
 from __future__ import annotations

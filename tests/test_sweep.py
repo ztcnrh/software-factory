@@ -86,16 +86,6 @@ def test_the_brief_creates_and_names_the_scratchpad(factory_root: Path, capsys):
     assert (_home(factory_root, item.id) / "runs" / "scratchpad").is_dir()
 
 
-def test_the_latest_review_conversation_wins(factory_root: Path):
-    """A retry must start from the newest worklist, not whichever file globs first —
-    picking an older round would have it fixing points already addressed."""
-    home = _home(factory_root, "WI-0001")
-    home.mkdir(parents=True, exist_ok=True)
-    (home / "code-review-1.md").write_text("round one")
-    (home / "code-review-2.md").write_text("round two")
-    assert brief_mod.latest_review(factory_root, "WI-0001").name == "code-review-2.md"
-
-
 # --- promotion and sweeping -------------------------------------------------
 
 
