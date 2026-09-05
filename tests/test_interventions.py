@@ -119,25 +119,6 @@ def test_records_survive_a_record_with_no_machine_block(tmp_path):
     assert "category" not in rec
 
 
-def test_malformed_signal_lines_become_markers(tmp_path):
-    """The hook appends to _signals.jsonl blindly (fail-open), so a corrupt line
-    must neither break parsing nor vanish silently — it leaves an in-place marker
-    so the retro knows a steer was lost, and the briefing renders that blip."""
-    from factory.retro import briefing
-
-    sig_dir = tmp_path / ".factory" / "interventions"
-    sig_dir.mkdir(parents=True)
-    (sig_dir / "_signals.jsonl").write_text(
-        '{"ts": "t1", "waiting_items": ["WI-0001"], "steering": "add validation"}\n'
-        "not json at all\n"
-        '{"ts": "t2", "waiting_items": ["WI-0002"], "steering": "wrong scope"}\n'
-    )
-    signals = Interventions(tmp_path).signals()
-    assert [s.get("ts") for s in signals] == ["t1", None, "t2"]
-    assert signals[1] == {"malformed": True}
-    assert "a steer was lost here" in briefing(tmp_path)
-
-
 def test_briefing_flags_repeated_station_runs(tmp_path):
     """A station re-running past the threshold writes no intervention record, so
     the briefing must surface it by attempt count — labeled enough to orient a
@@ -168,16 +149,3 @@ def test_briefing_omits_churn_section_when_all_quiet(tmp_path):
     assert "## Items with repeated station runs" not in briefing(tmp_path)
 
 
-def test_briefing_includes_chat_signals(tmp_path):
-    """Regression: _signals.jsonl used to be written by the hook but never read —
-    chat steering must reach the retro station via the briefing."""
-    from factory.retro import briefing
-
-    sig_dir = tmp_path / ".factory" / "interventions"
-    sig_dir.mkdir(parents=True)
-    (sig_dir / "_signals.jsonl").write_text(
-        '{"ts": "t1", "waiting_items": ["WI-0001"], "steering": "spec misses rate limiting"}\n'
-    )
-    text = briefing(tmp_path)
-    assert "## Chat steering signals" in text
-    assert "spec misses rate limiting" in text

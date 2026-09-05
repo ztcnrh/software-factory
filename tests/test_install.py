@@ -193,6 +193,23 @@ def test_reinstall_refreshes_our_hook_rather_than_stacking_a_second_copy(tmp_pat
     assert json.dumps(hooks["SessionStart"]).count("factory_board.py") == 1
 
 
+def test_upgrade_strips_a_retired_hooks_stale_settings_entry(tmp_path: Path):
+    """Regression: the merge swept only the events the toolkit currently ships, so
+    a factory entry under a retired event (the old steering-capture hook) would
+    have lived in adopter settings forever. Retiring a hook must retire its wiring."""
+    _install(tmp_path)
+    settings_path = tmp_path / ".claude" / "settings.json"
+    s = json.loads(settings_path.read_text())
+    s["hooks"]["UserPromptSubmit"] = [
+        {"hooks": [{"type": "command", "command": "python3 hooks/record_intervention.py"}]}
+    ]
+    settings_path.write_text(json.dumps(s))
+    _install(tmp_path)
+    hooks = json.loads(settings_path.read_text())["hooks"]
+    assert "record_intervention.py" not in json.dumps(hooks)
+    assert "UserPromptSubmit" not in hooks  # only our entry lived there — no empty husk left
+
+
 def test_uninstall_removes_only_our_entry_from_a_shared_hook_event(tmp_path: Path):
     """The exit has to be as non-destructive as the entry: opting out takes the
     factory's hook off SessionStart and leaves the project's own hook running."""

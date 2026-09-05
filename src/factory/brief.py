@@ -12,7 +12,6 @@ it, so the two can't drift.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from .checklist import Checklist
@@ -59,20 +58,6 @@ def run_marker(attempt: int) -> str:
     """Marks one attempt's section inside the state's brief. Explicit rather than
     the rendered heading, which ``--force`` would stop matching if its wording moved."""
     return f"<!-- factory:run {attempt} -->"
-
-
-_REVIEW_NAME = re.compile(r"code-review-(\d+)\.md")
-
-
-def latest_review(root: str | Path, item_id: str) -> Path | None:
-    """The highest-numbered review conversation file — the send-back worklist an
-    implement retry (or a re-review) reads first."""
-    best: tuple[int, Path] | None = None
-    for p in item_dir(root, item_id).glob("code-review-*.md"):
-        m = _REVIEW_NAME.fullmatch(p.name)
-        if m and (best is None or int(m.group(1)) > best[0]):
-            best = (int(m.group(1)), p)
-    return best[1] if best else None
 
 
 def compose(
@@ -126,6 +111,12 @@ def compose(
             + (f" — PR {item.change_pr} into the feature branch" if item.change_pr else "")
             + " · the implementation pass in flight"
         )
+    if item.pr or item.change_pr:
+        lines.append(
+            f"- **PR feedback:** `factory feedback {item.id}` — unresolved review threads and "
+            "comments on the item's PRs, verbatim. Human words there are gate input; machine "
+            "posts carry a `[factory:…]` label."
+        )
     if action.last_return:
         lines.append(f"- **Routed here by:** {action.last_return}")
     body = item.body.strip() or "_(no body — the title is the whole request)_"
@@ -137,9 +128,6 @@ def compose(
             lines.append(f"- `{a}`{exists}")
     else:
         lines.append("_(none yet)_")
-    review = latest_review(root, item.id)
-    if review:
-        lines.append(f"- Latest review conversation: `{review.relative_to(root)}`")
     # Both checkers get structurally identical briefs; naming the checklist is what
     # differentiates their inputs, rather than the prose in their skills alone.
     if action.checking:

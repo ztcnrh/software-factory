@@ -130,6 +130,8 @@ def main() -> int:
         check("a jira-sourced item records its ticket", "jira AMPS-104" in jstatus)
         factory(tmp, "new", "mystery ref", "--source-ref", "AMPS-105", expect_rc=1)
         check("a non-numeric ref without --source is refused", True)
+        out = factory(tmp, "feedback", item)
+        check("feedback on a PR-less item is a calm no-op", "no pull requests recorded" in out)
 
         print("\n=== walk the line ===")
         seen: list[str] = []

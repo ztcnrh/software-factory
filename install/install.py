@@ -76,7 +76,6 @@ CLAUDE_ITEMS = [
     "commands/factory.md",
     "commands/factory-status.md",
     "hooks/factory_board.py",
-    "hooks/record_intervention.py",
 ]
 ROOT_FILES = [
     "line.yml",
@@ -270,6 +269,8 @@ _RETIRED_PATHS = [
     "templates/PRODUCT.md",  # retired 0.2.0: spec shape moved into the write-product-spec skill
     "templates/TECH.md",  # retired 0.2.0: spec shape moved into the write-tech-spec skill
     "labels.yml",  # retired 0.6.0: renamed github-labels.yml, to free the word for classifiers.yml
+    # retired 0.6.4: chat-steering capture superseded by PR review threads as the signal
+    ".claude/hooks/record_intervention.py",
 ]
 
 
@@ -572,6 +573,8 @@ def copy(src: Path, dst: Path, force: bool, dry: bool = False) -> str:
 
 # The factory's own hook entries are recognised by the scripts they run — the one
 # stable marker in a Claude Code hook entry, which carries no name or id of its own.
+# record_intervention.py no longer ships (retired with its hook), but stays a marker
+# so upgrade/uninstall still strip its stale settings entry from older installs.
 _HOOK_MARKERS = ("factory_board.py", "record_intervention.py")
 
 
@@ -605,13 +608,25 @@ def merge_settings(target: Path, dry: bool = False) -> str:
         if a not in allow:
             allow.append(a)
     hooks = existing.setdefault("hooks", {})
+    # Sweep our previous entries from EVERY event before re-adding — not just the
+    # events we currently ship. A reinstall refreshes rather than stacking, and an
+    # event whose hook we retired loses its stale entry instead of carrying it forever.
+    for event in list(hooks):
+        current = hooks[event]
+        if not isinstance(current, list):
+            continue
+        kept = [e for e in current if not _is_factory_hook(e)]
+        if len(kept) == len(current):
+            continue  # nothing of ours under this event
+        if kept or event in (new.get("hooks") or {}):
+            hooks[event] = kept
+        else:
+            del hooks[event]  # only our entries lived here and we ship none now
     for event, incoming in (new.get("hooks") or {}).items():
         current = hooks.get(event)
         current = current if isinstance(current, list) else []
         incoming = incoming if isinstance(incoming, list) else [incoming]
-        # Drop our previous entries before re-adding, so a reinstall refreshes
-        # rather than stacking a second copy of the same hook.
-        hooks[event] = [e for e in current if not _is_factory_hook(e)] + incoming
+        hooks[event] = current + incoming
     dst.write_text(json.dumps(existing, indent=2) + "\n")
     return f"merged: {dst}"
 
@@ -645,7 +660,9 @@ def unmerge_settings(target: Path, dry: bool) -> str | None:
             allow.remove(a)
             changed = True
     hooks = cur.get("hooks", {})
-    for event in list(fact.get("hooks") or {}):
+    # Every event, not just the ones we currently ship — an entry from a hook we
+    # retired since install still carries our marker and must leave with us.
+    for event in list(hooks if isinstance(hooks, dict) else {}):
         current = hooks.get(event)
         if not isinstance(current, list):
             continue

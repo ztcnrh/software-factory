@@ -160,19 +160,15 @@ def test_brief_marks_a_checking_station_session_section_closed(factory_root: Pat
     assert "deliberately empty" in out and "checking station" in out
 
 
-def test_brief_surfaces_retry_context_and_the_review_conversation(factory_root: Path, capsys):
-    """An implement retry's brief must carry what sent it back and point at the
-    latest review conversation file — the retry starts from the worklist, not
-    from archaeology."""
+def test_brief_surfaces_retry_context(factory_root: Path, capsys):
+    """An implement retry's brief must carry what sent it back — the retry starts
+    from the reviewer's verdict, not from archaeology."""
     d = Dispatcher(factory_root)
     item = d.new_item("Feature")
     item.state = "implement"
     d.store.save(item)
     item = d.store.load(item.id)
     d.advance(item, StationReport(station="implement", verdict="implemented"))
-    review_dir = factory_root / ".factory" / "work-items" / item.id
-    review_dir.mkdir(parents=True, exist_ok=True)
-    (review_dir / "code-review-1.md").write_text("## Worklist\n1. add tests")
     d.advance(
         item, StationReport(station="code_review", verdict="changes_requested", summary="no tests")
     )
@@ -181,7 +177,6 @@ def test_brief_surfaces_retry_context_and_the_review_conversation(factory_root: 
     assert rc == 0
     assert "(attempt 2" in out
     assert "Routed here by:" in out and "no tests" in out
-    assert "code-review-1.md" in out
 
 
 def test_brief_refuses_a_gate_and_points_at_the_packet_flow(factory_root: Path, capsys):
