@@ -21,7 +21,7 @@ flowchart LR
 
 | Move | Where it lands |
 |---|---|
-| **Capture** | `.factory/interventions/` — one record per steer; chat steering while an item waits is hooked in too. Record shape: `src/factory/interventions.py`. |
+| **Capture** | `.factory/interventions/` — one record per gate steer (shape: `src/factory/interventions.py`) — plus the items' PR review threads, where the review loop's asks and answers live. |
 | **Measure** | `factory metrics`. Attending a gate and approving unchanged is the line working, not a miss. |
 | **Learn** | `.factory/retro/<date>/` plus a PR, and one ledger row per proposal in `.factory/retro/LEDGER.md`. |
 | **Dispose** | Skill and template edits take effect on merge. Gate policies sit dormant in `policies.yml` until you set `approved_by:`. |

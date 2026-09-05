@@ -25,7 +25,7 @@ Or let your agent drive it: in a Claude Code session in this repo, say *"install
 - `.claude/skills/` — the station skills (triage, spec, implement, code-review, verify, retro), the spec-writing pair the spec station drives (`write-product-spec`, `write-tech-spec`), `council` (which includes its cross-critique second round), and `research` (delegate noisy investigation to a subagent, keep the caller's context clean). (The deferred `monitor` station is parked under `deferred/` and is not installed.)
 - `.claude/agents/` — the matching subagents (isolated runners).
 - `.claude/commands/` — `/factory` and `/factory-status`.
-- `.claude/hooks/` + merged `.claude/settings.json` — the board + steering hooks.
+- `.claude/hooks/` + merged `.claude/settings.json` — the board hook.
 - `line.yml`, `policies.yml` — the line and its gate policies.
 - `classifiers.yml` — the vocabulary stations classify work items with, and what gate policies match on. Ships seeded with universal terms; yours to grow.
 - `github-labels.yml` — the `factory:<state>` conveyor labels mirrored onto GitHub issues (presentation, not policy input). Named `labels.yml` before v0.6.0; an upgrade removes the old file.

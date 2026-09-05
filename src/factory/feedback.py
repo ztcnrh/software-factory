@@ -7,8 +7,10 @@ done-signal — whoever raised a thread resolves it when satisfied, and until
 then it stays in every station's view; no bookkeeping field can drift from
 that. Comments the factory itself posts end with an invisible
 ``<!-- factory:<station> -->`` marker and are labeled here, so a station never
-mistakes its own output for a human's words. Nothing is filtered out or
-summarized: the engine packages, the reader interprets.
+mistakes its own output for a human's words. Nothing is summarized, and only
+two things are dropped — resolved threads, and reviews with no body text (a
+bare Approve state isn't actionable feedback): the engine packages, the
+reader interprets.
 """
 
 from __future__ import annotations
@@ -150,7 +152,8 @@ def render(item_id: str, prs: list[dict], failures: list[tuple[str, str]]) -> st
     difference."""
     lines = [f"# PR feedback — {item_id}", ""]
     for number, why in failures:
-        lines += [f"⚠ couldn't fetch PR #{number} ({why}) — feedback there is unknown, not absent."]
+        label = f"#{number}" if str(number).isdigit() else repr(number)
+        lines += [f"⚠ couldn't fetch PR {label} ({why}) — feedback there is unknown, not absent."]
     if failures:
         lines.append("")
     for pr in prs:

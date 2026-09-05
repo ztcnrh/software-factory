@@ -106,7 +106,7 @@ One bounded exception: within a single local session the driver may *resume* a s
 
 Statelessness means the factory writes a lot, and without a rule for which of it matters, a work item's pull request arrives buried under the machinery that produced it. The rule: **if the engine can rebuild it from state that survives, it's scratch; if nothing else holds it, it's memory.**
 
-Specs, the checklist, the review conversation, the intervention records, and the decisions a human actually made are memory — committed, and the reason a teammate cloning the repo sees the same board. Station briefs and scratchpads are scratch: they live under `runs/`, are gitignored, and `factory sweep` removes them when the item terminates. A gate's review packet is a *message*, not a file, for the same reason — it renders from state already on disk, and what has to survive (the decision, its signature, its why) is in the item's history.
+Specs, the checklist, the intervention records, and the decisions a human actually made are memory — committed, and the reason a teammate cloning the repo sees the same board. (The review conversation is memory too, but the PR holds it, not the tree.) Station briefs and scratchpads are scratch: they live under `runs/`, are gitignored, and `factory sweep` removes them when the item terminates. A gate's review packet is a *message*, not a file, for the same reason — it renders from state already on disk, and what has to survive (the decision, its signature, its why) is in the item's history.
 
 The sweep is safe to run automatically because it derives what to keep from the item's own record: a file survives because a station **registered it as an artifact**, the same act that makes it visible to the next station and hashed at a gate binding — and because it refuses any path resolving outside the item's directory. What stays committed but noisy (`.factory/` itself) ships marked `linguist-generated`, so it collapses in pull-request diffs rather than competing with the change under review.
 
@@ -114,7 +114,7 @@ The sweep is safe to run automatically because it derives what to keep from the 
 
 Two ways to move the conveyor, sharing one engine and one `line.yml`:
 
-**Local / interactive — the `/factory` command.** The default. It resolves a target item, then loops: `factory next` → read the directive → run the station → `factory advance` → repeat, until a gate or a terminal. A deterministic loop around an intelligent core. The `SessionStart` hook injects the board so every session is factory-aware; `UserPromptSubmit` quietly captures steering you type while an item waits at a gate.
+**Local / interactive — the `/factory` command.** The default. It resolves a target item, then loops: `factory next` → read the directive → run the station → `factory advance` → repeat, until a gate or a terminal. A deterministic loop around an intelligent core. The `SessionStart` hook injects the board so every session is factory-aware.
 
 **Cloud / unattended — GitHub Actions.** Opt-in, shipped disabled. GitHub becomes the conveyor: a `factory:<state>` label triggers that station headlessly, which advances the item and re-labels the issue, triggering the next run. Human-gate labels deliberately don't auto-run — they wait and comment the review packet. See [CLOUD-AUTONOMY.md](CLOUD-AUTONOMY.md). The layers are independent: local works with no cloud at all, and disabling cloud loses nothing.
 

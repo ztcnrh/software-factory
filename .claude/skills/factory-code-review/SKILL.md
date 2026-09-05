@@ -66,7 +66,7 @@ Every finding opens with exactly one tag, written literally — emoji, brackets,
 
   A nit without a concrete replacement is an opinion, not a finding. Drop it rather than make the implementer guess what would satisfy you.
 
-**The first three tags earn `changes_requested`; only `🧹 [NIT]` rides along.** Nits reach the implementer in `--notes` (and in the send-back file, if one is being written anyway) and are theirs to take or leave. If every finding you have is a nit, the verdict is `pass`.
+**The first three tags earn `changes_requested`; only `🧹 [NIT]` rides along.** Nits ride the posted review as inline comments with their suggestion blocks (or in `--notes`, when no remote carries a review) and are theirs to take or leave. If every finding you have is a nit, the verdict is `pass`.
 
 That threshold is deliberately low, and it only works because a send-back is *bounded*: the loop ends when the worklist is answered, not when you run out of opinions. What keeps it bounded is the re-review discipline below — read it before your second pass on any item.
 
@@ -75,7 +75,7 @@ That threshold is deliberately low, and it only works because a send-back is *bo
 Work comes back to you two ways. A `not_ready` from the ship gate arrives with **no implement run in between**, so the diff is the one that already passed: nothing is wrong with your earlier verdict, the human is asking for something it didn't cover. Take their ask as the finding, confirm the diff hasn't moved under you, and write the worklist as you would for any send-back. Otherwise the implementer has reworked, and the rules below apply.
 
 - **Read the delta; use the full diff only for context.** Your last posted review opens with the sha it reviewed (**Reviewed at**) — diff from it (`git diff <that-sha>...HEAD`) to see what actually changed. Don't restart a broad scan of code you already cleared. If no sha was recorded, fall back to the whole change diff, and record one this time.
-- **Give every earlier finding a disposition, in its own thread.** A claimed fix is a claim: check each against the code, then reply in that thread — a fix you verified gets a one-line confirmation and you **resolve the thread** (you raised it; you close it); one still open gets a reply saying exactly what's missing. A *reasoned* decline is a product decision and stands — acknowledge it and resolve; overturn it only with concrete correctness or security evidence, not a restated preference. Threads a *human* opened are theirs to resolve, never yours — reply only. (`factory feedback` prints the reply/resolve one-liners.)
+- **Give every earlier finding a disposition, in its own thread.** A claimed fix is a claim: check each against the code, then reply in that thread — a fix you verified gets a one-line confirmation and you **resolve the thread** (you raised it; you close it); one still open gets a reply saying exactly what's missing. A *reasoned* decline is a product decision and stands — acknowledge it and resolve; overturn it only with concrete correctness or security evidence, not a restated preference. Threads a *human* opened are theirs to resolve, never yours — reply only. A finding you carried in a review **body** (no anchor) has no thread — disposition it in your next review's body. (`factory feedback` prints the reply/resolve one-liners.)
 - **Don't invent new suggestions about old code.** A new `💡 [SUGGESTION]` is legitimate only about code the rework introduced or changed. If something sat in the diff at an earlier pass and you didn't flag it then, it is settled — a fresh opinion is not a new finding, and it now costs a full loop. `🚨 [CRITICAL]` and `⚠️ [IMPORTANT]` you may raise at any pass, anywhere in the diff — another loop costs less than a shipped defect.
 
 ## Output contract
@@ -85,13 +85,14 @@ On a **pass**:
 factory advance <id> --verdict pass --summary "<why it's sound>" --confidence <0..1> \
   [--notes "<for the ship gate: council synthesis + any split, judgment calls you accepted>"]
 ```
-Notes are optional on a pass — use them when the ship-gate human needs context beyond the headline (a council ran, you accepted a debatable judgment call). If the item looped, mention what the loop was about — the ship gate reads the review files but deserves the one-line arc.
+Notes are optional on a pass — use them when the ship-gate human needs context beyond the headline (a council ran, you accepted a debatable judgment call). If the item looped, mention what the loop was about — the ship gate reads the PR threads but deserves the one-line arc.
 
 On a **send-back**, the review lives on the change PR — where review conversations belong, and where your reasoning survives your context ending. Post **one review per pass** via the API, so the summary and the inline findings land together (build the payload in your scratchpad):
 
 ```
 gh api repos/{owner}/{repo}/pulls/<change-pr>/reviews --input review.json
 ```
+(An `automatable` item has no change PR — post on the item's own `pr`, the one carrying the diff.)
 
 - `review.json`: `{"event": "COMMENT", "body": "<summary>", "comments": [{"path": …, "line": …, "side": "RIGHT", "body": "<finding>"}, …]}`. `event` is always `COMMENT` — never `REQUEST_CHANGES`/`APPROVE`, which GitHub refuses on a PR your own token opened, and which would be redundant anyway: routing is the engine's job (`--verdict` is what sends work back), not GitHub review state's.
 - The **body** opens with `Reviewed at <sha>` — the change-branch head you read; the next pass diffs from it — then the rationale a one-liner can't hold (what you traced, why each severity is what it is) and a **Checked and sound** list, so the next pass doesn't re-litigate what you cleared. End it with `<!-- factory:code-review -->` on its own line, the marker that tells `factory feedback` a machine wrote it.

@@ -1401,7 +1401,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  factory sweep --all\n"
             "\n"
             "The factory writes two kinds of file. Memory is what nothing else holds: the\n"
-            "specs, the checklist, the review conversation, the records of what you decided.\n"
+            "specs, the checklist, the records of what you decided.\n"
             "Scratch is what the engine can rebuild: the per-run briefs (regenerate with\n"
             "`factory brief`) and a station's scratchpad. This removes the second kind.\n"
             "\n"

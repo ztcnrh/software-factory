@@ -269,7 +269,7 @@ _RETIRED_PATHS = [
     "templates/PRODUCT.md",  # retired 0.2.0: spec shape moved into the write-product-spec skill
     "templates/TECH.md",  # retired 0.2.0: spec shape moved into the write-tech-spec skill
     "labels.yml",  # retired 0.6.0: renamed github-labels.yml, to free the word for classifiers.yml
-    # retired 0.6.3: chat-steering capture superseded by PR review threads as the signal
+    # retired: chat-steering capture superseded by PR review threads as the signal
     ".claude/hooks/record_intervention.py",
 ]
 

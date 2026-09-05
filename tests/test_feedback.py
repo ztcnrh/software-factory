@@ -28,11 +28,10 @@ def test_pr_numbers_normalizes_every_recorded_form():
 
 
 def test_pr_numbers_reads_urls_by_their_pull_segment_and_reports_duds():
-    """Regression: a '/files' suffix used to make a recorded URL vanish (read as
-    'no feedback'), and a '#discussion_r…' fragment used to extract a different
-    number entirely — another PR's feedback presented as this item's. URLs parse
-    on '/pull/N' alone, and a ref that parses as nothing comes back to be
-    reported, never silently dropped."""
+    """A '/files' suffix must not make a recorded URL vanish (silence reads as
+    'no feedback'), and a '#discussion_r…' fragment must not shift the number —
+    that would present another PR's feedback as this item's. URLs parse on
+    '/pull/N' alone; a ref that parses as nothing comes back to be reported."""
     item = _item(
         pr="https://github.com/o/r/pull/58/files",
         change_passes=[
@@ -52,10 +51,10 @@ def test_author_label_flags_machine_posts():
 
 
 def test_author_label_keeps_a_quote_reply_human():
-    """Regression: GitHub quote-replies copy raw markdown, marker included, so a
-    human answering under a quoted machine post carried the marker mid-body and
-    was labeled as the machine — their send-back read as machine chatter. Only a
-    marker that ends the body (where stations put it) may label."""
+    """GitHub quote-replies copy raw markdown, marker included — a human answering
+    under a quoted machine post must stay labeled human, or their send-back reads
+    as machine chatter. Only a marker ending the body (where stations put it)
+    may label."""
     quoted = "> done in abc123\n> <!-- factory:implement -->\n\nNo, this is still broken."
     assert feedback.author_label("tz", quoted) == "tz"
 
@@ -144,9 +143,8 @@ def test_fetch_pr_filters_resolved_threads_and_empty_reviews(monkeypatch):
 
 
 def test_fetch_pr_reports_a_missing_pr_plainly(monkeypatch):
-    """Regression: the not-found check ran after the threads were read off the
-    null PR, so a deleted PR surfaced as 'unparseable graphql output' — a lie
-    about output that parsed fine — instead of naming what's actually wrong."""
+    """A deleted or nonexistent PR must be named plainly — reporting it as
+    'unparseable graphql output' would be a lie about output that parsed fine."""
     import json
 
     payload = json.dumps({"data": {"repository": {"pullRequest": None}}})

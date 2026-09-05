@@ -33,9 +33,9 @@ The guards riding those paths (digest-bound gates, the attempt cap, the policy-s
 
 ## Everything else, when you need it
 
-The leaf modules each own exactly one artifact on disk and none of them affect the line's *motion*: `store.py`, `brief.py`, `feedback.py`, `policies.py`, `interventions.py`, `metrics.py`, `retro.py`, `ledger.py`, `classifiers.py`, `checklist.py`, `sweep.py`, `adapters/github.py`. Under all of them sits `io.py` — atomic replace and a file lock, so durable writes handle crash-safety and concurrency in one place instead of each caller re-deriving it. The module table in [ARCHITECTURE.md](ARCHITECTURE.md) says what each owns — open one when you're changing it.
+The leaf modules each own exactly one concern and none of them affect the line's *motion*: `store.py`, `brief.py`, `policies.py`, `interventions.py`, `metrics.py`, `retro.py`, `ledger.py`, `classifiers.py`, `checklist.py`, `sweep.py` own one on-disk artifact apiece, while `feedback.py` and `adapters/github.py` own the GitHub surface (PR feedback in, issue labels out). Under the disk-writers sits `io.py` — atomic replace and a file lock, so durable writes handle crash-safety and concurrency in one place instead of each caller re-deriving it. The module table in [ARCHITECTURE.md](ARCHITECTURE.md) says what each owns — open one when you're changing it.
 
-Same for the prompt layer: `.claude/skills/factory-*/SKILL.md` (read `factory-triage` and `factory-spec` fully to get the pattern, skim the rest), `.claude/agents/factory-*.md`, `.claude/commands/factory.md`, and the two hook scripts under `.claude/hooks/`. What belongs in which file, and why, is Layer 2 of [ARCHITECTURE.md](ARCHITECTURE.md).
+Same for the prompt layer: `.claude/skills/factory-*/SKILL.md` (read `factory-triage` and `factory-spec` fully to get the pattern, skim the rest), `.claude/agents/factory-*.md`, `.claude/commands/factory.md`, and the board hook under `.claude/hooks/`. What belongs in which file, and why, is Layer 2 of [ARCHITECTURE.md](ARCHITECTURE.md).
 
 To know exactly what "adopting the factory" means, read the `CLAUDE_ITEMS` / `ROOT_FILES` lists in `install/install.py` — those lists *are* the install contract.
 
