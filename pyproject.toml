@@ -1,6 +1,6 @@
 [project]
 name = "software-factory"
-version = "0.6.4"
+version = "0.6.5"
 description = "A personal software factory — an agentic, self-improving loop that triages, specs, implements, reviews, verifies, ships, and monitors software changes, and learns from every human touch."
 readme = "README.md"
 requires-python = ">=3.13"

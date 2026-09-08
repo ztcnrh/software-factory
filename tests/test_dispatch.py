@@ -107,9 +107,9 @@ def test_gate_records_the_decider_identity(factory_root: Path):
     assert [e for e in item.history if e.kind == "gate"][-1].actor == "human:alice"
 
 
-def test_needs_revision_records_intervention_and_loops_back(factory_root: Path):
-    """Sending a spec back must (a) route to the spec station and (b) capture an
-    intervention record — the raw material the retro station learns from."""
+def test_needs_revision_records_a_steer_and_loops_back(factory_root: Path):
+    """Sending a spec back must (a) route to the spec station and (b) record the
+    steer in the metrics ledger — the raw material the retro station learns from."""
     d = Dispatcher(factory_root)
     item = d.new_item("Vague feature", risk="medium")
     _advance(d, item, "needs_spec")
@@ -124,7 +124,8 @@ def test_needs_revision_records_intervention_and_loops_back(factory_root: Path):
         ),
     )
     assert item.state == "spec"
-    assert len(d.interventions.list()) == 1
+    steers = [e for e in d.metrics.events() if e.get("kind") == "gate" and e.get("changed")]
+    assert len(steers) == 1 and steers[0]["category"] == "missing-edge-case"
 
 
 def test_station_report_spawns_child_at_triage(factory_root: Path):
@@ -286,9 +287,9 @@ def test_escalation_notes_and_confidence_survive_the_escape_hatch(factory_root: 
     assert [e for e in d.metrics.events() if e["kind"] == "station"][-1]["confidence"] == 0.3
 
 
-def test_is_steer_is_the_single_definition_of_an_intervention():
+def test_is_steer_is_the_single_definition_of_a_steer():
     """The 'did the human steer?' predicate lives on GateDecision so the dispatcher
-    (records the intervention) and the CLI (nudges for the why) can never drift:
+    (records the steer) and the CLI (nudges for the why) can never drift:
     steering decisions steer on their own; --changed marks an edited approval;
     a clean approval is not a steer."""
     assert GateDecision(gate="g", decision="needs_revision").is_steer

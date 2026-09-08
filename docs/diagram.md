@@ -37,10 +37,10 @@ flowchart TD
     parked -. "revive" .-> triage
 
     %% ---- the learning loop, declared last so it doesn't anchor the layout ----
-    %% interventions at the gates feed retro; retro proposes improvements back
+    %% steers at the gates feed retro; retro proposes improvements back
     retro{{Retro station}}:::learn
-    specrev <-. "interventions in / gate policies out" .-> retro
-    shiprev <-. "interventions in / gate policies out" .-> retro
+    specrev <-. "steers in / gate policies out" .-> retro
+    shiprev <-. "steers in / gate policies out" .-> retro
     retro -. "improves station skills" .-> spec
 
     %% edges 0-11 = solid happy path (green); 12-26 = dashed off-path (gray)
@@ -53,6 +53,6 @@ flowchart TD
     classDef learn fill:#d7c5f5,stroke:#5a32a3,color:#2a1550
 ```
 
-The **Retro station** (purple) closes the learning loop: every human intervention at a gate feeds it, and it proposes improvements back — sharper station skills, gate policies that auto-clear proven-safe items — because in this factory the line doesn't just run, it re-tools itself from every human steer. See [LEARNING-LOOP.md](LEARNING-LOOP.md). (Note: `verify` routes to the ship gate on both `verified` and `failed` — the human always sees verification output — but only `verified` is the happy path, so `failed` is drawn dashed.)
+The **Retro station** (purple) closes the learning loop: every human steer at a gate feeds it, and it proposes improvements back — sharper station skills, gate policies that auto-clear proven-safe items — because in this factory the line doesn't just run, it re-tools itself from every human steer. See [LEARNING-LOOP.md](LEARNING-LOOP.md). (Note: `verify` routes to the ship gate on both `verified` and `failed` — the human always sees verification output — but only `verified` is the happy path, so `failed` is drawn dashed.)
 
 The ship gate has two distinct ways back, and which one it is says where the problem was. **`not ready`** goes to code review: something is wrong with the change. **`recheck`** goes straight back to verification: nothing is wrong with the change — verification couldn't demonstrate part of it (missing access, an environment that wouldn't come up), the human cleared that blocker, and the item needs demonstrating rather than rebuilding. Both count as human steers against the North Star; `recheck` just costs one station run instead of three.

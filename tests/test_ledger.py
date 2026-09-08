@@ -113,7 +113,7 @@ def test_briefing_opens_with_open_ledger_rows(tmp_path):
     assert "## Reconcile past proposals first" in text
     assert open_row["id"] in text and "watch this one" in text
     assert "already adjudicated" not in text
-    assert text.index("Reconcile past proposals") < text.index("## Raw intervention records")
+    assert text.index("Reconcile past proposals") < text.index("## Steer log")
 
 
 def test_briefing_stays_quiet_with_no_open_rows(tmp_path):
@@ -124,29 +124,29 @@ def test_briefing_stays_quiet_with_no_open_rows(tmp_path):
     assert "Reconcile past proposals" not in briefing(tmp_path)
 
 
-def _intervention_file(root, ts_name: str, category: str) -> None:
-    d = root / ".factory" / "interventions"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / f"WI-0001-spec_review-{ts_name}.md").write_text(
-        "# Intervention — WI-0001 @ spec_review\n\n---\n"
-        f'```yaml\nitem: WI-0001\ngate: spec_review\ncategory: "{category}"\n```\n'
+def _steer(root, ts: str, category: str) -> None:
+    from factory.metrics import Metrics
+
+    Metrics(root).emit(
+        kind="gate", item="WI-0001", gate="spec_review", decision="needs_revision",
+        changed=True, category=category, ts=ts,
     )
 
 
 def test_recurrence_check_flags_an_applied_row_whose_category_came_back(tmp_path):
-    """The falsifiability join: an applied proposal claims its intervention
-    category stops recurring — a later matching intervention must be flagged
-    mechanically, not left to a future retro's memory."""
+    """The falsifiability join: an applied proposal claims its steer category
+    stops recurring — a later matching steer must be flagged mechanically, not
+    left to a future retro's memory."""
     from factory.retro import briefing
 
     led = Ledger(tmp_path)
     row = _add(led, category="missing-edge-case")
     led.update(row["id"], status="applied")
-    # An intervention BEFORE the apply date is the evidence the proposal answered,
-    # not a recurrence — the check must scope to interventions since.
-    _intervention_file(tmp_path, "1999-01-01T00-00-00Z", "missing-edge-case")
+    # A steer BEFORE the apply date is the evidence the proposal answered,
+    # not a recurrence — the check must scope to steers since.
+    _steer(tmp_path, "1999-01-01T00:00:00Z", "missing-edge-case")
     assert "Recurrence check" not in briefing(tmp_path)
-    _intervention_file(tmp_path, "2999-01-01T00-00-00Z", "missing-edge-case")
+    _steer(tmp_path, "2999-01-01T00:00:00Z", "missing-edge-case")
     text = briefing(tmp_path)
     assert "Recurrence check" in text
     assert row["id"] in text and "missing-edge-case" in text
@@ -159,7 +159,7 @@ def test_recurrence_check_ignores_other_categories_and_unapplied_rows(tmp_path):
 
     led = Ledger(tmp_path)
     _add(led, category="missing-edge-case")  # proposed, never applied
-    _intervention_file(tmp_path, "2999-01-01T00-00-00Z", "wrong-scope")
+    _steer(tmp_path, "2999-01-01T00-00-00Z", "wrong-scope")
     assert "Recurrence check" not in briefing(tmp_path)
 
 

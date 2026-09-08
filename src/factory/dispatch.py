@@ -21,7 +21,6 @@ from typing import Any
 from . import sweep
 from .checklist import DISPOSITIONS, Checklist, ChecklistError, row_label
 from .classifiers import Classifiers
-from .interventions import Interventions
 from .line import Line, LineError
 from .metrics import Metrics
 from .model import (
@@ -106,7 +105,6 @@ class Dispatcher:
         self.policy_state = PolicyState(self.root)
         self.store = Store(self.root)
         self.metrics = Metrics(self.root)
-        self.interventions = Interventions(self.root)
 
     def active_auto_rule(self, gate: str, item: WorkItem) -> dict | None:
         """The one lookup every auto-clear goes through: policies.yml rules
@@ -397,7 +395,7 @@ class Dispatcher:
             # Station notes are context for whoever reads the item next — the human
             # at the gate (via status / the review packet) and the next station.
             # Persist them; the report object itself is discarded. (The retro
-            # briefing reads interventions + metrics, not these, so notes don't
+            # briefing reads the metrics ledger, not these, so notes don't
             # auto-fuel it — a retro would have to dig into work-item history.)
             item.log(kind="note", actor=report.station, note=report.notes)
         for spec in report.spawn:
@@ -466,15 +464,16 @@ class Dispatcher:
         self,
         item: WorkItem,
         decision: GateDecision,
-        produced: str = "",
         accept_drift: bool = False,
         retractions: list[tuple[str, str]] | None = None,
         notices: list[str] | None = None,
     ) -> str:
-        """Record a human's decision at a gate; capture an intervention if the
-        human steered (revision / not-ready / park / explicit change). If the
-        gate was bound (``bind_gate``), the decision is checked against the
-        bound snapshot and refused on drift unless ``accept_drift``.
+        """Record a human's decision at a gate. A steer (revision / not-ready /
+        park / explicit change) lands in the metrics ledger with its category and
+        expected — the structured record the retro mines; the why travels in the
+        gate event's note and on the PR threads. If the gate was bound
+        (``bind_gate``), the decision is checked against the bound snapshot and
+        refused on drift unless ``accept_drift``.
 
         ``retractions`` ride along with the decision the human is already making —
         the human's retraction path, unrestricted by provenance.
@@ -541,12 +540,6 @@ class Dispatcher:
         item.metadata["epoch_len"] = len(item.history)
         if decision.is_steer:
             item.steers += 1  # a send-back / correction / park is human rework
-            path = self.interventions.record(item, decision, state, produced)
-            item.log(
-                kind="note",
-                actor="factory",
-                note=f"intervention recorded at {path.relative_to(self.root)}",
-            )
             self._suspend_clearing_rules(
                 item, f"human steer at {gate_name} ({decision.decision})"
             )
@@ -560,6 +553,12 @@ class Dispatcher:
             by=decision.by,
             required_human=True,
             changed=decision.is_steer,
+            # The steer's structured half — what the retro's recurrence check and
+            # the category vocabulary join on. The free-text why lives in the gate
+            # event's note and on the PR review threads.
+            category=decision.category,
+            expected=decision.expected,
+            notes=decision.notes,
         )
         return item.state
 
@@ -633,7 +632,7 @@ class Dispatcher:
         return item.state
 
     def apply_auto_gate(self, item: WorkItem, gate: str, rule: dict) -> str:
-        """Clear a gate via an approved policy — no human, no intervention."""
+        """Clear a gate via an approved policy — no human, no steer."""
         state = item.state
         decision = rule["decision"]
         nxt = self.line.route(state, decision)

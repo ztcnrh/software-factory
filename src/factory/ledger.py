@@ -1,7 +1,7 @@
 """The retro ledger: durable memory for the learning loop's own proposals.
 
 Every retro proposal (``RP-####`` — Retro Proposal) gets one row — what it
-changed, the intervention(s) it answered, the "how you'll know it worked"
+changed, the steer(s) it answered, the "how you'll know it worked"
 signal, and a status tracking what became of it (``proposed`` → ``applied``, via
 ``dormant`` for a policy awaiting its signature; ``rejected``/``superseded``
 closes it) plus the later observed outcome. The retro station opens every run by
@@ -71,7 +71,7 @@ class Ledger:
                         by_id[rid][k] = row[k]
                 if row.get("status") is not None:
                     # When the status last changed — the recurrence check scopes
-                    # "did the steer come back?" to interventions after this.
+                    # "did the steer come back?" to steers recorded after this.
                     by_id[rid]["status_since"] = row.get("ts", "")
             else:
                 self.warnings.append(f"line {i}: update for unknown id {rid!r} — skipped")

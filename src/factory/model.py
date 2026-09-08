@@ -253,8 +253,8 @@ class StationReport:
 # Gate decisions that are themselves a steer (rework), regardless of --changed.
 # `recheck` belongs here even though the code is fine: the human had to resolve a
 # blocker the line couldn't get past, which is an unblock — and the North Star
-# counts those. It also writes an intervention record, which is the point: "verify
-# couldn't reach staging" is exactly the recurring gap a retro should aim at.
+# counts those. It also records a steer, which is the point: "verify couldn't
+# reach staging" is exactly the recurring gap a retro should aim at.
 STEERING_VERDICTS = {"needs_revision", "not_ready", "recheck", "park"}
 
 
@@ -275,6 +275,6 @@ class GateDecision:
     def is_steer(self) -> bool:
         """Did the human steer? True for a send-back/park (the decision itself is
         rework) or an approval where they edited the work (``changed``). This single
-        definition decides what counts as an intervention everywhere — the dispatcher
-        records one, and the CLI nudges for the missing why."""
+        definition decides what counts as a steer everywhere — the dispatcher
+        records one in the metrics ledger, and the CLI nudges for the missing why."""
         return self.changed or self.decision in STEERING_VERDICTS

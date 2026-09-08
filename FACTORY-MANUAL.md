@@ -98,7 +98,7 @@ factory gate <id> --decision recheck --notes "granted staging access"   # → ba
 ```
 
 ### Shelving at either gate (`park`)
-Both gates also let you stop the line: `--decision park --notes "why" --category ...` moves the item to `parked` (terminal but **revivable**). Use it when the item shouldn't proceed *now* — an external/org blocker, a premature vision, more tech debt than it's worth. Because `park` is a steering decision, your `--notes` reason is captured as an intervention, so shelving also feeds the learning loop.
+Both gates also let you stop the line: `--decision park --notes "why" --category ...` moves the item to `parked` (terminal but **revivable**). Use it when the item shouldn't proceed *now* — an external/org blocker, a premature vision, more tech debt than it's worth. Because `park` is a steering decision, your `--notes` reason is recorded with the steer, so shelving also feeds the learning loop.
 
 To bring it back: `factory revive <id>` re-enters at triage (the safe default — the codebase and priorities may have moved while it sat), or `factory revive <id> --resume` re-enters at the state it was parked from (recorded at park time) when you know the shelved context is still fresh — e.g. an item parked at `ship_review` goes straight back to that gate instead of re-running the whole line.
 
@@ -111,7 +111,7 @@ Triage couldn't proceed without a product/priority call only you can make. Answe
 ### The one habit that matters
 **When you steer, say *why* — generalizably.** A send-back or `park` counts as a steer on its own; add `--changed` only when you *approve* but fixed the work at the gate yourself (by hand or by directing your agent), so that steer gets recorded too. Either way, `--notes "..." --category ...` is what turns a one-off correction into a permanent fix. "Public write endpoints always need input validation" teaches the factory; "fix this" doesn't. Thirty seconds of *why* now buys you fewer gates later.
 
-**Keep `--category` a small, reused vocabulary.** Name the *failure mode*, not the fix (`missing-edge-case`, not `add-validation`), in kebab-case, and reuse a word you've used before wherever it fits. The retro's recurrence check joins ledger rows to interventions on that exact string, so `missing_edge_case` and `missing-edge-case` are two unrelated categories and the join quietly finds nothing. Nothing validates the vocabulary — it's yours to grow — but the CLI prints the categories already in use whenever you introduce a new one, so a typo is visible at the moment you make it.
+**Keep `--category` a small, reused vocabulary.** Name the *failure mode*, not the fix (`missing-edge-case`, not `add-validation`), in kebab-case, and reuse a word you've used before wherever it fits. The retro's recurrence check joins ledger rows to recorded steers on that exact string, so `missing_edge_case` and `missing-edge-case` are two unrelated categories and the join quietly finds nothing. Nothing validates the vocabulary — it's yours to grow — but the CLI prints the categories already in use whenever you introduce a new one, so a typo is visible at the moment you make it.
 
 ---
 
@@ -123,7 +123,7 @@ Periodically (or on a schedule, in cloud mode), run the learning station:
 /factory retro          # or: factory retro   (then apply the factory-retro skill)
 ```
 
-It reads your accumulated interventions and the metrics, finds the patterns, and **proposes** changes — sharper station skills, better templates, and dormant **gate policies** — written to `.factory/retro/<date>/` and opened as a PR. You **dispose**: review the PR, and activate any proposed policy by setting `approved_by:` on it in `policies.yml`. Each thing you accept aims to take a recurring class of work off your plate. (See [LEARNING-LOOP.md](docs/LEARNING-LOOP.md) for the mechanism behind it.)
+It reads your accumulated steers and the metrics, finds the patterns, and **proposes** changes — sharper station skills, better templates, and dormant **gate policies** — written to `.factory/retro/<date>/` and opened as a PR. You **dispose**: review the PR, and activate any proposed policy by setting `approved_by:` on it in `policies.yml`. Each thing you accept aims to take a recurring class of work off your plate. (See [LEARNING-LOOP.md](docs/LEARNING-LOOP.md) for the mechanism behind it.)
 
 Watch `factory metrics`. The number to grow is the **one-shot ship rate** — the share of changes that ship with no human rework (send-back, correction, or unblock). It is *not* about removing yourself from the loop: you still own the ship decision and can attend every gate; the goal is that the line gets good enough that your review is a rubber-stamp. Expect it low early on and climbing as the factory learns. The list of "where humans had to step in" tells you and the Retro station where the next win is.
 
@@ -133,14 +133,14 @@ Two habits keep the ledger honest on your side:
 - When you merge or decline a retro PR, make sure the verdict lands on the row — `factory ledger update RP-#### --status applied` (a policy reaches `applied` once you sign it; `rejected` when you decline). The session handling the PR review usually does this for you; it takes seconds either way.
 - For your own backward-looking audit, start from `factory ledger list --open` (or read `LEDGER.md`, or ask your main session to walk it) — one file, no folder archaeology. Each row links its PR, so the full detail is one click away.
 
-Two checks also run **mechanically**, so the loop grades itself even when nobody remembers to: the briefing's *recurrence check* flags any applied proposal whose intervention category has recurred since it took effect (rows carry `--category` for exactly this join — the fix didn't hold), and a signed gate policy whose auto-cleared item later needed your rework is **auto-suspended**: the gate quietly returns to you, `factory policy list` shows which rule and why, and `factory policy reinstate <id>` re-arms it once you've judged the failure wasn't the rule's fault. Autonomy is an asymmetric ratchet on purpose — only you promote; failures demote by themselves.
+Two checks also run **mechanically**, so the loop grades itself even when nobody remembers to: the briefing's *recurrence check* flags any applied proposal whose steer category has recurred since it took effect (rows carry `--category` for exactly this join — the fix didn't hold), and a signed gate policy whose auto-cleared item later needed your rework is **auto-suspended**: the gate quietly returns to you, `factory policy list` shows which rule and why, and `factory policy reinstate <id>` re-arms it once you've judged the failure wasn't the rule's fault. Autonomy is an asymmetric ratchet on purpose — only you promote; failures demote by themselves.
 
 ---
 
 ## 5. Files you'll touch vs. files the factory owns
 
 - **You edit:** `line.yml` (reshape the line), `policies.yml` (activate learned policies), the station skills under `.claude/skills/` (when you want to teach a station directly).
-- **The factory owns (commit it — it's the memory):** `.factory/work-items/`, `.factory/interventions/`, `.factory/metrics/`, `.factory/retro/`. Keep these in version control; they're what the system learns from across time.
+- **The factory owns (commit it — it's the memory):** `.factory/work-items/`, `.factory/metrics/`, `.factory/retro/`. Keep these in version control; they're what the system learns from across time.
 
 ---
 

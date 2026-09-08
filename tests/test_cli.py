@@ -67,19 +67,6 @@ def _item_at(factory_root: Path, state: str) -> str:
     return item.id
 
 
-def test_gate_produced_flags_are_mutually_exclusive(factory_root: Path, capsys):
-    """--produced and --produced-file must conflict loudly — the file used to
-    silently win, discarding the inline evidence meant for the intervention record."""
-    item_id = _item_at(factory_root, "spec_review")
-    with pytest.raises(SystemExit) as exc:
-        main(
-            ["--root", str(factory_root), "gate", item_id, "--decision", "approved",
-             "--produced", "inline", "--produced-file", "somewhere.md"]
-        )
-    assert exc.value.code == 2
-    assert "not allowed with argument" in capsys.readouterr().err
-
-
 def test_policy_list_and_reinstate_flow(factory_root: Path, capsys):
     """The operator's view of the ratchet: list shows live status per rule
     (active/dormant/suspended with the why), reinstate re-arms, and a second
@@ -262,7 +249,7 @@ def test_gate_bind_decide_drift_flow_end_to_end(factory_root: Path, capsys):
 
 def test_gate_steering_without_notes_warns_but_records(factory_root: Path, capsys):
     """A send-back with no --notes still goes through (never block a human at a
-    gate), but warns loudly: an intervention record without a why is a learning-loop
+    gate), but warns loudly: a steer recorded without a why is a learning-loop
     entry the retro can't use."""
     item_id = _item_at(factory_root, "spec_review")
     rc = main(["--root", str(factory_root), "gate", item_id, "--decision", "needs_revision"])
@@ -281,7 +268,7 @@ def test_gate_plain_approval_does_not_warn(factory_root: Path, capsys):
 
 
 def test_gate_surfaces_the_category_vocabulary_on_a_new_word(factory_root: Path, capsys):
-    """The recurrence check joins ledger rows to interventions on an exact string,
+    """The recurrence check joins ledger rows to recorded steers on an exact string,
     so a near-miss spelling breaks it silently. Nothing can validate a free-form
     vocabulary — so the CLI teaches it at the one moment someone picks a word."""
     first = _item_at(factory_root, "spec_review")
@@ -307,19 +294,6 @@ def test_gate_stays_quiet_when_the_category_is_already_in_use(factory_root: Path
     main(["--root", str(factory_root), "gate", second, "--decision", "needs_revision",
           "--notes", "w", "--category", "wrong-scope"])
     assert "new category" not in capsys.readouterr().err
-
-
-def test_gate_warns_when_intervention_fields_ride_a_non_steer(factory_root: Path, capsys):
-    """--expected/--category/--produced only land in an intervention record, which a
-    plain approval never writes — they used to vanish silently; now the human is told
-    to add --changed if they actually steered."""
-    item_id = _item_at(factory_root, "spec_review")
-    rc = main(
-        ["--root", str(factory_root), "gate", item_id, "--decision", "approved",
-         "--category", "missing-edge-case"]
-    )
-    assert rc == 0
-    assert "add --changed" in capsys.readouterr().err
 
 
 def test_the_feature_branch_and_the_change_pr_are_recorded_separately(
@@ -806,17 +780,15 @@ def test_doctor_catches_an_id_that_disagrees_with_its_filename(factory_root: Pat
     assert "filename and id disagree" in capsys.readouterr().err
 
 
-def test_doctor_flags_a_ledger_category_no_intervention_uses(factory_root: Path, capsys):
+def test_doctor_flags_a_ledger_category_no_steer_uses(factory_root: Path, capsys):
     """The recurrence join is exact string equality, so a near-miss spelling makes
     it find nothing forever. `factory gate` nudges the steer side; nothing nudges
     the ledger side, which is what an agent types while writing up a proposal."""
-    from factory.interventions import Interventions
-    from factory.model import GateDecision, WorkItem
+    from factory.metrics import Metrics
 
-    Interventions(factory_root).record(
-        WorkItem(id="WI-0001", title="t", state="spec_review"),
-        GateDecision(gate="spec_review", decision="needs_revision", category="missing-edge-case"),
-        "spec_review",
+    Metrics(factory_root).emit(
+        kind="gate", item="WI-0001", gate="spec_review", decision="needs_revision",
+        changed=True, category="missing-edge-case",
     )
     Ledger(factory_root).add(
         title="tighten the spec skill",
@@ -829,18 +801,7 @@ def test_doctor_flags_a_ledger_category_no_intervention_uses(factory_root: Path,
     rc = main(["--root", str(factory_root), "doctor"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "matches no intervention record" in out
+    assert "matches no recorded steer" in out
     assert "did you mean 'missing-edge-case'?" in out
 
 
-def test_doctor_flags_an_intervention_with_no_machine_block(factory_root: Path, capsys):
-    """records() is best-effort by design, so a record whose machine block is gone
-    still counts as a steer but drops out of every category join — best-effort has
-    to be visible somewhere or it is just silent loss with better manners."""
-    d = factory_root / ".factory" / "interventions"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "WI-0001-spec_review-2026-08-04T10-00-00Z.md").write_text("# hand-written notes\n")
-    rc = main(["--root", str(factory_root), "doctor"])
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert "no readable machine block" in out

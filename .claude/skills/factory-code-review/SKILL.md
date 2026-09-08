@@ -16,7 +16,6 @@ You are the **code-review station**. Judge the diff against the spec and the rep
 ## Read first
 - `factory status <id>`, the spec under `specs/<id>-<slug>/` (exact paths in the item's artifacts), and the change under review: the item's `change_pr`, which targets the feature branch — equivalently `git diff <branch>...<change_branch>`. Review **that pass**, not the feature branch's whole history; earlier passes were reviewed on their own PRs. An `automatable` item has no change branch, so its `pr` against the integration branch is the diff.
 - `factory feedback <id>` — the review conversation so far, straight from the change PR: your earlier reviews (labeled `[factory:code-review]`), the implementer's replies, and anything a human added. Unlabeled words are a human's — treat them as gate input, not as one more reviewer's opinion. If your own unresolved threads exist, this is a re-review; read **Re-reviews** below before you start.
-- The intervention history at `.factory/interventions/` for this kind of change — past human corrections tell you what reviewers here actually care about.
 - The diff itself you read inline, always. But a question that reaches *beyond* it — how an API you're judging is used across the repo, what a touched subsystem actually does — is survey noise: read this repo's `research` skill (`.claude/skills/research/SKILL.md`) and let a subagent absorb it, so your context stays on the change under review.
 
 ## Fill your column of the checklist

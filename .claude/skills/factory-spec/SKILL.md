@@ -94,7 +94,7 @@ factory advance <id> \
 
 ## Revisions
 
-If the item comes back `needs_revision`, two places hold the why. The intervention record under `.factory/interventions/` carries the gate's notes; and when the human reviewed the spec in the GitHub UI, `factory feedback <id>` prints their inline comments on the feature PR — asks anchored to the exact spec lines they mean. Address each thread and reply in it with what changed (end replies with `<!-- factory:spec -->`; the command prints the reply one-liner); resolving the thread is theirs, not yours. Address the specific gaps, don't rewrite wholesale, and commit to the **same** feature branch.
+If the item comes back `needs_revision`, two places hold the why. The gate's notes are in the item's history (`factory status <id>`); and when the human reviewed the spec in the GitHub UI, `factory feedback <id>` prints their inline comments on the feature PR — asks anchored to the exact spec lines they mean. Address each thread and reply in it with what changed (end replies with `<!-- factory:spec -->`; the command prints the reply one-liner); resolving the thread is theirs, not yours. Address the specific gaps, don't rewrite wholesale, and commit to the **same** feature branch.
 
 ## Guardrails
 

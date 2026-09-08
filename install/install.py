@@ -495,7 +495,7 @@ def write_manifest(
 def uninstall(target: Path, prior: dict | None, dry: bool) -> int:
     """Remove the factory from a repo: delete what the installer created, unmerge
     settings.json, strip the CLAUDE.md block. Deliberately leaves .factory/ —
-    that's the repo's own history (work items, interventions, metrics)."""
+    that's the repo's own history (work items, metrics)."""
     if prior and prior.get("created"):
         owned = prior["created"]
         print(f"uninstalling factory v{prior.get('toolkit_version', '?')} (per install manifest)")
@@ -542,7 +542,7 @@ def uninstall(target: Path, prior: dict | None, dry: bool) -> int:
     print(
         f"""
 ✓ Factory removed from {target}
-  Left in place: .factory/ — your work items, interventions, and metrics (the
+  Left in place: .factory/ — your work items and metrics (the
   factory's memory, including the install manifest). Delete it manually for a
   clean slate. Review the diff and commit when satisfied.
 """
@@ -788,7 +788,7 @@ def main(argv: list[str] | None = None) -> int:
     log.append(plant_git_block(target, ".gitignore", GITIGNORE_BLOCK, dry))
     log.append(plant_git_block(target, ".gitattributes", GITATTRIBUTES_BLOCK, dry))
     runtime = target / ".factory"
-    subs = ("work-items", "interventions", "metrics")
+    subs = ("work-items", "metrics")
     missing = [s for s in subs if not (runtime / s).is_dir()]
     if not missing:
         log.append(f"skip (exists): {runtime}")

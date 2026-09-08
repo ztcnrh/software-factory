@@ -180,7 +180,7 @@ def _print_action(action: Action, line: Line) -> None:
 
 def cmd_init(args: argparse.Namespace) -> int:
     root = _root(args)
-    for sub in ("work-items", "interventions", "metrics"):
+    for sub in ("work-items", "metrics"):
         (root / ".factory" / sub).mkdir(parents=True, exist_ok=True)
     missing = [f for f in ("line.yml", "policies.yml") if not (root / f).exists()]
     if missing:
@@ -502,8 +502,6 @@ def cmd_gate(args: argparse.Namespace) -> int:
                 ("--notes", args.notes),
                 ("--expected", args.expected),
                 ("--category", args.category),
-                ("--produced", args.produced),
-                ("--produced-file", args.produced_file),
                 ("--accept-drift", args.accept_drift or None),
                 ("--retract", args.retract or None),
             )
@@ -550,23 +548,10 @@ def cmd_gate(args: argparse.Namespace) -> int:
     )
     if decision.is_steer and not decision.notes.strip():
         # Never block a human at a gate, but don't let the learning signal vanish
-        # silently either: an intervention record without a why teaches the retro nothing.
+        # silently either: a steer recorded without a why teaches the retro nothing.
         print(
-            "⚠ steering with no --notes — the intervention record will carry no 'why', "
-            "so the retro can't learn from it. Consider --notes / --expected / --category.",
-            file=sys.stderr,
-        )
-    produced = ""
-    if args.produced_file:
-        produced = Path(args.produced_file).read_text()
-    elif args.produced:
-        produced = args.produced
-    if not decision.is_steer and (decision.expected or decision.category or produced):
-        # These fields only land in an intervention record, and a non-steer
-        # decision doesn't write one — say so instead of dropping them silently.
-        print(
-            f"⚠ --expected/--category/--produced go into an intervention record, and a plain "
-            f"{decision.decision!r} doesn't write one — add --changed if you steered the work.",
+            "⚠ steering with no --notes — the steer will carry no 'why', so the retro "
+            "can't learn from it. Consider --notes / --expected / --category.",
             file=sys.stderr,
         )
     # Read the vocabulary in use BEFORE the decision writes its own record, but
@@ -576,7 +561,8 @@ def cmd_gate(args: argparse.Namespace) -> int:
     if decision.is_steer and decision.category:
         known_categories = {
             c
-            for r in d.interventions.records()
+            for r in d.metrics.events()
+            if r.get("kind") == "gate"
             if (c := r.get("category")) and c != "uncategorized"
         }
     # Filled in by gate(): things worth showing the human that must not block the
@@ -586,7 +572,6 @@ def cmd_gate(args: argparse.Namespace) -> int:
         new_state = d.gate(
             item,
             decision,
-            produced=produced,
             accept_drift=args.accept_drift,
             retractions=retractions,
             notices=notices,
@@ -606,7 +591,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
     for name, reason in retractions:
         print(f"  ↩ classifier {name!r} retracted: {reason}")
     if decision.category and decision.category not in known_categories:
-        # The retro's recurrence check joins ledger rows to interventions on an
+        # The retro's recurrence check joins ledger rows to recorded steers on an
         # exact string, so a near-miss spelling breaks it silently. The vocabulary
         # is free-form on purpose — nothing to validate against — so surface what
         # is already in use at the one moment someone is choosing a word.
@@ -962,7 +947,6 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     """Cross-check the factory's stores against each other and the config —
     'is my factory consistent?' as one command. Read-only."""
     from .classifiers import Classifiers
-    from .interventions import Interventions
     from .metrics import Metrics
     from .policies import Policies, PolicyState
     from .store import Store
@@ -1065,28 +1049,20 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     led = Ledger(root)
     entries = led.entries()
     warns += [f"retro ledger: {w}" for w in led.warnings]
-    interventions = Interventions(root)
-    records = interventions.records()
-    n_iv = len(records)
+    steers = [e for e in metrics.events() if e.get("kind") == "gate" and e.get("changed")]
     # `factory gate` nudges when a steer coins a new category; nothing nudges the
     # ledger side, so a near-miss spelling only ever surfaces here.
-    in_use = {c for r in records if (c := r.get("category")) and c != "uncategorized"}
+    in_use = {c for e in steers if (c := e.get("category"))}
     for e in entries:
         cat = e.get("category")
         if cat and cat not in in_use:
             near = difflib.get_close_matches(cat, sorted(in_use), n=1)
             warns.append(
-                f"retro ledger: {e['id']} category {cat!r} matches no intervention record"
+                f"retro ledger: {e['id']} category {cat!r} matches no recorded steer"
                 + (f" — did you mean {near[0]!r}?" if near else "")
                 + " (the recurrence check joins on this exact string)"
             )
-    lost = [r for r in records if r.get("malformed")]
-    for r in lost:
-        warns.append(
-            f"intervention {r['path'].name}: no readable machine block — it still "
-            "counts as a steer, but drops out of every category join"
-        )
-    print(f"✓ metrics/ledger read; {n_iv} intervention record(s)")
+    print(f"✓ metrics/ledger read; {len(steers)} steer(s) on record")
 
     import shutil as _shutil
 
@@ -1425,7 +1401,8 @@ def build_parser() -> argparse.ArgumentParser:
     # -- gate --
     s = sub.add_parser(
         "gate",
-        help="Record a human decision at a gate (a steer also writes an intervention record)",
+        help="Record a human decision at a gate (a steer lands in the metrics ledger, with its "
+        "category)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
@@ -1448,7 +1425,7 @@ def build_parser() -> argparse.ArgumentParser:
             "--accept-drift to record anyway (logged, and the human's call to make). A decision\n"
             "with no prior --bind still works — it just isn't drift-checked.\n"
             "A steering decision (needs_revision / not_ready / recheck / park) or --changed\n"
-            "writes an intervention record: give it a generalizable --notes — that's what the\n"
+            "records a steer: give it a generalizable --notes — that's what the\n"
             "retro station learns from."
         ),
     )
@@ -1478,7 +1455,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--changed",
         action="store_true",
         help="The human changed the work at the gate — by hand or by directing their agent — "
-        "instead of sending it back (records an intervention even on approval)",
+        "instead of sending it back (records the steer even on approval)",
     )
     s.add_argument(
         "--notes",
@@ -1500,15 +1477,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="TEXT",
         help="Why that classification was wrong — required, one per --retract, in order",
-    )
-    produced_src = s.add_mutually_exclusive_group()
-    produced_src.add_argument(
-        "--produced", help="What the station produced (inline text), embedded in the record"
-    )
-    produced_src.add_argument(
-        "--produced-file",
-        metavar="FILE",
-        help="Read the produced artifact from FILE instead of --produced",
     )
     s.set_defaults(func=cmd_gate)
 
@@ -1671,7 +1639,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--answers",
         action="append",
         metavar="REF",
-        help="An intervention record (or churn item) this answers; repeat for more",
+        help="A steer (or churn item) this answers, e.g. WI-0007@ship_review; repeat for more",
     )
     a.add_argument("--pr", help="The retro PR carrying the change, once opened")
     a.add_argument(
@@ -1682,9 +1650,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     a.add_argument(
         "--category",
-        help="The intervention category this proposal answers (e.g. missing-edge-case). "
+        help="The steer category this proposal answers (e.g. missing-edge-case). "
         "Once the row is `applied`, the retro briefing mechanically flags any later "
-        "intervention of the same category as a recurrence — the fix didn't hold",
+        "steer of the same category as a recurrence — the fix didn't hold",
     )
     a.set_defaults(func=cmd_ledger)
     u = lsub.add_parser(
@@ -1763,8 +1731,7 @@ def build_parser() -> argparse.ArgumentParser:
             "known state, and matches its filename; every artifact path still exists; lineage\n"
             "(parent) pointers resolve; no stale gate bindings, crashed-save leftovers, or\n"
             "orphaned policy suspensions; metrics/ledger files are readable (torn lines\n"
-            "counted); every ledger category matches an intervention record, and every\n"
-            "intervention still has a readable machine block — the two halves of the retro's\n"
+            "counted); and every ledger category matches a recorded steer — the join the retro's\n"
             "recurrence join, which fails silently when either drifts.\n"
             "\n"
             "Warnings inform; errors exit 1. Run it when something feels off, after a crash,\n"

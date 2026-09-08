@@ -22,13 +22,13 @@ A small, dependency-light Python package (the `factory` CLI).
 | `brief.py` | The deterministic half of a station run's context packet. |
 | `feedback.py` | The item's PR feedback, read back verbatim: unresolved review threads, review summaries, comments — machine posts labeled. |
 | `policies.py` | Evaluates gate policies, and owns **`PolicyState`** — the engine-written overlay that *suspends* a signed rule when an item it auto-cleared later needed a human. |
-| `metrics.py`, `interventions.py`, `retro.py` | The North Star ledger; one record per human steer; the briefing that assembles them for the retro station. |
+| `metrics.py`, `retro.py` | The North Star ledger — one event per gate/station/ship, a steer carrying its category and why; and the briefing that assembles it all for the retro station. |
 | `cli.py` | The thin command surface `/factory` and the workflows call into — every verb documented by its own `-h`. |
 | `adapters/github.py` | An **optional** mirror: keeps an issue's `factory:<state>` label in sync, and lists `intake`-labeled issues for the `factory intake` sensor. Nothing on the line depends on it. |
 
 ### `dispatch.py` — the motor
 
-`next_action()` is pure: it reports what should happen for an item's current state — which attempt this is, whether the station is a checker, what routed the item here. `advance()` records a station's report and routes. `gate()` records a human decision (and captures an intervention if you steered). `apply_auto_gate()` clears a gate via a signed policy. This file *is* the factory's control flow, and it's the most heavily tested.
+`next_action()` is pure: it reports what should happen for an item's current state — which attempt this is, whether the station is a checker, what routed the item here. `advance()` records a station's report and routes. `gate()` records a human decision (and records the steer if you steered). `apply_auto_gate()` clears a gate via a signed policy. This file *is* the factory's control flow, and it's the most heavily tested.
 
 **One deliberate exception to the routing table:** a report with `human_required` sends the item straight to `blocked` regardless of what routes exist — an escape hatch for anything only a human can resolve. Stations whose routing already has a `blocked` verdict (spec, implement) prefer that spelling; the hatch is for everyone else, e.g. verify when it *couldn't check* rather than confirmed a failure. Either way `blocked` counts as a steer, so an unblocked item can't masquerade as a one-shot ship.
 
@@ -106,7 +106,7 @@ One bounded exception: within a single local session the driver may *resume* a s
 
 Statelessness means the factory writes a lot, and without a rule for which of it matters, a work item's pull request arrives buried under the machinery that produced it. The rule: **if the engine can rebuild it from state that survives, it's scratch; if nothing else holds it, it's memory.**
 
-Specs, the checklist, the intervention records, and the decisions a human actually made are memory — committed, and the reason a teammate cloning the repo sees the same board. (The review conversation is memory too, but the PR holds it, not the tree.) Station briefs and scratchpads are scratch: they live under `runs/`, are gitignored, and `factory sweep` removes them when the item terminates. A gate's review packet is a *message*, not a file, for the same reason — it renders from state already on disk, and what has to survive (the decision, its signature, its why) is in the item's history.
+Specs, the checklist, the metrics ledger, and the decisions a human actually made are memory — committed, and the reason a teammate cloning the repo sees the same board. (The review conversation is memory too, but the PR holds it, not the tree.) Station briefs and scratchpads are scratch: they live under `runs/`, are gitignored, and `factory sweep` removes them when the item terminates. A gate's review packet is a *message*, not a file, for the same reason — it renders from state already on disk, and what has to survive (the decision, its signature, its why) is in the item's history.
 
 The sweep is safe to run automatically because it derives what to keep from the item's own record: a file survives because a station **registered it as an artifact**, the same act that makes it visible to the next station and hashed at a gate binding — and because it refuses any path resolving outside the item's directory. What stays committed but noisy (`.factory/` itself) ships marked `linguist-generated`, so it collapses in pull-request diffs rather than competing with the change under review.
 
