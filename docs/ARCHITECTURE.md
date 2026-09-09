@@ -22,7 +22,7 @@ A small, dependency-light Python package (the `factory` CLI).
 | `brief.py` | The deterministic half of a station run's context packet. |
 | `feedback.py` | The item's PR feedback, read back verbatim: unresolved review threads, review summaries, comments — machine posts labeled. |
 | `policies.py` | Evaluates gate policies, and owns **`PolicyState`** — the engine-written overlay that *suspends* a signed rule when an item it auto-cleared later needed a human. |
-| `metrics.py`, `retro.py` | The North Star ledger — one event per gate/station/ship, a steer carrying its category and why; and the briefing that assembles it all for the retro station. |
+| `metrics.py`, `retro.py` | The North Star ledger — one event per gate/station/ship, a steer carrying its category; and the briefing that assembles it all for the retro station. |
 | `cli.py` | The thin command surface `/factory` and the workflows call into — every verb documented by its own `-h`. |
 | `adapters/github.py` | An **optional** mirror: keeps an issue's `factory:<state>` label in sync, and lists `intake`-labeled issues for the `factory intake` sensor. Nothing on the line depends on it. |
 

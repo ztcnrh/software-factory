@@ -500,7 +500,6 @@ def cmd_gate(args: argparse.Namespace) -> int:
                 ("--decision", args.decision),
                 ("--changed", args.changed or None),
                 ("--notes", args.notes),
-                ("--expected", args.expected),
                 ("--category", args.category),
                 ("--accept-drift", args.accept_drift or None),
                 ("--retract", args.retract or None),
@@ -543,7 +542,6 @@ def cmd_gate(args: argparse.Namespace) -> int:
         by=_resolve_actor(args),
         changed=args.changed,
         notes=args.notes or "",
-        expected=args.expected or "",
         category=args.category or "",
     )
     if decision.is_steer and not decision.notes.strip():
@@ -551,7 +549,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
         # silently either: a steer recorded without a why teaches the retro nothing.
         print(
             "⚠ steering with no --notes — the steer will carry no 'why', so the retro "
-            "can't learn from it. Consider --notes / --expected / --category.",
+            "can't learn from it. Consider --notes / --category.",
             file=sys.stderr,
         )
     # Read the vocabulary in use BEFORE the decision writes its own record, but
@@ -1409,8 +1407,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  factory gate WI-0007 --bind\n"
             "  factory gate WI-0007 --decision approved\n"
             "  factory gate WI-0007 --decision needs_revision --category missing-edge-case \\\n"
-            '      --notes "public write endpoints must always specify input validation" \\\n'
-            '      --expected "a validation + rejection-behavior section in the spec"\n'
+            '      --notes "public write endpoints must always specify input validation"\n'
             '  factory gate WI-0007 --decision approved --changed --notes "tightened rollout"\n'
             "  factory gate WI-0007 --decision approved \\\n"
             '      --retract bug --retract-reason "it was a feature request all along"\n'
@@ -1461,8 +1458,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--notes",
         help="The generalizable WHY behind the decision — the learning loop's highest-value input",
     )
-    s.add_argument("--expected", help="What the human wanted the station to produce")
-    s.add_argument("--category", help="Intervention category, e.g. missing-edge-case, wrong-scope")
+    s.add_argument("--category", help="Steer category, e.g. missing-edge-case, wrong-scope")
     s.add_argument(
         "--retract",
         action="append",

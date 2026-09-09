@@ -25,10 +25,12 @@ CHURN_THRESHOLD = 3
 def briefing(root: str | Path, churn_threshold: int = CHURN_THRESHOLD) -> str:
     metrics = Metrics(root)
     summary = metrics.summary()
-    # The steer record: every gate event where the human reworked the line. The
-    # structured half (category, expected) rides the event; the conversation
-    # itself lives on the item's PR threads.
+    # The steer record: every gate event where the human reworked the line. Only
+    # the structured half (category) rides the event; the why lives once, in the
+    # item's gate history event (joined below on the shared ts), and the
+    # conversation itself on the item's PR threads.
     steers = [e for e in metrics.events() if e.get("kind") == "gate" and e.get("changed")]
+    items_by_id = {i.id: i for i in Store(root).list_items()}
 
     lines = ["# Retro briefing", ""]
     lines.append(f"- Steers on record: **{len(steers)}**")
@@ -117,7 +119,7 @@ def briefing(root: str | Path, churn_threshold: int = CHURN_THRESHOLD) -> str:
             lines.append(f"- **{rid}** — suspended {s['ts']} after {s['item']}: {s['why']}")
 
     churn = []
-    for item in Store(root).list_items():
+    for item in items_by_id.values():
         hot = {s: n for s, n in item.attempts.items() if n >= churn_threshold}
         if hot:
             churn.append((max(hot.values()), item, hot))
@@ -154,10 +156,16 @@ def briefing(root: str | Path, churn_threshold: int = CHURN_THRESHOLD) -> str:
         if st.get("category"):
             head += f" (category `{st['category']}`)"
         lines.append(head)
-        if st.get("notes"):
-            lines.append(f"    - why: {st['notes']}")
-        if st.get("expected"):
-            lines.append(f"    - expected: {st['expected']}")
+        it = items_by_id.get(st.get("item"))
+        if it is None:
+            lines.append("    - why: (item pruned — its gate history went with it)")
+        else:
+            why = next(
+                (e.note for e in it.history if e.kind == "gate" and e.ts == st.get("ts")),
+                None,
+            )
+            if why:
+                lines.append(f"    - why: {why}")
         if st.get("item"):
             lines.append(
                 f"    - the conversation: that item's PR review threads "

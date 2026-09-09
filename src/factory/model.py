@@ -260,15 +260,14 @@ STEERING_VERDICTS = {"needs_revision", "not_ready", "recheck", "park"}
 
 @dataclass
 class GateDecision:
-    """A human's decision at a gate. The ``expected``/``category`` fields are the
-    structured learning signal the retro station mines."""
+    """A human's decision at a gate. ``category`` is the structured learning
+    signal the retro station mines; the free-text why travels in ``notes``."""
 
     gate: str
     decision: str  # the verdict chosen, e.g. "approved" | "needs_revision"
     by: str = "unknown"  # who decided — the CLI resolves this to a real identity
     changed: bool = False  # human changed the work at the gate, by hand or via their agent
     notes: str = ""
-    expected: str = ""  # what the human wanted the station to have produced
     category: str = ""  # e.g. "missing-edge-case" | "wrong-scope" | "style"
 
     @property

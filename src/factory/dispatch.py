@@ -469,9 +469,9 @@ class Dispatcher:
         notices: list[str] | None = None,
     ) -> str:
         """Record a human's decision at a gate. A steer (revision / not-ready /
-        park / explicit change) lands in the metrics ledger with its category and
-        expected — the structured record the retro mines; the why travels in the
-        gate event's note and on the PR threads. If the gate was bound
+        park / explicit change) lands in the metrics ledger with its category —
+        the structured record the retro mines; the why travels in the gate
+        event's note and on the PR threads. If the gate was bound
         (``bind_gate``), the decision is checked against the bound snapshot and
         refused on drift unless ``accept_drift``.
 
@@ -524,7 +524,7 @@ class Dispatcher:
         item.human_touches += 1
         for name, reason in retractions or []:
             item.retract_classifier(name, by=actor, reason=reason)
-        item.log(
+        gate_ev = item.log(
             kind="gate",
             from_state=state,
             to_state=nxt,
@@ -554,11 +554,11 @@ class Dispatcher:
             required_human=True,
             changed=decision.is_steer,
             # The steer's structured half — what the retro's recurrence check and
-            # the category vocabulary join on. The free-text why lives in the gate
-            # event's note and on the PR review threads.
+            # the category vocabulary join on. The free-text why lives once, in
+            # the gate history event; sharing that event's ts is what lets the
+            # retro briefing join the two without duplicating the prose here.
+            ts=gate_ev.ts,
             category=decision.category,
-            expected=decision.expected,
-            notes=decision.notes,
         )
         return item.state
 

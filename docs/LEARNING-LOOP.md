@@ -21,7 +21,7 @@ flowchart LR
 
 | Move | Where it lands |
 |---|---|
-| **Capture** | The metrics ledger (`.factory/metrics/events/`) — one gate event per steer, carrying its category, expected, and why — plus the items' PR review threads, where the review loop's asks and answers live. |
+| **Capture** | The metrics ledger (`.factory/metrics/events/`) — one gate event per steer carrying its category; the why lives in the item's gate history and its PR threads — plus the items' PR review threads, where the review loop's asks and answers live. |
 | **Measure** | `factory metrics`. Attending a gate and approving unchanged is the line working, not a miss. |
 | **Learn** | `.factory/retro/<date>/` plus a PR, and one ledger row per proposal in `.factory/retro/LEDGER.md`. |
 | **Dispose** | Skill and template edits take effect on merge. Gate policies sit dormant in `policies.yml` until you set `approved_by:`. |
