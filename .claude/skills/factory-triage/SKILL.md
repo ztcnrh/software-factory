@@ -1,57 +1,140 @@
 ---
 name: factory-triage
-description: The factory's triage station. Assess a new work item (issue/task), reproduce it if it's a bug, judge scope and risk, then route it — to spec, straight to implementation, to a human for clarification, or parked. Use when a work item is at the `triage` state, or when asked to triage an issue for the factory.
+description: The factory's triage station. Assess a new work item (issue/task) against the current codebase and related open issues, reproduce it if it's a bug, judge scope and risk, then route it — to spec, straight to implementation, to a human for clarification, or parked. Use when a work item is at the `triage` state, or when asked to triage an issue for the factory.
 ---
 
 # Triage station
 
-You are the **triage station** on the software factory line. Your job is to look at one new work item and decide where it goes next — fast, and with a recorded rationale. You do not write specs or code here.
+You are the **triage station** on the software factory line. Assess one work item and decide exactly one verdict:
 
-## Read first
-- `factory status <id>` — the work item (title, body, classifiers, risk).
-- If the item mirrors a tracker issue (GitHub, Jira, Linear, …), read that thread before judging scope — the `gh` CLI or the tracker's CLI/API from your shell, or a tracker MCP tool if your run carries one. A mirrored issue is often only a pointer to the ticket that holds the real detail, and triaging a title is how a wrong verdict gets made. Skim it: you're routing, not investigating.
-- The repository it targets: README, `pyproject.toml`/`package.json`/`go.mod` for the stack, and any obviously-related code. Keep this shallow — triage is minutes, not hours.
-- If it's a bug, try the cheapest possible reproduction (a test, a curl, a log read). Note whether you reproduced it.
+- `automatable`
+- `needs_spec`
+- `needs_human_clarification`
+- `park`
 
-## Decide
-Pick exactly one verdict and assign a risk level:
+The goal is to route work honestly, not to make every item appear actionable. Base the decision on evidence from the work item, its tracker thread, the current checkout, and related open issues. You do not write specs or code here.
 
-| Verdict | When |
-|---|---|
-| `automatable` | Small, unambiguous, low-risk. A clear fix or tiny feature with an obvious approach and existing test patterns. Skips the spec station. |
-| `needs_spec` | Real product or architectural ambiguity, cross-cutting change, ~1k+ LOC, or expensive-to-reverse behavior. Most non-trivial features. |
-| `needs_human_clarification` | You cannot proceed without a decision only the human can make (priorities, product intent, access). |
-| `park` | Not worth doing now (duplicate, stale, blocked on something external, low value). Revivable later. Also the umbrella's resting place after a decomposition (below). |
+## Workflow
 
-Assign **risk** `low | medium | high` from blast radius: data/privacy/migrations/auth/ payments/public API → high; isolated internal logic with tests → low.
+### 1. Read the work item
 
-## Decompose an oversized item (the rare fifth path)
+`factory status <id>` gives you the item (title, body, classifiers, risk) and your brief holds the context the driver carried over. The item is already identified — you are routing it, not finding it.
 
-When one item is genuinely **several independent, leaf-sized changes** — each shippable and reviewable on its own, none sharing an unresolved design decision with another — don't send the whole thing down the line as one oversized unit (one bloated spec, one hard-to-review PR). Split it at the item boundary: spawn each leaf as its own work item and park the original as the umbrella. Multiple spawns need the report-file form of advance:
+### 2. Fetch tracker context
 
-```
-cat > /tmp/<id>-triage-report.json <<'EOF'
-{"verdict": "park",
- "summary": "decomposed into leaf items (see spawn events)",
- "risk": "<low|medium|high>",
- "spawn": [
-   {"title": "<leaf 1, self-contained>", "body": "<context + the ask + what done looks like>"},
-   {"title": "<leaf 2, self-contained>", "body": "<same — children do not inherit this body>"}
- ]}
-EOF
-factory advance <id> --report /tmp/<id>-triage-report.json
-```
+If the item mirrors a tracker issue (GitHub, Jira, Linear, …), read that thread before judging scope. A mirrored issue is often only a pointer to the ticket that holds the real detail, and triaging a title is how a wrong verdict gets made. Use the best available integration, in this order:
 
-Each child enters at triage with `parent` set to the umbrella automatically; the umbrella lands in `parked` (revivable if the split turns out wrong) with every spawn recorded in its history. Write each child's body **self-contained** — carry over whatever context that leaf needs, because it won't see the parent's.
+1. A relevant MCP server or native tracker tool
+2. The tracker's authenticated CLI, such as `gh`
+3. The tracker's API or web page
 
-Guards — decomposition is for the clear case, not a habit:
-- **Leaf-sized means not re-splittable.** If a child could plausibly be decomposed again, the split was wrong — the request is a project, not a work item: route it `needs_human_clarification` instead and say so.
-- **Independence is the bar.** Leaves that must land in one PR, share one migration, or settle one design together are *one* item — route `needs_spec` and let the spec scope it.
-- **More than ~5 leaves is a roadmap**, not a decomposition — `needs_human_clarification`.
-- **When in doubt, don't split.** `needs_spec` on the whole item is the safe default; a spec handles scoped complexity fine.
+Fetch:
 
-## Output contract
-Emit your verdict to the line. Set **risk** and attach the **classifiers** that describe the item — gate policies match on both (`max_risk`, and `classifiers_any` / `classifiers_all`), so this is how triage feeds the auto-approval loop (e.g. classify a docs-only change `docs` so a policy can later clear its gate untouched):
+- Full issue title and description
+- Comments and discussion
+- Existing labels, status, assignee, project, and linked issues
+- Attachments or screenshots when they materially affect understanding
+- Related open issues, including likely duplicates, dependencies, and nearby product work
+
+Do not classify solely from the title. Do not expose credentials or secrets while fetching tracker data.
+
+### 3. Inspect the current codebase
+
+Confirm the current checkout is the relevant repository. Search the codebase for the affected feature, behavior, terminology, and likely implementation area.
+
+If `roadmap.md` or `vision.md` exist at the repository root, read them first. Use them to determine whether the item aligns with the stated product direction before choosing a verdict.
+
+Assess:
+
+- Whether the described behavior exists today
+- Likely files, services, and systems involved
+- Whether the item has a bounded implementation path
+- Dependencies, migrations, platform differences, and testing requirements
+- Existing abstractions that make the change cohesive or indicate it does not fit
+- Whether the item aligns with the roadmap and vision (if those documents exist)
+- Whether related open issues or active work change the recommendation
+
+Prefer targeted searches and reads. This is triage, not implementation: do not edit product code.
+
+### 4. Reproduce bugs with reasonable effort
+
+When the item is a bug, try to reproduce it — a confirmed repro is the strongest evidence a verdict can rest on, and a failed one usually means the report is missing something. Match the means to the bug:
+
+- **Cheapest first.** A failing test, a `curl`, a CLI invocation, a log read. Most bugs fall here.
+- **Visible bugs get a browser.** When the issue is a UI, browser, desktop, rendering, layout, or other interactive bug, and visual reproduction would materially improve the readiness decision — being torn between verdicts is exactly that case — drive the app in a real browser with whatever browser-automation tools your run carries, and capture a screenshot of what you saw. When the issue text asks for visual reproduction, screenshots, or video, treat reproduction as required rather than optional.
+- **Long repro paths get a subagent.** When reproducing means standing the app up, seeding data, or walking several screens, spawn an isolated subagent for it rather than filling your own context with setup: hand it the steps from the report, ask for reproduced / not reproduced / blocked plus the evidence, and fold its answer in.
+
+Skip the browser for non-visual issues. Keep the effort bounded: a few minutes, not an investigation. Never block on reproduction: if it needs environment details, credentials, or data you don't have, record that and continue with the best evidence-based verdict.
+
+Fold the reproduction status into your rationale. Confirmed repro strengthens `automatable` or `needs_spec` when the rest of the rubric fits; failed or blocked repro often supports `needs_human_clarification` when steps or environment details are missing. Reproduction status goes in `--summary` either way: `reproduced`, `not reproduced: <why>`, or `not attempted: <why>`.
+
+### 5. Choose one verdict
+
+Use the following rubric. When evidence sits between verdicts, choose the more cautious one.
+
+#### `automatable`
+
+Choose when:
+
+- Desired behavior and success criteria are clear
+- Scope is bounded and cohesive with the current product
+- Likely implementation area is identifiable
+- Complexity and risk are low enough that a coding agent has a good chance of completing it correctly in one pass
+- No unresolved product decision or major dependency blocks implementation
+
+Small bugs with clear reproduction steps and straightforward improvements usually belong here. Skips the spec station.
+
+#### `needs_spec`
+
+Choose when ALL of the following are true:
+
+- The product goal is clear and appears worthwhile
+- The work aligns with the product's roadmap and vision
+- The item has either ambiguity or significant complexity:
+  - **Ambiguity**: Multiple valid product or technical implementations exist with significant differences; a human should weigh in on which direction to pursue
+  - **Complexity**: The implementation is likely more than a few hundred lines of code, spans multiple systems, requires migrations, or carries non-trivial risk
+
+The item should be clear enough to begin product or technical specification work without first asking the reporter basic questions.
+
+If the repository contains `roadmap.md` or `vision.md`, read them before applying this verdict. Only apply `needs_spec` when the item fits the stated product direction. If the item is interesting but does not align with the roadmap or vision, prefer `park` instead.
+
+#### `needs_human_clarification`
+
+Choose when:
+
+- The expected behavior, problem, scope, or reproduction is ambiguous
+- Critical environment details, evidence, or acceptance criteria are missing
+- A decision only the human can make blocks the work (priorities, product intent, access)
+- The item may be actionable, but the available information cannot support a responsible implementation or spec
+
+State the smallest set of concrete questions whose answers would unblock re-triage. Put them in `--summary` — the human sees it at the gate.
+
+#### `park`
+
+Choose when:
+
+- The request does not fit cohesively into the current product or codebase direction
+- It duplicates or conflicts with planned work
+- The benefit does not justify the complexity or maintenance cost
+- A dependency, platform limitation, or strategic decision makes work premature
+
+Explain what would need to change before reconsidering it. Do not use this verdict merely because an item is difficult; complex but cohesive work is usually `needs_spec`. Parked items are revivable.
+
+### 6. Assign risk and classify
+
+Assign **risk** `low | medium | high` from blast radius: data/privacy/migrations/auth/payments/public API → high; isolated internal logic with tests → low.
+
+Attach the **classifiers** that describe the item. Gate policies match on both risk and classifiers (`max_risk`, and `classifiers_any` / `classifiers_all`), so this is how triage feeds the auto-approval loop — e.g. classify a docs-only change `docs` so a policy can later clear its gate untouched.
+
+**Classify, and don't be shy about it.** Your brief lists the classifiers this repo recognizes (`classifiers.yml`); reach for one whenever it fits. But coining a new one is a legitimate move, not a last resort — classifiers only start automating gates away once they're specific enough for a policy to act on safely, and the vocabulary can only get there if the stations that see the work propose the terms. If this item belongs to a recurring *kind* of work the list doesn't name yet, name it, and say in `--notes` what that kind is so the human has something concrete to promote.
+
+The one thing to avoid is a synonym: `doc-update` beside `docs-update` splits one idea in two, and a policy keyed on either then matches half the work. New idea, new term; same idea, existing term. Anything outside the vocabulary is still recorded and never dropped — it just satisfies no gate policy, and stays flagged, until a human promotes it.
+
+You classify early on partial information, so treat your classifiers as a first pass: a later station that disproves one can retract it (`--retract`), and the log keeps both entries.
+
+### 7. Emit the verdict
+
+Run this yourself, in your shell — printing it advances nothing:
 
 ```
 factory advance <id> \
@@ -63,14 +146,13 @@ factory advance <id> \
   --notes "<anything the next station should know>"
 ```
 
-**Classify, and don't be shy about it.** Your brief lists the classifiers this repo recognizes (`classifiers.yml`); reach for one whenever it fits. But coining a new one is a legitimate move, not a last resort — classifiers only start automating gates away once they're specific enough for a policy to act on safely, and the vocabulary can only get there if the stations that see the work propose the terms. If this item belongs to a recurring *kind* of work the list doesn't name yet, name it, and say in `--notes` what that kind is so the human has something concrete to promote.
+One verdict, one risk, one sentence of why. The engine records the verdict and mirrors it to the tracker; you do not label, comment on, or otherwise mutate the tracker yourself.
 
-The one thing to avoid is a synonym: `doc-update` beside `docs-update` splits one idea in two, and a policy keyed on either then matches half the work. New idea, new term; same idea, existing term. Anything outside the vocabulary is still recorded and never dropped — it just satisfies no gate policy, and stays flagged, until a human promotes it.
+## Guardrails
 
-You classify early on partial information, so treat your classifiers as a first pass: a later station that disproves one can retract it (`--retract`), and the log keeps both entries.
-
-For `needs_human_clarification`, instead phrase the open question crisply in `--summary` — the human will see it at the gate.
-
-## Quality bar
-- One verdict, one risk, one sentence of why. Triage is a routing decision, not an investigation. When torn between `automatable` and `needs_spec`, choose `needs_spec` — a cheap spec beats a wrong build.
-- If you find yourself reading for more than a few minutes, the honest verdict is probably `needs_spec`.
+- Do not mutate the tracker: no comments, labels, status, assignment, or other changes. `factory advance` is your only output.
+- Do not implement the item during triage or edit product code.
+- Do not classify an item without checking both the tracker context and the current codebase.
+- Do not put raw secrets, tokens, private environment variables, command output dumps, or internal reasoning in the result.
+- Treat comments from maintainers and linked product/spec documents as stronger evidence than guesses from code alone.
+- If you find yourself reading for more than a few minutes, the honest verdict is probably `needs_spec` — a cheap spec beats a wrong build.

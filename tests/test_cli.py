@@ -623,19 +623,17 @@ def test_metrics_prints_trend_only_with_a_prior_window(factory_root: Path, capsy
     assert "last 5 ships" in out and "prior 2" in out
 
 
-def test_triage_decomposition_report_spawns_leaves_and_parks_the_umbrella(
-    factory_root: Path, capsys
-):
-    """The exact recipe the triage skill prescribes for oversized items — a
-    --report file with verdict park + a spawn list — must fan the leaves into
-    triage (parented to the umbrella) and shelve the umbrella revivably."""
+def test_report_file_spawns_children_and_parks_the_parent(factory_root: Path, capsys):
+    """A --report file carrying verdict park plus a spawn list must fan the
+    children into triage (parented to the original) and shelve the original
+    revivably — the multi-spawn path only the report form can express."""
     item_id = _item_at(factory_root, "triage")
     report = factory_root / "report.json"
     report.write_text(
         json.dumps(
             {
                 "verdict": "park",
-                "summary": "decomposed into leaf items",
+                "summary": "split into follow-ups",
                 "spawn": [
                     {"title": "Leaf: export CSV", "body": "self-contained"},
                     {"title": "Leaf: export JSON", "body": "self-contained"},
@@ -646,11 +644,11 @@ def test_triage_decomposition_report_spawns_leaves_and_parks_the_umbrella(
     rc = main(["--root", str(factory_root), "advance", item_id, "--report", str(report)])
     assert rc == 0
     d = Dispatcher(factory_root)
-    umbrella = d.store.load(item_id)
-    assert umbrella.state == "parked"
-    leaves = [i for i in d.store.list_items() if i.parent == item_id]
-    assert sorted(x.title for x in leaves) == ["Leaf: export CSV", "Leaf: export JSON"]
-    assert all(x.state == "triage" for x in leaves)
+    parent = d.store.load(item_id)
+    assert parent.state == "parked"
+    children = [i for i in d.store.list_items() if i.parent == item_id]
+    assert sorted(x.title for x in children) == ["Leaf: export CSV", "Leaf: export JSON"]
+    assert all(x.state == "triage" for x in children)
 
 
 def test_ledger_round_trip_via_cli(factory_root: Path, capsys):

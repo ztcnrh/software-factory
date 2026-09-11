@@ -28,9 +28,9 @@ Each entry: what it is today · why it's fine for now · the idea for later.
 
 ## 3. Delivery is serial — the driver runs one item at a time
 
-**Today.** Triage can decompose a genuinely separable item into leaf-sized children (the spawn/parent machinery; the umbrella parks), so oversized work arrives as several small units, each with its own spec/review/verify/PR. But the driver still moves one item start-to-finish before the next, so independent leaves gain no wall-clock parallelism.
+**Today.** The driver moves one item start-to-finish before the next. Independent items gain no wall-clock parallelism, and an oversized item travels the line as one unit — triage routes it to spec, and the spec station scopes it rather than splitting it.
 
-**Why it's fine for now.** A solo operator driving one interactive session wants one thing moving at a time anyway, and decomposition already bought the review-coherence win — the cycle-time cost only bites as volume grows or the factory runs more autonomously.
+**Why it's fine for now.** A solo operator driving one interactive session wants one thing moving at a time anyway — the cycle-time cost only bites as volume grows or the factory runs more autonomously.
 
 **The idea for later.** Let the driver run **independent items concurrently** — parallel station subagents on disjoint branches, keeping the item as the isolation unit (never intra-station fan-out, which would collide on one branch). The care points: gate presentation (batch the human's pending decisions rather than interleaving them), `.factory/` write contention (engine calls are cheap to serialize through one driver), and keeping cost visible while several meters run. The moment *two drivers* can run (local + cloud, or two sessions), claims need **leases** — an `{owner, expires}` field on the item plus a claim step that reaps expired leases (the codex bench build's crash-safe pattern) — so a dead session's item is reclaimable and two runners can't double-work one item.
 

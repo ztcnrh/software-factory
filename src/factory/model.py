@@ -223,9 +223,8 @@ class StationReport:
     """What a station emits when done. ``verdict`` drives routing via line.yml.
 
     A station can also escalate (``human_required``), update the item's risk,
-    attach artifacts, or spawn new work items (a follow-up or leaf item — e.g.
-    from the deferred monitor, or triage decomposing an oversized item — enters
-    fresh at triage, linked to its parent)."""
+    attach artifacts, or spawn new work items (a follow-up — e.g. from the
+    deferred monitor — enters fresh at triage, linked to its parent)."""
 
     station: str
     verdict: str

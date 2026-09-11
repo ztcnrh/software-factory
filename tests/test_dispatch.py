@@ -131,8 +131,8 @@ def test_needs_revision_records_a_steer_and_loops_back(factory_root: Path):
 def test_station_report_spawns_child_at_triage(factory_root: Path):
     """A station report can spawn follow-up work: the child enters fresh at triage
     with a parent link back to its origin. This is the generic 'loop continues'
-    mechanism the deferred monitor and triage's decomposition path ride on; we
-    exercise it directly from a station here."""
+    mechanism the deferred monitor rides on; we exercise it directly from a
+    station here."""
     d = Dispatcher(factory_root)
     item = d.new_item("Parent feature", risk="low")
     item.state = "verify"

@@ -1,7 +1,7 @@
 ---
 name: factory-triage
 description: Runs the factory triage station in isolation — assess one work item, judge scope/risk, and route it. Invoke when a work item is at the `triage` state.
-tools: Read, Grep, Glob, Bash, mcp__plugin_atlassian_atlassian
+tools: Read, Grep, Glob, Bash, Agent, mcp__claude-in-chrome, mcp__plugin_atlassian_atlassian
 model: sonnet
 skills:
   - factory-triage
