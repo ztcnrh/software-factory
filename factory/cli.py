@@ -616,7 +616,8 @@ def item_metrics(n: int, comments: list[dict], timeline: list[dict], pr: dict | 
         "shipped": bool(merged),
         "cycle_hours": round((_parse_ts(merged) - _parse_ts(started)).total_seconds() / 3600, 1)
         if merged and started else None,
-        "steers": sum(g["decision"] == "request_changes" for g in gates) + len(human_commits),
+        "steers": sum(g["decision"] in ("request_changes", "retriage") for g in gates)
+        + len(human_commits),
         "autonomous": bool(merged) and not human_commits,
     }
 

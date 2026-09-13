@@ -329,6 +329,8 @@ def test_item_metrics_and_aggregate_from_a_fixture_record():
         {"body": cli.run_comment(report("implement", "implemented", cost_usd=2.0,
                                         session_id="s2"))},
         {"body": f"{cli.GATE_MARK}" + json.dumps({"decision": "request_changes"}) + " -->"},
+        {"body": f"{cli.GATE_MARK}" + json.dumps({"decision": "retriage"}) + " -->"},
+        {"body": f"{cli.GATE_MARK}" + json.dumps({"decision": "approve"}) + " -->"},
     ]
     timeline = [{"event": "labeled", "label": {"name": "factory:triage"},
                  "created_at": "2026-01-01T00:00:00Z"}]
@@ -337,9 +339,9 @@ def test_item_metrics_and_aggregate_from_a_fixture_record():
                {"commit": {"author": {"email": "human@x"}}}]
     shipped = cli.item_metrics(7, comments, timeline, pr, commits)
     assert shipped == {"issue": 7, "pr": None, "runs": 2, "cost_usd": 2.5, "shipped": True,
-                       "cycle_hours": 12.0, "steers": 2, "autonomous": False}
+                       "cycle_hours": 12.0, "steers": 3, "autonomous": False}
     stuck = cli.item_metrics(8, [{"body": cli.run_comment(report(cost_usd=1.0))}], [], None, [])
     agg = cli.aggregate([shipped, stuck])
     assert agg["cost_per_shipped_usd"] == 3.5 and agg["total_cost_usd"] == 3.5
     assert agg["median_cycle_hours"] == 12.0 and agg["autonomy_pct"] == 0
-    assert agg["steers_per_shipped"] == 2.0 and agg["runs"] == 3
+    assert agg["steers_per_shipped"] == 3.0 and agg["runs"] == 3
