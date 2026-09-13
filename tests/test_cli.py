@@ -232,6 +232,21 @@ def test_apply_files_followups_as_plain_issues(gh, tmp_path):
     assert create[3] == "README invocation fails" and "triage run on #7" in create[5]
 
 
+def test_post_review_skips_a_head_already_reviewed_and_survives_a_failed_resolve(gh, tmp_path):
+    """A retry after a partial apply (review posted, comment not yet) must not post the review
+    again, and a token that cannot resolve threads must not fail the whole apply."""
+    gh.responses[("issue", "view")] = issue_json("review")
+    gh.responses[("pr", "list")] = pr_json()
+    gh.responses[("api", "--paginate", "--slurp", "repos/o/r/pulls/12/reviews")] = json.dumps(
+        [[{"body": f"Reviewed at {'a' * 12}\n\nold\n\n{cli.REVIEW_MARK}"}]])
+    gh.responses[("api", "--paginate", "--slurp", "repos/o/r/issues/7/comments")] = "[[]]"
+    gh.responses[("api", "graphql")] = subprocess.CalledProcessError(1, ["gh"], "", "denied")
+    r = report("review", "approve", body="ok", comments=[], resolve=["PRRT_1"])
+    cli.cmd_apply(7, write(tmp_path, r))
+    assert not gh.argv("api", "--method", "POST")
+    assert gh.argv("issue", "comment") and gh.argv("issue", "edit")
+
+
 def test_apply_review_posts_pr_review_before_moving_the_label(gh, tmp_path):
     """The review must land on the PR first: if the label moved and the post failed, implement
     would run with no worklist."""

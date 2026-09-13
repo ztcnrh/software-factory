@@ -447,8 +447,12 @@ def cmd_apply(n: int, report_path: str) -> None:
         if station == "review":
             _post_review(pr, report)
             for thread in report.get("resolve") or []:
-                _gh("api", "graphql", "-f", "query=mutation($id:ID!){resolveReviewThread("
-                    "input:{threadId:$id}){thread{isResolved}}}", "-f", f"id={thread}")
+                try:
+                    _gh("api", "graphql", "-f", "query=mutation($id:ID!){resolveReviewThread("
+                        "input:{threadId:$id}){thread{isResolved}}}", "-f", f"id={thread}")
+                except subprocess.CalledProcessError:
+                    print(f"factory: could not resolve thread {thread} (the token may not); "
+                          "resolve it by hand", file=sys.stderr)
         _gh("issue", "comment", str(n), "--body", run_comment(report))
         for f in report.get("followups") or []:
             body = f"{f['body'].strip()}\n\nSurfaced by the factory's {station} run on #{n}."
@@ -465,6 +469,11 @@ def _post_review(pr: dict, report: dict) -> None:
     text = report["body"].strip().removesuffix(REVIEW_MARK).strip()
     text = re.sub(r"\A[Rr]eviewed at [0-9a-f]{7,40}\s*", "", text)
     body = f"Reviewed at {head[:12]}\n\n{text}\n\n{REVIEW_MARK}"
+    posted = _paginated(f"repos/{_repo()}/pulls/{pr['number']}/reviews")
+    if any(REVIEW_MARK in (r.get("body") or "") and f"Reviewed at {head[:12]}" in r["body"]
+           for r in posted):
+        print(f"factory: review at {head[:12]} already on PR #{pr['number']}", file=sys.stderr)
+        return
     comments = [
         {**c, "body": f"{c['body'].strip().removesuffix(REVIEW_MARK).strip()}\n\n{REVIEW_MARK}"}
         for c in report["comments"]

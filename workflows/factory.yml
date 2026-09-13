@@ -59,6 +59,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.13"
+          enable-cache: false
       - name: Which station
         id: station
         run: |
@@ -112,6 +113,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.13"
+          enable-cache: false
       - name: Which station
         id: station
         run: |
@@ -159,6 +161,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.13"
+          enable-cache: false
       - name: Install the factory CLI
         env:
           FACTORY_TOOLKIT_GIT: ${{ vars.FACTORY_TOOLKIT_GIT }}
@@ -193,6 +196,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.13"
+          enable-cache: false
       - name: Install the factory CLI
         env:
           FACTORY_TOOLKIT_GIT: ${{ vars.FACTORY_TOOLKIT_GIT }}
