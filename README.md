@@ -31,6 +31,7 @@ In a Claude Code session in your repo:
 /factory new "tally crashes on a blank cell"   # files the issue and drives it to the first gate
 /factory                                        # the board and the headline metrics
 /factory 12 approve                             # a gate decision; request_changes "why" sends it back
+/factory 12 retriage "needs a spec: …"        # disagree with a station's routing
 ```
 
 Or without the driver: `factory run 12 --out r.json && factory apply 12 r.json`. In the cloud the same commands run when the label changes, and a PR review or merge records the gate.

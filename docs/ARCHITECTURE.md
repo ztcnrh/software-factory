@@ -38,7 +38,7 @@ stateDiagram-v2
   parked --> triage: human retriage
 ```
 
-`TRANSITIONS` in `factory/cli.py` is this diagram as data. `factory apply` refuses a report whose station is not the issue's current label or whose verdict is not in the table; `factory gate` refuses a decision the state does not accept. `done` and `park` are accepted from any active state because a merge or a shelving is a fact, not a routing decision.
+`TRANSITIONS` in `factory/cli.py` is this diagram as data. `factory apply` refuses a report whose station is not the issue's current label or whose verdict is not in the table; `factory gate` refuses a decision the state does not accept. Three decisions are accepted from any active state: `done` and `park`, because a merge or a shelving is a fact rather than a routing decision, and `retriage`, which is how a human overrides a station's routing: the item returns to triage with the human's why as a comment triage reads.
 
 ## A station run
 
@@ -55,9 +55,9 @@ claude -p "/factory-<station> Issue #<n> in <owner/repo>. Branch: <feature/n-slu
   --append-system-prompt <factory/prompts/station.md>
 ```
 
-It runs in a throwaway `git worktree` on the item's branch (or the default branch tip when none exists), with `GIT_AUTHOR_*` set to `factory` so a human's commits on a factory PR stay distinguishable. The prompt carries the one fact the runner knows better than the station: whether the branch and PR already exist. Everything else the station fetches itself with the `gh` calls its skill names.
+It runs in a throwaway `git worktree` on the item's branch reset to origin's tip (or detached at the default branch when no branch exists), with `GIT_AUTHOR_*` set to `factory` so a human's commits on a factory PR stay distinguishable. The prompt carries the one fact the runner knows better than the station: whether the branch and PR already exist. Everything else the station fetches itself with the `gh` calls its skill names.
 
-The `result` event's `structured_output` is the report. `factory run` adds `cost_usd` (Claude Code's list-price estimate from real token counts), `model`, `session_id`, `turns`, `duration_ms`, and `run_url`, and writes the JSON. `factory apply` validates it, posts the PR review for the review station, leaves the run comment, and moves the label. Retrying an apply with the same `session_id` adds no second comment.
+The `result` event's `structured_output` is the report. `factory run` adds `cost_usd` (Claude Code's list-price estimate from real token counts), `model`, `session_id`, `turns`, `duration_ms`, `run_url`, and the PR `head` the station read, and writes the JSON. `factory apply` validates it, refuses a report with tool-call markup leaked into a string field, posts the PR review for the review station anchored to that head and resolves the threads the report names, leaves the run comment, and moves the label. Retrying an apply with the same `session_id` posts nothing a second time. A station therefore needs no GitHub write access to review: every write it wants rides the report.
 
 ## The run comment
 
@@ -75,6 +75,6 @@ Per item: runs and cost from run comments; shipped and cycle time from the PR's 
 
 ## Cloud
 
-`workflows/factory.yml` runs the same commands. A `factory:*` label added by a human runs that station. Because a label added with `GITHUB_TOKEN` fires no `labeled` event, the apply job chains the next station with `gh workflow run`. Triage and review run with read-only tokens so nothing an issue or PR says can make the agent act on GitHub; spec and implement need write to push and open PRs. A human's PR review or merge runs the gate job, which derives the issue from the branch name.
+`workflows/factory.yml` runs the same commands. A `factory:*` label added by a human runs that station. Because a label added with `GITHUB_TOKEN` fires no `labeled` event, the apply job chains the next station with `gh workflow run`. Triage and review run with read-only tokens so nothing an issue or PR says can make the agent act on GitHub; spec and implement need write to push and open PRs. A human's PR review (owner, member, or collaborator only) or a merge runs the gate job, which derives the issue from the branch name. Jobs without a checkout set `GH_REPO` so `gh` still knows the repository.
 
 Locally, a PR opened with your own token cannot be approved by you, so the spec gate is `/factory <n> approve`; in the cloud the bot owns the PR and the GitHub Approve button works. Merging is the ship approval in both.
