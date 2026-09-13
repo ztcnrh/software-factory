@@ -152,8 +152,9 @@ def schema(station: str) -> dict:
         "verdict": {"type": "string", "enum": verdicts},
         "summary": {
             "type": "string",
-            "description": "One or two sentences a human reads on the issue: the verdict and its "
-            "why. For needs_info or blocked, the concrete questions whose answers unblock it.",
+            "description": "At most two short sentences, under 60 words, read on the issue by a "
+            "human: the verdict and its why. Details belong in notes or the PR. For needs_info "
+            "or blocked, the concrete questions whose answers unblock it.",
         },
         "notes": {
             "type": "string",
