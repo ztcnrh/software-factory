@@ -19,7 +19,7 @@ gh api repos/<owner/repo>/pulls/<pr>/comments      # review threads and replies
 gh api repos/<owner/repo>/pulls/<pr>/commits       # a commit whose author is not `factory` is a human fix
 ```
 
-Start with the metrics: cost per shipped item and where the steers concentrate. For each item in the window, read the gate comments (the `--why` a human gave), human reviews and replies to factory findings, and human commits on factory PRs. Read the finished items' threads too, resolved ones included: an approving comment or a pass with no threads says what to keep, and a retro that only reads failures eventually optimizes away something that worked.
+Start with the metrics: cost per shipped item and where the steers concentrate; each item row carries its `pr` number. For each item in the window, read the gate comments (the `--why` a human gave), human reviews and replies to factory findings, and human commits on factory PRs. Read the finished items' threads too, resolved ones included: an approving comment or a pass with no threads says what to keep, and a retro that only reads failures eventually optimizes away something that worked.
 
 ## 2. Score each signal
 

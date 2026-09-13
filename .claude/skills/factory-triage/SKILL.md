@@ -32,7 +32,7 @@ Search for the affected feature, behavior, terminology, and likely implementatio
 
 ## 4. Reproduce bugs with bounded effort
 
-A confirmed reproduction is the strongest evidence a verdict can rest on, and a failed one usually means the report is missing something. Cheapest means first: a failing test, a CLI invocation, a `curl`, a log read. When the bug is visual and seeing it would change the verdict, drive the app in a real browser if your run carries browser tools. When reproducing means standing the app up or walking several steps, spawn an isolated subagent for it and fold its answer in. A few minutes, not an investigation; never block on missing credentials or data, record the gap and proceed on the best evidence.
+A confirmed reproduction is the strongest evidence a verdict can rest on, and a failed one usually means the report is missing something. Cheapest means first: the existing tests, a CLI invocation, a `curl`, a log read; you do not edit files here. When the bug is visual and seeing it would change the verdict, drive the app in a real browser if your run carries browser tools. When reproducing means standing the app up or walking several steps, spawn an isolated subagent for it and fold its answer in. A few minutes, not an investigation; never block on missing credentials or data, record the gap and proceed on the best evidence.
 
 Reproduction status goes in `summary` either way: `reproduced`, `not reproduced: <why>`, or `not attempted: <why>`.
 

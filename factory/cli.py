@@ -126,7 +126,7 @@ def _item_pr(n: int, branch: str | None = None) -> dict | None:
         "pr", "list", "--head", branch, "--state", "all", "--limit", "10",
         "--json", "number,url,state,isDraft,mergedAt,headRefOid,createdAt",
     )
-    prs.sort(key=lambda p: (p["state"] != "OPEN", p["createdAt"]))
+    prs.sort(key=lambda p: (p["state"] != "OPEN", -_parse_ts(p["createdAt"]).timestamp()))
     return prs[0] if prs else None
 
 
@@ -184,6 +184,12 @@ def schema(station: str) -> dict:
                 "additionalProperties": False,
             },
         }
+        props["resolve"] = {
+            "type": "array",
+            "description": "Thread ids from `factory threads` whose fix you verified; the runner "
+            "resolves them.",
+            "items": {"type": "string"},
+        }
         required += ["body", "comments"]
     return {"type": "object", "properties": props, "required": required,
             "additionalProperties": False}
@@ -192,7 +198,7 @@ def schema(station: str) -> dict:
 # A structured-output call that went wrong leaks the tool-call envelope into a string field.
 MALFORMED = re.compile(r"<parameter name=|</(summary|notes|body|verdict)>")
 RUNNER_KEYS = {"station", "model", "cost_usd", "session_id", "turns", "duration_ms", "run_url",
-               "ts"}
+               "ts", "head"}
 
 
 def validate(report: dict, station: str) -> None:
@@ -295,7 +301,7 @@ def worktree(n: int | str, branch: str | None) -> Iterator[Path]:
     if path.exists():
         git("worktree", "remove", "--force", str(path))
     if branch:
-        git("worktree", "add", "--quiet", str(path), branch)
+        git("worktree", "add", "--quiet", "-B", branch, str(path), f"origin/{branch}")
     else:
         git("worktree", "add", "--quiet", "--detach", str(path), f"origin/{_default_branch()}")
     try:
@@ -377,6 +383,7 @@ def cmd_run(target: str, out: str | None, budget: float | None) -> None:
         "duration_ms": result.get("duration_ms"),
         "run_url": _run_url(),
         "ts": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "head": pr["headRefOid"] if pr else None,
     }
     text = json.dumps(report, indent=2)
     if out:
@@ -416,10 +423,8 @@ def cmd_apply(n: int, report_path: str) -> None:
     pr = _item_pr(n)
     if verdict in ("ready_for_review", "implemented") and not (pr and pr["state"] == "OPEN"):
         fail(f"{verdict} reported but #{n} has no open PR from a feature/{n}-* branch")
-    if station == "review":
-        if not pr:
-            fail(f"review reported but #{n} has no PR")
-        _post_review(pr, report)
+    if station == "review" and not pr:
+        fail(f"review reported but #{n} has no PR")
     already = any(
         r.get("session_id") == report.get("session_id")
         for c in _comments(n) for r in parse_marks(c["body"], RUN_MARK)
@@ -427,6 +432,11 @@ def cmd_apply(n: int, report_path: str) -> None:
     if already:
         print(f"factory: run {report.get('session_id')} already recorded on #{n}", file=sys.stderr)
     else:
+        if station == "review":
+            _post_review(pr, report)
+            for thread in report.get("resolve") or []:
+                _gh("api", "graphql", "-f", "query=mutation($id:ID!){resolveReviewThread("
+                    "input:{threadId:$id}){thread{isResolved}}}", "-f", f"id={thread}")
         _gh("issue", "comment", str(n), "--body", run_comment(report))
     _set_state(n, target, states)
     link = f" · {pr['url']}" if pr else ""
@@ -436,14 +446,15 @@ def cmd_apply(n: int, report_path: str) -> None:
 def _post_review(pr: dict, report: dict) -> None:
     """Post the station's review; degrade the anchor or the event before ever dropping a finding."""
     event = "APPROVE" if report["verdict"] == "approve" else "REQUEST_CHANGES"
+    head = report.get("head") or pr["headRefOid"]
     text = report["body"].strip().removesuffix(REVIEW_MARK).strip()
     text = re.sub(r"\A[Rr]eviewed at [0-9a-f]{7,40}\s*", "", text)
-    body = f"Reviewed at {pr['headRefOid'][:12]}\n\n{text}\n\n{REVIEW_MARK}"
+    body = f"Reviewed at {head[:12]}\n\n{text}\n\n{REVIEW_MARK}"
     comments = [
         {**c, "body": f"{c['body'].strip().removesuffix(REVIEW_MARK).strip()}\n\n{REVIEW_MARK}"}
         for c in report["comments"]
     ]
-    payload = {"event": event, "body": body, "comments": comments, "commit_id": pr["headRefOid"]}
+    payload = {"event": event, "body": body, "comments": comments, "commit_id": head}
     endpoint = f"repos/{_repo()}/pulls/{pr['number']}/reviews"
     for _ in range(3):
         try:
@@ -510,8 +521,8 @@ def cmd_board() -> None:
     by_state: dict[str, list] = {s: [] for s in STATES}
     for issue in issues:
         for s in _states(issue):
-            by_state[s].append(issue)
-    for state in STATES:
+            by_state.setdefault(s, []).append(issue)
+    for state in by_state:
         if not by_state[state]:
             continue
         tag = " (human)" if state in GATES else ""
@@ -598,6 +609,7 @@ def item_metrics(n: int, comments: list[dict], timeline: list[dict], pr: dict | 
     human_commits = [c for c in commits if (c["commit"]["author"] or {}).get("email") != BOT_EMAIL]
     return {
         "issue": n,
+        "pr": pr.get("number") if pr else None,
         "runs": len(runs),
         "cost_usd": round(sum(r.get("cost_usd") or 0 for r in runs), 4),
         "shipped": bool(merged),

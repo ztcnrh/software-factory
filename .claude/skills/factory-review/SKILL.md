@@ -40,7 +40,7 @@ Prioritize, in this order: correctness, security, error handling, regressions, m
 
 ## Follow-ups
 
-Determine whether each earlier finding was addressed, remains open, or was declined. Treat the author's replies as product decisions unless concrete correctness or security evidence overrides them. Review the delta for new or regressed issues and use the full diff only for context; do not restart a broad scan of unchanged code. A new `💡 [SUGGESTION]` about code that was already in the diff at an earlier pass is not a finding. Resolve the threads whose fix you verified (`factory threads` prints the command); reply to the ones still open with exactly what is missing.
+Determine whether each earlier finding was addressed, remains open, or was declined. Treat the author's replies as product decisions unless concrete correctness or security evidence overrides them. Review the delta for new or regressed issues and use the full diff only for context; do not restart a broad scan of unchanged code. A new `💡 [SUGGESTION]` about code that was already in the diff at an earlier pass is not a finding. Put the thread ids whose fix you verified in `resolve`; the runner resolves them. A finding still open gets a new inline comment saying exactly what is missing.
 
 ## Annotated lines
 
@@ -77,7 +77,7 @@ The first three tags earn `request_changes`; only nits ride along. If every find
 
 `body` leads with the actionable findings by severity, or one line that there are none, then `Found: X critical, Y important, Z suggestions`, then the disposition (`Approve` or `Request changes`). For a spec-backed change, list each PRODUCT.md invariant number with its status: implemented and shown to hold, implemented and not exercised, or missing. No change summaries, no praise, no restating the diff.
 
-`summary` is the one or two sentence headline the human reads on the issue.
+`summary` is the one or two sentence headline the human reads on the issue. `resolve` lists the thread ids (from `factory threads`) you verified as fixed.
 
 ## Guardrails
 

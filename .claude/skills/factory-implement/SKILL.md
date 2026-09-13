@@ -19,7 +19,7 @@ Then, in order of authority:
 
 - `specs/<n>-*/PRODUCT.md` and `TECH.md` on the branch, when they exist. Read them completely before touching code; the numbered Behavior invariants are the acceptance criteria. Newer issue comments and gate comments can supersede them. An absent `TECH.md` is normal.
 - For an `automatable` item there are no specs; the issue thread is the contract.
-- When the prompt names an existing PR, this is a loop-back. `factory threads <n>` prints the unresolved review threads: that list is your worklist. Every `🚨 [CRITICAL]`, `⚠️ [IMPORTANT]`, and `💡 [SUGGESTION]` needs an answer; `🧹 [NIT]` items are yours to take or leave.
+- `factory threads <n>` when the prompt names a PR. Unresolved threads mean a loop-back after a review's send-back: that list is your worklist. Every `🚨 [CRITICAL]`, `⚠️ [IMPORTANT]`, and `💡 [SUGGESTION]` needs an answer; `🧹 [NIT]` items are yours to take or leave. A draft PR with no threads is the spec station's hand-off: a first pass.
 
 If the sources conflict, or the change turns out much larger or more ambiguous than the specs assume, report `blocked` with the specific conflict instead of guessing which source wins.
 
@@ -33,7 +33,7 @@ Read the code you are about to change: current behavior, the files, tests, and d
 - Make the smallest cohesive change that satisfies the invariants. Where the spec grants **Latitude**, meet the quality bar it names with your own judgment.
 - **Tests ship with the change**: a regression test for every bug fix, unit tests for non-trivial logic, in the repo's framework and layout.
 - Follow existing style and architecture. No unrelated refactors, formatting churn, dependency upgrades, or opportunistic cleanup.
-- Comments document current state only. Nothing in the repo's tree cites an issue number, a spec file, or an invariant number; state the reason inline or leave it out. Provenance belongs in the commit message and PR body.
+- Comments document current state only. Nothing you write into the repo's tree (code, comments, docstrings, test names) cites a spec file or an invariant number; state the reason inline or leave it out. Provenance belongs in the commit message and PR body.
 - **Keep the spec true.** When implementation teaches you something the spec missed and the change still fits the approved intent, update `PRODUCT.md`/`TECH.md` on the branch and say so in `notes`. When the approved intent itself no longer holds, report `blocked`; a quiet rewrite of the spec is an unreviewed scope change.
 
 ## 4. Validate

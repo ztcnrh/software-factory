@@ -189,6 +189,37 @@ def test_apply_comments_then_swaps_label_and_is_idempotent_on_session_id(gh, tmp
     assert not gh.argv("issue", "comment") and gh.argv("issue", "edit")
 
 
+def test_item_pr_prefers_open_then_newest(gh):
+    """An item whose branch has had several PRs must resolve to the live one, then the most
+    recent closed one, never the oldest."""
+    gh.responses[("pr", "list")] = json.dumps([
+        {"number": 1, "state": "CLOSED", "createdAt": "2026-01-01T00:00:00Z"},
+        {"number": 3, "state": "CLOSED", "createdAt": "2026-03-01T00:00:00Z"},
+        {"number": 2, "state": "OPEN", "createdAt": "2026-02-01T00:00:00Z"}])
+    assert cli._item_pr(7)["number"] == 2
+    gh.responses[("pr", "list")] = json.dumps([
+        {"number": 1, "state": "CLOSED", "createdAt": "2026-01-01T00:00:00Z"},
+        {"number": 3, "state": "MERGED", "createdAt": "2026-03-01T00:00:00Z"}])
+    assert cli._item_pr(7)["number"] == 3
+
+
+def test_apply_review_resolves_threads_and_skips_the_post_on_a_retry(gh, tmp_path):
+    """The review's thread resolutions ride the report so the station never needs a write token,
+    and a retried apply must not post the review twice."""
+    gh.responses[("issue", "view")] = issue_json("review")
+    gh.responses[("pr", "list")] = pr_json()
+    gh.responses[("api", "--paginate", "--slurp")] = "[[]]"
+    r = report("review", "approve", body="ok", comments=[], resolve=["PRRT_1"])
+    cli.cmd_apply(7, write(tmp_path, r))
+    assert len(gh.argv("api", "--method", "POST")) == 1
+    [(mut, _)] = gh.argv("api", "graphql")
+    assert "resolveReviewThread" in mut[3] and mut[-1] == "id=PRRT_1"
+    gh.calls.clear()
+    gh.responses[("api", "--paginate", "--slurp")] = json.dumps([[{"body": cli.run_comment(r)}]])
+    cli.cmd_apply(7, write(tmp_path, r))
+    assert not gh.argv("api", "--method", "POST") and gh.argv("issue", "edit")
+
+
 def test_apply_review_posts_pr_review_before_moving_the_label(gh, tmp_path):
     """The review must land on the PR first: if the label moved and the post failed, implement
     would run with no worklist."""
@@ -197,11 +228,12 @@ def test_apply_review_posts_pr_review_before_moving_the_label(gh, tmp_path):
     gh.responses[("api", "--paginate", "--slurp")] = "[[]]"
     r = report("review", "request_changes", body="Findings", comments=[
         {"path": "a.py", "line": 3, "side": "RIGHT", "body": "⚠️ [IMPORTANT] x"}])
+    r["head"] = "b" * 40
     cli.cmd_apply(7, write(tmp_path, r))
     [(post, payload)] = gh.argv("api", "--method", "POST")
     sent = json.loads(payload)
-    assert sent["event"] == "REQUEST_CHANGES" and sent["commit_id"] == "a" * 40
-    assert sent["body"].startswith("Reviewed at aaaaaaaaaaaa") and cli.REVIEW_MARK in sent["body"]
+    assert sent["event"] == "REQUEST_CHANGES" and sent["commit_id"] == "b" * 40
+    assert sent["body"].startswith("Reviewed at bbbbbbbbbbbb") and cli.REVIEW_MARK in sent["body"]
     assert sent["comments"][0]["path"] == "a.py" and cli.REVIEW_MARK in sent["comments"][0]["body"]
     order = [a[:2] for a, _ in gh.calls]
     assert order.index(("api", "--method")) < order.index(("issue", "edit"))
@@ -304,7 +336,7 @@ def test_item_metrics_and_aggregate_from_a_fixture_record():
     commits = [{"commit": {"author": {"email": cli.BOT_EMAIL}}},
                {"commit": {"author": {"email": "human@x"}}}]
     shipped = cli.item_metrics(7, comments, timeline, pr, commits)
-    assert shipped == {"issue": 7, "runs": 2, "cost_usd": 2.5, "shipped": True,
+    assert shipped == {"issue": 7, "pr": None, "runs": 2, "cost_usd": 2.5, "shipped": True,
                        "cycle_hours": 12.0, "steers": 2, "autonomous": False}
     stuck = cli.item_metrics(8, [{"body": cli.run_comment(report(cost_usd=1.0))}], [], None, [])
     agg = cli.aggregate([shipped, stuck])

@@ -30,7 +30,8 @@ If critical product intent is missing and cannot be recovered from the thread or
 The prompt says whether `feature/<n>-<slug>` exists.
 
 - **None yet:** `git checkout -b feature/<n>-<slug>` (slug: a short kebab of the title, at most five words). Specs go in `specs/<n>-<slug>/`.
-- **Exists:** you are revising after a send-back. The checkout is already on it. Read the human's why: the latest `factory · gate` comment on the issue, and the unresolved PR review threads via `factory threads <n>`. Address each point in the existing files; do not rewrite wholesale.
+- **Exists with a PR:** you are revising after a send-back. The checkout is already on it. Read the human's why: the latest `factory · gate` comment on the issue, and the unresolved PR review threads via `factory threads <n>`. Address each point in the existing files; do not rewrite wholesale.
+- **Exists without a PR:** an earlier run stopped before opening one. Continue on the branch and finish.
 
 Write `PRODUCT.md` following `write-product-spec`. Its numbered Behavior invariants are the acceptance criteria every later station cites by number. Write `TECH.md` following `write-tech-spec` when the change is architectural or cross-cutting; skip it for localized work.
 
