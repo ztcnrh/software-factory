@@ -12,7 +12,7 @@ Implement the issue named in the prompt and leave a pull request ready for revie
 ## 1. Read first
 
 ```
-gh issue view <n> --comments
+gh issue view <n> --json title,body,labels,comments
 ```
 
 Then, in order of authority:

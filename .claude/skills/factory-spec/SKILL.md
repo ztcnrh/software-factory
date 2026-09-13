@@ -17,7 +17,7 @@ The spec content comes from two skills in this repo; read the file before writin
 ## 1. Gather context
 
 ```
-gh issue view <n> --comments
+gh issue view <n> --json title,body,labels,comments
 gh issue list --state open --search "<key terms>" --limit 20
 ```
 

@@ -51,5 +51,5 @@ if command -v factory >/dev/null; then
 else
   echo "factory CLI not on PATH: run 'uv tool install $here' then 'factory labels' in $target"
 fi
-echo "installed into $target: .claude/skills/{${skills[*]// /,}}${cloud:+ + .github/workflows/factory.yml}"
+echo "installed into $target: ${#skills[@]} skills under .claude/skills/$([ $cloud = 1 ] && echo ', .github/workflows/factory.yml')"
 echo "next: commit these files, then in a Claude Code session there run  /factory new \"<title>\""

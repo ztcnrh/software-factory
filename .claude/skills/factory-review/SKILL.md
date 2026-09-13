@@ -12,7 +12,7 @@ Review the pull request for the issue named in the prompt. The checkout is the P
 ## Inputs
 
 ```
-gh issue view <n> --comments
+gh issue view <n> --json title,body,labels,comments
 gh pr view <pr> --json title,body,url,headRefOid,reviews
 factory diff <n>
 factory threads <n>

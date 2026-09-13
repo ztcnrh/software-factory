@@ -337,6 +337,10 @@ def cmd_run(target: str, out: str | None, budget: float | None) -> None:
     }
     print(f"factory: {prompt}  [{meta['model']}, ≤${budget or BUDGET_USD[station]:g}]",
           file=sys.stderr)
+    if os.environ.get("ANTHROPIC_API_KEY") is not None:
+        print("factory: ANTHROPIC_API_KEY is set, so this run bills that key rather than a Claude "
+              "subscription (it outranks CLAUDE_CODE_OAUTH_TOKEN and /login even when empty)",
+              file=sys.stderr)
     result = None
     with worktree(n or "retro", branch) as cwd:
         with subprocess.Popen(argv, cwd=cwd, env=env, stdout=subprocess.PIPE, text=True) as proc:

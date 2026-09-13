@@ -13,7 +13,7 @@ Every other station produces software; you produce a better factory. Your input 
 
 ```
 factory metrics --json
-gh issue view <n> --comments                       # per item: run comments and factory · gate comments
+gh issue view <n> --json title,body,labels,comments   # per item: run comments and factory · gate comments
 gh api repos/<owner/repo>/pulls/<pr>/reviews       # human reviews; factory ones end with <!-- factory:review -->
 gh api repos/<owner/repo>/pulls/<pr>/comments      # review threads and replies
 gh api repos/<owner/repo>/pulls/<pr>/commits       # a commit whose author is not `factory` is a human fix

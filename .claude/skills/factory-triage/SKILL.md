@@ -12,10 +12,10 @@ Assess the issue named in the prompt and decide exactly one verdict: `automatabl
 ## 1. Read the issue
 
 ```
-gh issue view <n> --comments
+gh issue view <n> --json title,body,labels,comments
 ```
 
-Read the title, body, every comment, attachments, and linked issues. Do not classify from the title alone. Maintainer comments and linked product or spec documents outweigh guesses from code.
+Piped `gh` output omits the body unless you ask for `--json`. Read the title, body, every comment, attachments, and linked issues. Do not classify from the title alone. Maintainer comments and linked product or spec documents outweigh guesses from code.
 
 ## 2. Look for related work
 
