@@ -232,7 +232,7 @@ def test_apply_files_followups_as_plain_issues(gh, tmp_path):
     assert create[3] == "README invocation fails" and "triage run on #7" in create[5]
 
 
-def test_post_review_skips_a_head_already_reviewed_and_survives_a_failed_resolve(gh, tmp_path):
+def test_post_review_skips_a_reviewed_head_and_survives_a_failed_resolve(gh, tmp_path):
     """A retry after a partial apply (review posted, comment not yet) must not post the review
     again, and a token that cannot resolve threads must not fail the whole apply."""
     gh.responses[("issue", "view")] = issue_json("review")
