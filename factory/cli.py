@@ -42,13 +42,13 @@ TRANSITIONS = {
     ("review", "approve"): "ship-review",
     ("review", "request_changes"): "implement",
 }
-# (state, human decision) -> next state. `done` and `park` are accepted from any active state.
+# (state, human decision) -> next state. `done`, `park`, and `retriage` are accepted from any
+# active state: a merge or a shelving is a fact, and re-triage with a comment is how a human
+# overrides a station's routing without labeling by hand.
 GATE_MOVES = {
     ("spec-review", "approve"): "implement",
     ("spec-review", "request_changes"): "spec",
     ("ship-review", "request_changes"): "implement",
-    ("needs-info", "retriage"): "triage",
-    ("parked", "retriage"): "triage",
 }
 DECISIONS = ("approve", "request_changes", "park", "done", "retriage")
 
@@ -189,6 +189,8 @@ def schema(station: str) -> dict:
             "additionalProperties": False}
 
 
+# A structured-output call that went wrong leaks the tool-call envelope into a string field.
+MALFORMED = re.compile(r"<parameter name=|</(summary|notes|body|verdict)>")
 RUNNER_KEYS = {"station", "model", "cost_usd", "session_id", "turns", "duration_ms", "run_url",
                "ts"}
 
@@ -203,6 +205,9 @@ def validate(report: dict, station: str) -> None:
         fail(f"report is missing {missing}")
     if report["verdict"] not in sch["properties"]["verdict"]["enum"]:
         fail(f"verdict {report['verdict']!r} is not one of {sch['properties']['verdict']['enum']}")
+    for key in ("summary", "notes", "body"):
+        if MALFORMED.search(report.get(key) or ""):
+            fail(f"{key} carries tool-call markup; the structured output was malformed, rerun")
     for i, c in enumerate(report.get("comments", [])):
         item = sch["properties"]["comments"]["items"]
         if set(c) - set(item["properties"]) or [k for k in item["required"] if k not in c]:
@@ -343,7 +348,8 @@ def cmd_run(target: str, out: str | None, budget: float | None) -> None:
               file=sys.stderr)
     result = None
     with worktree(n or "retro", branch) as cwd:
-        with subprocess.Popen(argv, cwd=cwd, env=env, stdout=subprocess.PIPE, text=True) as proc:
+        with subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                              stdout=subprocess.PIPE, text=True) as proc:
             for line in proc.stdout:
                 try:
                     event = json.loads(line)
@@ -470,6 +476,8 @@ def cmd_gate(n: int, decision: str, why: str | None) -> None:
         target = "done"
     elif decision == "park" and state not in ("done", "parked"):
         target = "parked"
+    elif decision == "retriage" and state not in ("done", "triage"):
+        target = "triage"
     else:
         target = GATE_MOVES.get((state, decision))
     if not target:

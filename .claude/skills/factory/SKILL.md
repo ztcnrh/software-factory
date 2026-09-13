@@ -33,5 +33,6 @@ Repeat:
 - `factory:spec-review` — approving means *build against this plan*. Point at the draft PR; the human reads `PRODUCT.md` there. Decisions: `approve`, `request_changes "<why>"` (their PR review comments are the worklist; the why is what retro learns from), `park`.
 - `factory:ship-review` — the human merges the PR when they are satisfied; merging is the approval. `request_changes "<why>"` sends it back to implement; `park` shelves it. After they merge: `done`.
 - `factory:needs-info` — the station's questions are in its run comment; the human answers on the issue, then `retriage`.
+- Any station label the human disagrees with — `retriage "<why>"` sends the item back to triage with the reason as a comment triage will read. Never move a label by hand.
 
 Keep the human's surface minimal: a decision, not a transcript.

@@ -80,6 +80,14 @@ def test_validate_refuses_unknown_key_missing_field_and_bad_verdict():
         cli.validate(report(verdict="implemented"), "triage")
 
 
+def test_validate_refuses_a_summary_carrying_tool_call_markup():
+    """A malformed structured-output call leaks `</summary><parameter name="notes">` into the
+    string; posting that as the run comment would put garbage in the record."""
+    bad = report(summary='why</summary>\n<parameter name="notes">area: x')
+    with pytest.raises(SystemExit, match="malformed"):
+        cli.validate(bad, "triage")
+
+
 def test_validate_checks_review_comment_shape():
     """A malformed inline comment would 422 the whole PR review at post time; catch it first."""
     bad = report("review", "approve", comments=[{"path": "a.py", "body": "x"}])
@@ -247,8 +255,8 @@ def test_gate_approve_moves_spec_review_to_implement_with_a_gate_comment(gh):
 
 
 def test_gate_refuses_approve_at_ship_review_and_moves_from_non_gate_states(gh):
-    """Merging is the ship approval, so `approve` at ship-review is a mistake to name; `done`
-    and `park` are facts a human can state from any active state."""
+    """Merging is the ship approval, so `approve` at ship-review is a mistake to name; `done`,
+    `park`, and `retriage` are moves a human can make from any active state."""
     gh.responses[("issue", "view")] = issue_json("ship-review")
     with pytest.raises(SystemExit, match="merge the PR"):
         cli.cmd_gate(7, "approve", None)
@@ -258,7 +266,10 @@ def test_gate_refuses_approve_at_ship_review_and_moves_from_non_gate_states(gh):
     cli.cmd_gate(7, "done", None)
     gh.responses[("issue", "view")] = issue_json("needs-info")
     cli.cmd_gate(7, "retriage", None)
-    assert [a[0][4] for a in gh.argv("issue", "edit")] == ["factory:done", "factory:triage"]
+    gh.responses[("issue", "view")] = issue_json("implement")
+    cli.cmd_gate(7, "retriage", "this needs a spec: the JSON shape is a contract")
+    assert [a[0][4] for a in gh.argv("issue", "edit")] == [
+        "factory:done", "factory:triage", "factory:triage"]
 
 
 def test_gate_refuses_an_issue_with_two_factory_labels(gh):
