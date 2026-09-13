@@ -430,8 +430,13 @@ def cmd_apply(n: int, report_path: str) -> None:
 def _post_review(pr: dict, report: dict) -> None:
     """Post the station's review; degrade the anchor or the event before ever dropping a finding."""
     event = "APPROVE" if report["verdict"] == "approve" else "REQUEST_CHANGES"
-    body = f"Reviewed at {pr['headRefOid'][:12]}\n\n{report['body'].strip()}\n\n{REVIEW_MARK}"
-    comments = [{**c, "body": f"{c['body'].strip()}\n\n{REVIEW_MARK}"} for c in report["comments"]]
+    text = report["body"].strip().removesuffix(REVIEW_MARK).strip()
+    text = re.sub(r"\A[Rr]eviewed at [0-9a-f]{7,40}\s*", "", text)
+    body = f"Reviewed at {pr['headRefOid'][:12]}\n\n{text}\n\n{REVIEW_MARK}"
+    comments = [
+        {**c, "body": f"{c['body'].strip().removesuffix(REVIEW_MARK).strip()}\n\n{REVIEW_MARK}"}
+        for c in report["comments"]
+    ]
     payload = {"event": event, "body": body, "comments": comments, "commit_id": pr["headRefOid"]}
     endpoint = f"repos/{_repo()}/pulls/{pr['number']}/reviews"
     for _ in range(3):
@@ -514,18 +519,22 @@ def cmd_threads(n: int) -> None:
     owner, name = _repo().split("/")
     query = """query($owner:String!,$name:String!,$pr:Int!){ repository(owner:$owner,name:$name){
       pullRequest(number:$pr){ reviewThreads(first:100){ nodes{ id isResolved path line
-        comments(first:50){ nodes{ author{login} body } } } } } } }"""
+        comments(first:50){ nodes{ databaseId author{login} body } } } } } } }"""
     data = _gh_json("api", "graphql", "-f", f"query={query}", "-f", f"owner={owner}",
                     "-f", f"name={name}", "-F", f"pr={pr['number']}")
     threads = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
     open_threads = [t for t in threads if not t["isResolved"]]
     print(f"PR #{pr['number']}: {len(open_threads)} unresolved thread(s)")
     for t in open_threads:
-        print(f"\n{t['path']}:{t['line']}  thread {t['id']}")
+        root = t["comments"]["nodes"][0]["databaseId"]
+        print(f"\n{t['path']}:{t['line']}  thread {t['id']}  comment {root}")
         for c in t["comments"]["nodes"]:
             print(f"  @{c['author']['login']}: {c['body'].replace(REVIEW_MARK, '').strip()}")
     if open_threads:
-        print("\nresolve one: gh api graphql -f query='mutation{resolveReviewThread("
+        repo = _repo()
+        print(f"\nreply:   gh api -X POST repos/{repo}/pulls/{pr['number']}/comments/<comment>"
+              "/replies -f body='...'")
+        print("resolve: gh api graphql -f query='mutation{resolveReviewThread("
               "input:{threadId:\"<thread>\"}){thread{isResolved}}}'")
 
 

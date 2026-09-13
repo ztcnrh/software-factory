@@ -199,6 +199,19 @@ def test_apply_review_posts_pr_review_before_moving_the_label(gh, tmp_path):
     assert order.index(("api", "--method")) < order.index(("issue", "edit"))
 
 
+def test_post_review_does_not_duplicate_the_sha_line_or_marker(gh):
+    """A station that copies the Reviewed-at line and marker into its body (the skill documents
+    them) must not produce a review with two of each."""
+    posted = []
+    gh.responses[("api", "--method", "POST")] = lambda a, i: posted.append(json.loads(i)) or ""
+    pr = json.loads(pr_json())[0]
+    body = "Reviewed at abcdef123456\n\nFindings\n\n" + cli.REVIEW_MARK
+    cli._post_review(pr, report("review", "approve", body=body, comments=[
+        {"path": "a.py", "line": 1, "side": "RIGHT", "body": "x\n" + cli.REVIEW_MARK}]))
+    assert posted[0]["body"] == f"Reviewed at {'a' * 12}\n\nFindings\n\n{cli.REVIEW_MARK}"
+    assert posted[0]["comments"][0]["body"] == f"x\n\n{cli.REVIEW_MARK}"
+
+
 def test_post_review_degrades_anchor_then_event_but_never_drops_findings(gh):
     """GitHub rejects bad inline anchors (422) and self-approval; both fall back and keep the
     findings in the body."""

@@ -41,7 +41,7 @@ Decide what is decidable. A product call you can frame but not settle goes in th
 Commit the spec files with a clear message and push: `git push -u origin HEAD`.
 
 - **No PR yet:** `gh pr create --draft --base <default branch> --title "#<n>: <title>" --body-file <file>`. The body links the issue as `Spec for #<n>` (never `Closes`; the code that resolves the issue is not here yet), lists the spec paths, summarizes the product and technical direction, and names the decisions the reviewer must make.
-- **PR exists:** push to it. Reply in each review thread you addressed with what changed; resolving threads is the human's.
+- **PR exists:** push to it. Reply in each review thread you addressed with what changed (`factory threads <n>` prints the reply command); resolving threads is the human's.
 
 Verify `gh pr view` returns a real URL before reporting.
 

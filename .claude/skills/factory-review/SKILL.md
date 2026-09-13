@@ -21,7 +21,7 @@ gh api repos/<owner/repo>/pulls/<pr>/reviews
 
 - `factory diff <n>` is the annotated diff and the only source of inline comment locations.
 - `specs/<n>-*/PRODUCT.md` (and `TECH.md`) on the branch: the numbered invariants are the acceptance criteria. Cite them by number.
-- Prior factory reviews carry `Reviewed at <sha>` on their first line and end with `<!-- factory:review -->`. When one exists this is a follow-up: `git diff <sha>...HEAD` is the delta. `factory threads <n>` shows what is still open and how the implementer answered.
+- Prior factory reviews carry `Reviewed at <sha>` on their first line and end with `<!-- factory:review -->`; the runner adds both when it posts your report, so do not write them yourself. When one exists this is a follow-up: `git diff <sha>...HEAD` is the delta. `factory threads <n>` shows what is still open and how the implementer answered.
 
 ## Scope
 

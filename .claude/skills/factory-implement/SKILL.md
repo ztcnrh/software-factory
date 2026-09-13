@@ -48,7 +48,7 @@ Commit with a clear message and `git push -u origin HEAD`. Unpushed work does no
 
 - **No PR yet:** `gh pr create --base <default branch> --title "#<n>: <title>" --body-file <file>`.
 - **Draft PR from the spec station:** `gh pr ready <pr>` and `gh pr edit <pr> --body-file <file>`.
-- **Loop-back:** push, then reply in every thread you answered, in that thread, with what you changed (name the commit) or why you declined. Declining is legitimate but explicit; a silent skip earns another send-back. Never resolve a thread: whoever raised it closes it.
+- **Loop-back:** push, then reply in every thread you answered, in that thread (`factory threads <n>` prints the reply command), with what you changed (name the commit) or why you declined. Declining is legitimate but explicit; a silent skip earns another send-back. Never resolve a thread: whoever raised it closes it.
 
 The PR body links the issue with `Closes #<n>`, points at the spec files when they exist, summarizes the change, and states the validation commands run and their results, plus any known limits. Verify `gh pr view` returns a real URL before reporting.
 
