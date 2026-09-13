@@ -220,6 +220,18 @@ def test_apply_review_resolves_threads_and_skips_the_post_on_a_retry(gh, tmp_pat
     assert not gh.argv("api", "--method", "POST") and gh.argv("issue", "edit")
 
 
+def test_apply_files_followups_as_plain_issues(gh, tmp_path):
+    """An out-of-scope defect a station finds must land somewhere durable; a plain, unlabeled
+    issue leaves the decision to run the factory on it with a human."""
+    gh.responses[("issue", "view")] = issue_json("triage")
+    gh.responses[("pr", "list")] = "[]"
+    gh.responses[("api", "--paginate", "--slurp")] = "[[]]"
+    r = report(followups=[{"title": "README invocation fails", "body": "no [project.scripts]"}])
+    cli.cmd_apply(7, write(tmp_path, r))
+    [(create, _)] = gh.argv("issue", "create")
+    assert create[3] == "README invocation fails" and "triage run on #7" in create[5]
+
+
 def test_apply_review_posts_pr_review_before_moving_the_label(gh, tmp_path):
     """The review must land on the PR first: if the label moved and the post failed, implement
     would run with no worklist."""

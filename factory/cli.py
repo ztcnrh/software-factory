@@ -161,6 +161,17 @@ def schema(station: str) -> dict:
             "description": "What the next station or the human must know that the summary and the "
             "artifacts do not carry. Omit when there is nothing.",
         },
+        "followups": {
+            "type": "array",
+            "description": "Real defects or gaps you found outside this item's scope. The runner "
+            "files each as a plain issue for a human to triage. Omit when there are none.",
+            "items": {
+                "type": "object",
+                "properties": {"title": {"type": "string"}, "body": {"type": "string"}},
+                "required": ["title", "body"],
+                "additionalProperties": False,
+            },
+        },
     }
     required = ["verdict", "summary"]
     if station == "review":
@@ -439,6 +450,9 @@ def cmd_apply(n: int, report_path: str) -> None:
                 _gh("api", "graphql", "-f", "query=mutation($id:ID!){resolveReviewThread("
                     "input:{threadId:$id}){thread{isResolved}}}", "-f", f"id={thread}")
         _gh("issue", "comment", str(n), "--body", run_comment(report))
+        for f in report.get("followups") or []:
+            body = f"{f['body'].strip()}\n\nSurfaced by the factory's {station} run on #{n}."
+            _gh("issue", "create", "--title", f["title"], "--body", body)
     _set_state(n, target, states)
     link = f" · {pr['url']}" if pr else ""
     print(f"#{n}: {station} → {verdict} → {PREFIX}{target}{link}")

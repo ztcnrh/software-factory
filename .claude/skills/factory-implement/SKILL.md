@@ -42,6 +42,8 @@ Run the repo's own checks: targeted tests for the changed behavior, then the wid
 
 When specs exist, walk every numbered invariant against your diff and confirm each is satisfied or explicitly out of scope. Fix mismatches you caused; report stale spec text rather than claiming alignment.
 
+When a send-back or a gate names a specific spec line or invariant, re-run its counterexample against that exact sentence before replying. Reading the surrounding paragraph and concluding the spec already says it is how the same send-back arrives twice.
+
 ## 5. Commit, push, PR
 
 Commit with a clear message and `git push -u origin HEAD`. Unpushed work does not exist to the reviewer.

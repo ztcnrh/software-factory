@@ -35,6 +35,7 @@ Prioritize, in this order: correctness, security, error handling, regressions, m
 - V0 or initial PRs: timeouts, retries, and lifecycle as optional unless correctness, security, or data loss is at stake.
 - Areas the spec marks **Latitude** are the implementer's call; judge them against the bar the spec set, not the mechanism you would have chosen.
 - Spec currency: a stale `PRODUCT.md` that no longer describes the change is `⚠️ [IMPORTANT]`; drift beyond the approved intent is a scope finding.
+- Provenance in the repo tree is a finding: code, comments, docstrings, or test names that cite a spec file or an invariant number. Invariants get renumbered, so these read as stale or wrong to anyone holding only the checkout. One `🧹 [NIT]` anchored on a representative line, with the remaining paths named in `body`, not one per occurrence.
 - Untouched code the change merely sits near is context, not scope; mention it in `body` if it matters, never as a send-back.
 - Docs- or spec-only diffs: clarity, completeness, contradictions, missing acceptance criteria.
 
