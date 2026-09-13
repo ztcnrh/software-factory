@@ -509,7 +509,7 @@ def cmd_threads(n: int) -> None:
         fail(f"#{n} has no PR")
     owner, name = _repo().split("/")
     query = """query($owner:String!,$name:String!,$pr:Int!){ repository(owner:$owner,name:$name){
-      pullRequest(number:$pr){ reviewThreads(first:100){ nodes{ isResolved path line
+      pullRequest(number:$pr){ reviewThreads(first:100){ nodes{ id isResolved path line
         comments(first:50){ nodes{ author{login} body } } } } } } }"""
     data = _gh_json("api", "graphql", "-f", f"query={query}", "-f", f"owner={owner}",
                     "-f", f"name={name}", "-F", f"pr={pr['number']}")
@@ -517,9 +517,12 @@ def cmd_threads(n: int) -> None:
     open_threads = [t for t in threads if not t["isResolved"]]
     print(f"PR #{pr['number']}: {len(open_threads)} unresolved thread(s)")
     for t in open_threads:
-        print(f"\n{t['path']}:{t['line']}")
+        print(f"\n{t['path']}:{t['line']}  thread {t['id']}")
         for c in t["comments"]["nodes"]:
             print(f"  @{c['author']['login']}: {c['body'].replace(REVIEW_MARK, '').strip()}")
+    if open_threads:
+        print("\nresolve one: gh api graphql -f query='mutation{resolveReviewThread("
+              "input:{threadId:\"<thread>\"}){thread{isResolved}}}'")
 
 
 HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")

@@ -1,46 +1,42 @@
 # Software Factory
 
-An agentic delivery line for your own projects. Drop in a work item; it triages, specs, implements, reviews, verifies, and hands you a change to ship. Every time you step in to correct it, it writes down why — then rewrites its own instructions so it needs you less next time.
+A software factory that lives in GitHub. Label an issue, and Claude Code triages it, writes a spec when one is needed, implements it on a branch with tests, and reviews the pull request. You decide twice: approve the spec, merge the PR. Everything the factory knows about an item is on the issue and its PR; nothing is committed to your repo but a handful of skills.
 
-This repo is the machinery. It installs *into* your project repos and runs there.
-
-```
-new item → Triage ─┬─ needs a spec → Spec → ✋ approve the plan
-                   └─ small enough → build it now
-                                            │
-                                            ▼
-        Implement ⇄ Code review → Verify → ✋ ship it? → Deploy → Done
-         (sent back until it passes)
+```mermaid
+flowchart LR
+  T[triage] -->|needs_spec| S[spec] --> SR{{spec-review}} -->|approve| I[implement]
+  T -->|automatable| I --> R[review] -->|approve| SHR{{ship-review}} -->|merge| D[done]
+  R -->|request_changes| I
+  T -->|needs_info| N[needs-info] -.->|answer, retriage| T
 ```
 
-Wherever you see ✋ the line stops and waits for you, and it stops too when it hits something only you can answer. **It never merges.** Stations branch, commit, and open pull requests; the merge button stays yours.
+Hexagons are human gates. Every other arrow is a station run: one headless `claude -p` process whose final message is a JSON verdict, applied by a small CLI that moves the label and leaves a run comment with the measured cost.
 
-The sixth station is the whole point. **Retro** reads every place you stepped in — a send-back, a correction, an unblock — and proposes changes to the factory's own station instructions and gate policies, as a pull request you review. The number it exists to raise is the **one-shot ship rate**: the share of changes that ship with no human rework at all. The goal was never zero humans. It's zero rework, until your review is a rubber stamp.
-
-## Try it
+## Install
 
 ```bash
-uv tool install /path/to/software-factory       # puts the `factory` CLI on PATH
-python3 install/install.py /path/to/your/repo   # adopt it into a project
-cd /path/to/your/repo && factory init
+git clone https://github.com/fetch-rewards/software-factory && cd software-factory
+uv tool install .                       # the `factory` CLI
+./install.sh /path/to/your/repo         # copies the skills, creates the labels
+./install.sh /path/to/your/repo --with-cloud   # also the GitHub Actions workflow
 ```
 
-Then, in a Claude Code session in that repo:
+Commit what it copied. For the cloud workflow, add the `CLAUDE_CODE_OAUTH_TOKEN` secret (`claude setup-token`; it runs on your Claude subscription), set the `FACTORY_TOOLKIT_GIT` variable to a pip-installable ref of this repo, and allow Actions to create pull requests in the repo settings.
 
-```bash
-factory new "the thing I want"
-/factory          # drives it down the line until it needs you
-/factory-status    # the board, the metrics, what's waiting on you
+## Use
+
+In a Claude Code session in your repo:
+
+```
+/factory new "tally crashes on a blank cell"   # files the issue and drives it to the first gate
+/factory                                        # the board and the headline metrics
+/factory 12 approve                             # a gate decision; request_changes "why" sends it back
 ```
 
-Or skip all of it: open a Claude Code session here and say *"install the factory into `<path>`"*. It runs fully local — no cloud accounts needed to start.
+Or without the driver: `factory run 12 --out r.json && factory apply 12 r.json`. In the cloud the same commands run when the label changes, and a PR review or merge records the gate.
 
-## Next
+`factory metrics` prints cost per shipped item, cycle time, autonomy (merged PRs with no human commit), and steers per item, all derived from the issues and PRs.
 
-- **[FACTORY-MANUAL.md](FACTORY-MANUAL.md)** — operating it day to day, and what each gate is really asking you.
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — how the machine is built, and why it's built that way.
-- **[PRINCIPLES.md](PRINCIPLES.md)** — what it's for, where it's going, and what it doesn't do yet.
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the primitives table, the transitions, and the runner contract.
 
-Proven end-to-end on real work, and still early — the cloud layer ships disabled. Meant to be used, stress-tested, and improved, increasingly by itself.
-
-*Inspired by Zach Lloyd's "factory engineering" thesis and the patterns in [warpdotdev/common-skills](https://github.com/warpdotdev/common-skills).*
+*Built on the skills and patterns in Warp's [cloud-factory-demo](https://github.com/warpdotdev/cloud-factory-demo).*

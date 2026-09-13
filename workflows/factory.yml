@@ -1,0 +1,219 @@
+# The software factory in GitHub Actions. One workflow, three paths:
+#   a factory:* label lands on an issue  → run that station, then apply its report
+#   the apply job dispatches this workflow again when the new label is another station
+#     (a label added with GITHUB_TOKEN fires no `labeled` event, a workflow_dispatch does)
+#   a human reviews or merges a factory PR → record the gate decision
+#
+# Setup: secret CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) or ANTHROPIC_API_KEY;
+# variable FACTORY_TOOLKIT_GIT, e.g. git+https://github.com/<you>/software-factory@main;
+# repository setting "Allow GitHub Actions to create and approve pull requests".
+
+name: factory
+
+on:
+  issues:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: issue number whose label names the station to run
+        required: true
+        type: number
+  pull_request_review:
+    types: [submitted]
+  pull_request:
+    types: [closed]
+
+# One run per item at a time; a queued run waits instead of cancelling a run mid-push.
+concurrency:
+  group: factory-${{ inputs.issue || github.event.issue.number || github.event.pull_request.head.ref }}
+  cancel-in-progress: false
+
+env:
+  ISSUE: ${{ inputs.issue || github.event.issue.number }}
+  LABEL: ${{ inputs.issue && 'dispatch' || github.event.label.name }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  # Triage and review only read; their token cannot label, comment, or push, so nothing an issue
+  # or PR says can make the agent act on GitHub. Spec and implement must push and open PRs.
+  run-read:
+    if: >-
+      (github.event_name == 'issues' &&
+       contains(fromJSON('["factory:triage","factory:review"]'), github.event.label.name)) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      report: ${{ steps.run.outputs.report }}
+      skipped: ${{ steps.station.outputs.skipped }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - name: Which station
+        id: station
+        run: |
+          labels=$(gh issue view "$ISSUE" --json labels -q '[.labels[].name] | join(" ")')
+          case " $labels " in
+            *" factory:triage "*|*" factory:review "*) echo "skipped=false" >> "$GITHUB_OUTPUT" ;;
+            *) echo "skipped=true" >> "$GITHUB_OUTPUT"; echo "not a read-only station: $labels" ;;
+          esac
+      - name: Install the factory CLI and Claude Code
+        if: steps.station.outputs.skipped == 'false'
+        env:
+          FACTORY_TOOLKIT_GIT: ${{ vars.FACTORY_TOOLKIT_GIT }}
+        run: |
+          [ -n "$FACTORY_TOOLKIT_GIT" ] || { echo "::error::set the FACTORY_TOOLKIT_GIT repository variable"; exit 1; }
+          uv tool install "$FACTORY_TOOLKIT_GIT"
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Run the station
+        if: steps.station.outputs.skipped == 'false'
+        id: run
+        env:
+          OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # Exactly one credential: an ANTHROPIC_API_KEY outranks the OAuth token even when empty.
+          if [ -n "$OAUTH_TOKEN" ]; then export CLAUDE_CODE_OAUTH_TOKEN="$OAUTH_TOKEN";
+          elif [ -n "$API_KEY" ]; then export ANTHROPIC_API_KEY="$API_KEY";
+          else echo "::error::set the CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY secret"; exit 1; fi
+          factory run "$ISSUE" --out report.json
+          echo "report=$(jq -c . report.json)" >> "$GITHUB_OUTPUT"
+
+  run-write:
+    if: >-
+      github.event_name == 'issues' &&
+      contains(fromJSON('["factory:spec","factory:implement"]'), github.event.label.name) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      report: ${{ steps.run.outputs.report }}
+      skipped: ${{ steps.station.outputs.skipped }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - name: Which station
+        id: station
+        run: |
+          labels=$(gh issue view "$ISSUE" --json labels -q '[.labels[].name] | join(" ")')
+          case " $labels " in
+            *" factory:spec "*|*" factory:implement "*) echo "skipped=false" >> "$GITHUB_OUTPUT" ;;
+            *) echo "skipped=true" >> "$GITHUB_OUTPUT"; echo "not a writing station: $labels" ;;
+          esac
+      - name: Install the factory CLI and Claude Code
+        if: steps.station.outputs.skipped == 'false'
+        env:
+          FACTORY_TOOLKIT_GIT: ${{ vars.FACTORY_TOOLKIT_GIT }}
+        run: |
+          [ -n "$FACTORY_TOOLKIT_GIT" ] || { echo "::error::set the FACTORY_TOOLKIT_GIT repository variable"; exit 1; }
+          uv tool install "$FACTORY_TOOLKIT_GIT"
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Run the station
+        if: steps.station.outputs.skipped == 'false'
+        id: run
+        env:
+          OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$OAUTH_TOKEN" ]; then export CLAUDE_CODE_OAUTH_TOKEN="$OAUTH_TOKEN";
+          elif [ -n "$API_KEY" ]; then export ANTHROPIC_API_KEY="$API_KEY";
+          else echo "::error::set the CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY secret"; exit 1; fi
+          factory run "$ISSUE" --out report.json
+          echo "report=$(jq -c . report.json)" >> "$GITHUB_OUTPUT"
+
+  apply:
+    needs: [run-read, run-write]
+    if: >-
+      always() && (needs.run-read.outputs.skipped == 'false' || needs.run-write.outputs.skipped == 'false')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - name: Install the factory CLI
+        env:
+          FACTORY_TOOLKIT_GIT: ${{ vars.FACTORY_TOOLKIT_GIT }}
+        run: uv tool install "$FACTORY_TOOLKIT_GIT"
+      - name: Apply the report and chain the next station
+        env:
+          REPORT: ${{ needs.run-read.outputs.report || needs.run-write.outputs.report }}
+        run: |
+          [ -n "$REPORT" ] || { echo "::error::the station returned no report"; exit 1; }
+          printf '%s' "$REPORT" > report.json
+          factory apply "$ISSUE" report.json | tee apply.out
+          case "$(cat apply.out)" in
+            *"factory:spec"*|*"factory:implement"*|*"factory:review"*)
+              gh workflow run factory.yml -f issue="$ISSUE" ;;
+          esac
+
+  gate:
+    if: >-
+      startsWith(github.event.pull_request.head.ref, 'feature/') &&
+      ((github.event_name == 'pull_request_review' &&
+        github.event.review.user.type != 'Bot' &&
+        contains(fromJSON('["approved","changes_requested"]'), github.event.review.state)) ||
+       (github.event_name == 'pull_request' && github.event.pull_request.merged == true))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - name: Install the factory CLI
+        env:
+          FACTORY_TOOLKIT_GIT: ${{ vars.FACTORY_TOOLKIT_GIT }}
+        run: uv tool install "$FACTORY_TOOLKIT_GIT"
+      - name: Record the decision
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          STATE: ${{ github.event.review.state }}
+          WHY: ${{ github.event.review.body }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          issue=$(sed -nE 's#^feature/([0-9]+)-.*#\1#p' <<<"$HEAD_REF")
+          [ -n "$issue" ] || { echo "not a factory branch: $HEAD_REF"; exit 0; }
+          if [ "$MERGED" = true ]; then decision=done;
+          elif [ "$STATE" = approved ]; then decision=approve;
+          else decision=request_changes; fi
+          # A decision the item's state does not accept (e.g. Approve at ship-review, where the
+          # merge is the approval) is a notice, not a failure of the factory.
+          if ! factory gate "$issue" "$decision" ${WHY:+--why "$WHY"} | tee gate.out; then
+            echo "::notice::$(cat gate.out)"; exit 0
+          fi
+          case "$(cat gate.out)" in
+            *"factory:spec"*|*"factory:implement"*) gh workflow run factory.yml -f issue="$issue" ;;
+          esac
