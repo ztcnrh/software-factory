@@ -131,7 +131,7 @@ def _item_pr(n: int, branch: str | None = None) -> dict | None:
 
 
 def _paginated(endpoint: str) -> list:
-    return [x for page in _gh_json("api", "--paginate", "--slurp", endpoint) for x in page]
+    return [x for page in _gh_json("api", "--paginate", "--slurp", endpoint) or [] for x in page]
 
 
 def _comments(n: int) -> list[dict]:
