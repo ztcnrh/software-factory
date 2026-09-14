@@ -50,4 +50,4 @@ If Context and Approach end up describing the same files and state from differen
 - Prefer concrete implementation guidance over generic architecture language.
 - Reference `PRODUCT.md` for behavior instead of restating it; reference invariants by number.
 - Each section should earn its place — if a section would repeat another or contain only boilerplate, omit it.
-- Approved specs ship in the same PR as the implementation, and this file is kept true as the approach evolves — `TECH.md` describes the implementation that actually ships.
+- Approved specs land on the default branch through their own PR before implementation starts, and the implementation keeps this file true as the approach evolves — `TECH.md` describes the implementation that actually ships.

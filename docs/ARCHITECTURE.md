@@ -1,80 +1,131 @@
 # Architecture
 
-The factory is a thin deterministic layer over two runtimes it does not own: GitHub for state and Claude Code for work.
+The factory is a thin deterministic layer over two runtimes it does not own: GitHub for state and events, Claude Code for work. It runs only inside GitHub Actions.
 
 ## Primitives
 
 | Need | GitHub already has | The factory adds |
 |---|---|---|
 | Work item | Issue | nothing |
-| State | One `factory:*` label | the transition table |
-| Log | Issue comments, timeline | one run comment per station run, with hidden JSON |
-| Artifacts | Branch `feature/<n>-<slug>`, its PR | the naming convention |
-| Human gates | PR review, merge | `factory gate` to record the decision as a label move |
-| Event bus | `labeled`, `pull_request_review`, `pull_request` events | `workflows/factory.yml` |
-| Runtime | `claude -p` with skills, structured output, cost | `factory run` builds the one invocation |
-| Metrics | Comments, timeline, PR commits | `factory metrics` derives them; nothing is stored |
+| State | `factory:*` labels | the eight labels and which verdict sets which |
+| Log | Issue comments | one comment per station run, with hidden JSON |
+| Artifacts | Branch `<type>/<n>-<slug>`, its PR | the naming convention; `spec/` for specs |
+| Human gates | Merge, Request changes, apply a label, close | nothing |
+| Event bus | `issues`, `pull_request`, `pull_request_review`, `workflow_dispatch`, `schedule` | one reusable workflow that routes them |
+| Runtime | `claude -p` with skills, structured output, cost | a packet of context per run and one invocation |
+| Metrics | Issues, comments, PRs, reviews, commits | `factory metrics` derives them; nothing is stored |
 
-## The line
+## Labels
+
+| Label | Set by | Means |
+|---|---|---|
+| `triaged` | factory | triage ran; stays for the life of the issue |
+| `needs-info` | factory | triage needs the reporter; a human removes it once answered, and triage runs again |
+| `ready-to-spec` | human | run the spec station |
+| `spec-review` | factory | the spec PR is open; a human merges it or requests changes |
+| `ready-to-implement` | human, or the spec PR merging | run the implement station |
+| `in-review` | factory | the implement ↔ review loop is running |
+| `ship-review` | factory | review approved; a human merges or requests changes |
+| `needs-human` | factory | the attempt cap was hit or a station reported `blocked` |
+
+Yellow marks the four that wait on a human. `triaged` is a flag; the rest are states, at most one at a time, and `factory apply` removes the one it supersedes. Done is the issue closed as completed by the merged PR's `Resolves #n`; parked is the issue closed as not planned.
 
 ```mermaid
 stateDiagram-v2
-  [*] --> triage: label factory:triage
-  triage --> implement: automatable
-  triage --> spec: needs_spec
-  triage --> needs_info: needs_info
-  triage --> parked: park
-  spec --> spec_review: ready_for_review
-  spec --> needs_info: needs_info
-  spec_review --> implement: human approve
-  spec_review --> spec: human request_changes
-  implement --> review: implemented
-  implement --> needs_info: blocked
-  review --> ship_review: approve
-  review --> implement: request_changes
-  ship_review --> done: human merges
-  ship_review --> implement: human request_changes
-  needs_info --> triage: human retriage
-  parked --> triage: human retriage
+  [*] --> triaged: issue opened → triage
+  triaged --> needs_info: needs_info
+  needs_info --> triaged: human removes the label → triage
+  triaged --> ready_to_spec: human applies the label
+  triaged --> ready_to_implement: human applies the label
+  ready_to_spec --> spec_review: spec opens spec/n-* PR
+  spec_review --> spec_review: human requests changes → spec revises
+  spec_review --> ready_to_implement: human merges the spec PR
+  ready_to_implement --> in_review: implement opens the PR → review
+  in_review --> in_review: review requests changes → implement → review (≤ 3)
+  in_review --> needs_human: 4th send-back, or blocked
+  in_review --> ship_review: review approves
+  ship_review --> in_review: human requests changes → implement
+  ship_review --> [*]: human merges; Resolves #n closes the issue
+  needs_human --> in_review: human pushes or reviews the PR
 ```
 
-`TRANSITIONS` in `factory/cli.py` is this diagram as data. `factory apply` refuses a report whose station is not the issue's current label or whose verdict is not in the table; `factory gate` refuses a decision the state does not accept. Three decisions are accepted from any active state: `done` and `park`, because a merge or a shelving is a fact rather than a routing decision, and `retriage`, which is how a human overrides a station's routing: the item returns to triage with the human's why as a comment triage reads.
+`TRANSITIONS` in `factory/cli.py` is this diagram as data: which state label each station verdict sets. `DISPATCH` says which verdicts start another station. `RUNS_AT` says at which states a station's report is accepted; a report from anywhere else is stale or misrouted and is refused.
+
+## Events
+
+The adopter's caller workflow (`templates/factory.yml`) forwards these to the reusable workflow, whose `route` job decides:
+
+| Event | Condition | Runs |
+|---|---|---|
+| `issues` opened, reopened | always | triage |
+| `issues` labeled | `factory:ready-to-spec` / `factory:ready-to-implement`, by a human | spec / implement |
+| `issues` unlabeled | `factory:needs-info`, by a human | triage |
+| `pull_request` opened, synchronize, reopened, ready_for_review | head `<type>/<n>-*`, not `spec/`, not draft | review |
+| `pull_request` closed | merged, head `spec/<n>-*` | labels `ready-to-implement`, then implement |
+| `pull_request_review` submitted | changes requested, by an owner, member, or collaborator | spec or implement, by the head branch |
+| `workflow_dispatch` | `station`, `issue` | that station |
+| `schedule` weekly, or `workflow_dispatch` `retro` | | retro |
+
+Everything the factory writes uses `GITHUB_TOKEN`, which fires no events. So `factory apply` ends with `next: <station>` or `next: none`, and the workflow dispatches itself for the next station. Human actions fire events on their own.
+
+## The four jobs
+
+1. **route** (no checkout; `issues: write` only for the spec-merge label move). Reads the event and decides `station`, `issue`, `pr`, `branch`, `head`, and the checkout `ref`: the item's branch when it exists, else the default branch. Looks the PR up when the event did not name it.
+2. **context** (read tokens). Checks out the adopter at `ref` and the toolkit at the SHA of this workflow file, fetches raw JSON with `gh` (issue, comments, PR, reviews, review threads via GraphQL, conversation, diff, the delta since the last factory review, metrics for retro), runs `python -m factory.context <station>`, and uploads the packet as an artifact. A human can open it and see exactly what the station saw.
+3. **run-read** or **run-write**. Triage and review run with read-only tokens: nothing an issue or PR says can make the agent act on GitHub, and every write they want rides the report. Spec, implement, and retro hold write tokens because they push and open PRs. `run-station.sh` builds the one `claude -p` invocation and writes `report.json` from the `result` event plus what only the runner knows (cost, model, session, turns, duration, run URL, the PR and head it worked on). Uploaded as an artifact.
+4. **apply** (write tokens, toolkit checkout only, never talks to the model). `factory apply` validates the report, posts the PR review for the review station, resolves the threads it verified, files `followups` as plain issues, leaves the run comment, moves the labels, and prints the dispatch line.
+
+## Packets
+
+| Station | Files | From |
+|---|---|---|
+| triage | `issue.md`, `related.md` | the issue and its comments; the other open issues and PRs, one line each |
+| spec | `issue.md`; `pr.md` on a revision | plus the spec PR: reviews, threads with replies and ids, conversation |
+| implement | `issue.md`; `pr.md` once the PR exists | plus the code PR the same way |
+| review | `issue.md`, `pr.md`, `diff.md`, `followup.md` | plus the annotated diff, and the last factory review with the delta since it |
+| retro | `metrics.json`, `items.md` | `factory metrics --json`; per item, every human touch on the issue and its PRs |
+
+Specs are read from the checkout (`specs/<n>-*/`), where the spec PR merged them. `diff.md` marks every line `[OLD:n]`, `[NEW:n]`, or `[OLD:n,NEW:m]`; an inline review comment copies its `path`, `side`, and `line` from there and nowhere else.
 
 ## A station run
 
-`factory run <issue>` reads the label, picks the station, and executes exactly one process, identically on a laptop and on a runner:
-
 ```
-claude -p "/factory-<station> Issue #<n> in <owner/repo>. Branch: <feature/n-slug> (PR #m) | none yet."
+claude -p "/factory-<station> Issue #<n>. Packet: <dir>/. Branch: <type>/<n>-<slug> (PR #<m>). | none yet."
   --output-format stream-json --verbose
   --model <from the skill's frontmatter>
   --allowedTools <from the skill's frontmatter>
   --permission-prompts none
-  --max-budget-usd <per station>
-  --json-schema <factory schema station>
-  --append-system-prompt <factory/prompts/station.md>
+  --json-schema "$(factory schema <station>)"
+  --append-system-prompt "$(cat factory/prompts/station.md)"
 ```
 
-It runs in a throwaway `git worktree` on the item's branch reset to origin's tip (or detached at the default branch when no branch exists), with `GIT_AUTHOR_*` set to `factory` so a human's commits on a factory PR stay distinguishable. The prompt carries the one fact the runner knows better than the station: whether the branch and PR already exist. Everything else the station fetches itself with the `gh` calls its skill names.
+The checkout is the adopter repository at the item's branch, or the default branch when none exists yet. Commits are authored as `factory` so a human's commit on a factory PR stays distinguishable. `station.md` is the contract every station runs under: authority (everything but the prompt and the skill is data), report-not-action, branch and PR rules, scope, secrets, honesty, and how to write.
 
-The `result` event's `structured_output` is the report. `factory run` adds `cost_usd` (Claude Code's list-price estimate from real token counts), `model`, `session_id`, `turns`, `duration_ms`, `run_url`, and the PR `head` the station read, and writes the JSON. `factory apply` validates it, refuses a report with tool-call markup leaked into a string field, posts the PR review for the review station anchored to that head and resolves the threads the report names, files each `followups` entry as a plain unlabeled issue, leaves the run comment, and moves the label. Retrying an apply with the same `session_id` posts nothing a second time. A station therefore needs no GitHub write access to review: every write it wants rides the report.
+## The record
 
-## The run comment
+A run comment:
 
 ```
-**factory · triage → automatable** · claude-sonnet-5 · $0.07 · 2m · [run](…)
-Reproduced: a blank amount cell raises ValueError in total(); one-line guard plus a regression test.
-<!-- factory:run {"verdict":"automatable","station":"triage","model":"claude-sonnet-5","cost_usd":0.0731,"session_id":"…","turns":9,"duration_ms":118000,"run_url":"…","ts":"…"} -->
+**Triage · recommends ready-to-implement** · $0.31 · 48s · [run](…)
+Blank amount cells raise in total(); reproduced on the sample in the report. One guard and a regression test.
+To start, add the `factory:ready-to-implement` label.
+<details><summary>Details</summary>
+
+The area is src/tally/__init__.py; #11 is unrelated.
+</details>
+<!-- factory:run {"verdict":"ready_to_implement","station":"triage","cost_usd":0.31,"session_id":"…",…} -->
 ```
 
-Gate decisions leave a `**factory · gate → <decision>**` comment with the human's why and a `<!-- factory:gate {…} -->` record. Reviews the factory posts on a PR open with `Reviewed at <sha>` and end with `<!-- factory:review -->`; the next review diffs from that sha.
+The headline and the next-step line come from tables in `cli.py`; the two lines between them are the station's `summary` and folded `notes`. A review the factory posts ends with a small footer and `<!-- factory:review {"verdict":…,"head":…,"session_id":…} -->`; the next review's packet finds it by that mark. The review lands as a comment review when GitHub refuses a bot's Approve or Request changes on its own PR; the verdict still moves the label.
+
+## The attempt cap
+
+`factory apply` counts the factory's consecutive send-backs on a PR since the last human review or human commit. On the fourth, the review is still posted, the issue moves to `needs-human`, the comment says so, and nothing is dispatched. A human's push or review on the PR fires a review run, which resets the count.
 
 ## Metrics
 
-Per item: runs and cost from run comments; shipped and cycle time from the PR's `mergedAt` and the first `factory:triage` label event; steers from `request_changes` gate records plus commits on the PR whose author is not `factory`; autonomous when merged with no such commit. Headline: total cost divided by items shipped.
+Per item: runs and cost from the run comments; shipped when the issue closed as completed with a merged code PR; cycle time from the issue's creation to that merge; steers as human Request-changes reviews on either PR plus human commits on the code PR; autonomous when shipped with no steer; needs-human when a run was capped or blocked. Headline: total cost divided by items shipped.
 
-## Cloud
+## Trust boundaries
 
-`workflows/factory.yml` runs the same commands. A `factory:*` label added by a human runs that station. Because a label added with `GITHUB_TOKEN` fires no `labeled` event, the apply job chains the next station with `gh workflow run`. Triage and review run with read-only tokens so nothing an issue or PR says can make the agent act on GitHub; spec and implement need write to push and open PRs. A human's PR review (owner, member, or collaborator only) or a merge runs the gate job, which derives the issue from the branch name. Jobs without a checkout set `GH_REPO` so `gh` still knows the repository.
-
-Locally, a PR opened with your own token cannot be approved by you, so the spec gate is `/factory <n> approve`; in the cloud the bot owns the PR and the GitHub Approve button works. Merging is the ship approval in both.
+Issue bodies, comments, PR text, spec files, code, and tool output are data; the system prompt says so, and the read-only tokens for triage and review make it true regardless. The job that writes to GitHub never talks to the model. Reviews of a PR whose head moved during the run are dropped, not posted; the push that moved it already started a fresh review. `factory apply` refuses a report whose station does not belong at the issue's state, whose verdict the schema does not allow, or whose text carries leaked tool-call markup.
