@@ -54,6 +54,7 @@ Describe, at minimum:
 - Default behavior and the happy-path user flow.
 - Every user-visible state and the transitions between them.
 - All inputs the user can provide and how the feature responds to each.
+- For behavior that parses or matches data the consumer did not hand-type (spreadsheet exports, uploaded files, API payloads): the variants the real source puts in one field — surrounding whitespace, case, the other conventions for a single value, such as an accounting `($100.00)` beside `-$100.00` — and which of them are accepted. Real data is messier than the example in the work item; the invariant that matches only the clean spelling is the one that comes back.
 - Empty states, error states, loading/pending states, and cancellation.
 - Edge cases a reasonable implementer would not think to ask about — permission denied, offline, timeouts, races between state changes, concurrent instances, stale or missing data, interactions with adjacent features.
 - The expectations native to the surface: for a UI, keyboard/focus/accessibility; for an API, idempotency, versioning, and compatibility; for a CLI, exit codes and stdin/stdout contracts; for a data model, integrity and consistency guarantees.

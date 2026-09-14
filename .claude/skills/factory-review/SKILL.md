@@ -31,7 +31,7 @@ Prioritize, in this order: correctness, security, error handling, regressions, m
 - Spec currency: a stale `PRODUCT.md` that no longer describes the change is `⚠️ [IMPORTANT]`; drift beyond the approved intent is a scope finding.
 - Provenance in the repo tree is a finding: code, comments, docstrings, or test names that cite a spec file or a rule number. Rules get renumbered, so these read as stale or wrong to anyone holding only the checkout. One `🧹 [NIT]` anchored on a representative line, with the remaining paths named in `body`, not one per occurrence.
 - Untouched code the change merely sits near is context, not scope; mention it in `body` if it matters, never as a send-back.
-- `pr.md` saying the PR CONFLICTS with its base is `⚠️ [IMPORTANT]` in `body` and earns `request_changes` on its own: GitHub runs nothing on a conflicted PR, so this send-back is how the base gets merged in.
+- Nothing you run proves anything about a PR whose base moved out from under it, and `pr.md`'s mergeability is a snapshot GitHub computes late. Check the base yourself: `git fetch origin <base>` then `git log --oneline HEAD..origin/<base>`. A conflict, or a base commit that touched the code this diff touches, is `⚠️ [IMPORTANT]` in `body` and earns `request_changes` on its own: GitHub runs nothing on a conflicted PR, so this send-back is how the base gets merged in.
 - Docs- or spec-only diffs: clarity, completeness, contradictions, missing acceptance criteria.
 
 ## Follow-ups

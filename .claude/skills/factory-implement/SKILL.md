@@ -21,9 +21,11 @@ If the sources conflict, or the change turns out much larger or more ambiguous t
 
 Read the code you are about to change: current behavior, the files, tests, and data flows involved, the patterns the repo already uses, the edge cases the rules imply, and the repo's validation commands (README, package scripts, CI config, Makefile). Never delegate reading a file you are about to edit.
 
+When the change parses or matches data nobody hand-typed (exports, uploads, payloads) and no spec pins the accepted forms, look at what else that source puts in the same field: surrounding whitespace, case, the other notation for the same value. Handle the variants that share the code path, or name them in the PR body as left out on purpose; accepting only the spelling the issue quoted invites a send-back for its sibling.
+
 ## 3. Build
 
-- **Branch.** The prompt says whether the branch exists. Exists: the checkout is on it; commit there, and when `pr.md` says it CONFLICTS with the base branch, `git merge origin/<base>` first, resolve every conflict keeping both behaviors, and run the suite before anything else. None yet: `git checkout -b <type>/<n>-<slug>` from the current HEAD, where `<type>` is the conventional-commit type that fits the issue (`fix` for a bug, `feat` for new behavior, else `docs`, `refactor`, `perf`, `test`, or `chore`) and the slug is a short kebab of the title, at most five words.
+- **Branch.** The prompt says whether the branch exists. Exists: the checkout is on it; commit there. When `pr.md` says it CONFLICTS with the base branch, or `git fetch origin <base>` and `git log --oneline HEAD..origin/<base>` show the base moved in code you touch, `git merge origin/<base>` first, resolve every conflict keeping both behaviors, and run the suite before anything else. None yet: `git checkout -b <type>/<n>-<slug>` from the current HEAD, where `<type>` is the conventional-commit type that fits the issue (`fix` for a bug, `feat` for new behavior, else `docs`, `refactor`, `perf`, `test`, or `chore`) and the slug is a short kebab of the title, at most five words.
 - Make the smallest cohesive change that satisfies the rules. Where the spec grants **Latitude**, meet the quality bar it names with your own judgment.
 - **Tests ship with the change**: a regression test for every bug fix, unit tests for non-trivial logic, in the repo's framework and layout.
 - Follow existing style and architecture. No unrelated refactors, formatting churn, dependency upgrades, or opportunistic cleanup.
