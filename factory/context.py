@@ -143,9 +143,13 @@ def threads_md(threads: list[dict]) -> list[str]:
             head += f" · reply to comment `{nodes[0]['databaseId']}`"
         out += ["", head]
         for c in nodes:
-            out += ["", f"**{c['author']['login']}** · {when(c.get('createdAt'))}", "",
-                    strip(c["body"])]
+            out += ["", f"**{login(c)}** · {when(c.get('createdAt'))}", "", strip(c["body"])]
     return out
+
+
+def login(node: dict) -> str:
+    """A thread comment's author; GraphQL returns null for a deleted account."""
+    return (node.get("author") or {}).get("login") or "ghost"
 
 
 def pr_md(pr: dict, reviews: list[dict], threads: list[dict], talk: list[dict]) -> str:
@@ -156,14 +160,16 @@ def pr_md(pr: dict, reviews: list[dict], threads: list[dict], talk: list[dict]) 
            f"By {who(pr)} · `{head.get('ref')}` at {(head.get('sha') or '')[:12]} → "
            f"`{base.get('ref')}`{' · draft' if pr.get('draft') else ''} · {pr.get('html_url', '')}",
            "", "## Description", "", strip(pr.get("body")) or "_(no description)_"]
-    spoken = [r for r in reviews if strip(r.get("body"))]
+    # A human's review counts even with no body: the verdict itself is the message. A bot's
+    # bodyless review is the artifact of a reply posted inside a thread.
+    spoken = [r for r in reviews if strip(r.get("body")) or not is_bot(r)]
     if spoken:
         out += ["", "## Reviews", "",
                 "A bar a human states here binds like the spec."]
         for r in sorted(spoken, key=lambda r: r.get("submitted_at") or ""):
             state = (r.get("state") or "").lower().replace("_", " ")
             out += ["", f"### {who(r)} · {state} · at {(r.get('commit_id') or '')[:12]} · "
-                        f"{when(r.get('submitted_at'))}", "", strip(r["body"])]
+                        f"{when(r.get('submitted_at'))}", "", strip(r.get("body")) or "_(no text)_"]
     if threads:
         out += ["", "## Threads", "",
                 "Open threads are the worklist; whoever raised one closes it.",
@@ -231,8 +237,7 @@ def items_md(metrics: dict, raw: Path) -> str:
                     out.append(f"- human review · {state} · {(r.get('user') or {}).get('login')}: "
                                f"{first_line(r['body'])}")
             for t in load(folder, f"threads-{m}.json", []):
-                humans = [c for c in t["comments"]["nodes"][1:]
-                          if c["author"]["login"] != "github-actions"]
+                humans = [c for c in t["comments"]["nodes"] if login(c) != "github-actions"]
                 if humans:
                     state = "resolved" if t["isResolved"] else "open"
                     out.append(f"- human reply on `{t.get('path')}:{t.get('line') or '?'}` "

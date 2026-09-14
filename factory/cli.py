@@ -312,20 +312,23 @@ def _factory_reviews(reviews: list[dict]) -> list[tuple[dict, dict]]:
     return out
 
 
+TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
+
+
 def sendbacks(reviews: list[dict], commits: list[dict], session_id: str | None = None) -> int:
-    """Consecutive factory send-backs on a PR since the last human review or human commit. The
-    review from `session_id` is left out so a retried apply counts the same as the first."""
+    """Consecutive factory send-backs on a PR since the last review by a maintainer or commit by a
+    human. The review from `session_id` is left out so a retried apply counts the same as the
+    first. Commits count by committer date: a rebase keeps the author date of the original."""
     events: list[tuple[str, str]] = []
     for r in reviews:
-        if (r.get("user") or {}).get("type") != "Bot":
-            events.append((r["submitted_at"], "human"))
+        if (r.get("user") or {}).get("type") != "Bot" and r.get("author_association") in TRUSTED:
+            events.append((r.get("submitted_at") or "", "human"))
     for r, rec in _factory_reviews(reviews):
         if rec.get("verdict") == "request_changes" and rec.get("session_id") != session_id:
-            events.append((r["submitted_at"], "sendback"))
+            events.append((r.get("submitted_at") or "", "sendback"))
     for c in commits:
-        author = c["commit"]["author"] or {}
-        if author.get("email") != BOT_EMAIL:
-            events.append((author.get("date") or "", "human"))
+        if (c["commit"]["author"] or {}).get("email") != BOT_EMAIL:
+            events.append(((c["commit"]["committer"] or {}).get("date") or "", "human"))
     count = 0
     for _, kind in sorted(events, reverse=True):
         if kind == "human":
@@ -355,16 +358,19 @@ def cmd_apply(n: int, report_path: str) -> None:
         pr = _open_pr(n, spec=True)
     elif station in ("implement", "review"):
         pr = _open_pr(n, spec=False)
-    if verdict in ("ready_for_review", "implemented") and not pr:
-        fail(f"{verdict} reported but #{n} has no open PR from a "
-             f"{'spec' if station == 'spec' else '<type>'}/{n}-* branch")
+    if verdict in ("ready_for_review", "implemented"):
+        if not pr:
+            fail(f"{verdict} reported but #{n} has no open PR from a "
+                 f"{'spec' if station == 'spec' else '<type>'}/{n}-* branch")
+        if pr.get("isDraft"):
+            fail(f"{verdict} reported but PR #{pr['number']} is still a draft")
     if station == "review":
         if not pr:
             fail(f"review reported but #{n} has no open PR")
         if report.get("head") and report["head"] != pr["headRefOid"]:
             print(f"factory: PR #{pr['number']} moved to {pr['headRefOid'][:12]} since this "
-                  f"review of {report['head'][:12]}; the newer push gets its own review")
-            print("next: none")
+                  f"review of {report['head'][:12]}; reviewing the new head instead")
+            print("next: review")
             return
     capped = False
     if (station, verdict) == ("review", "request_changes"):
@@ -391,14 +397,18 @@ def cmd_apply(n: int, report_path: str) -> None:
                 except subprocess.CalledProcessError:
                     print(f"factory: could not resolve thread {thread}; resolve it by hand",
                           file=sys.stderr)
-        _gh("issue", "comment", str(n), "--body", run_comment(report, capped))
         for f in report.get("followups") or []:
             body = f"{f['body'].strip()}\n\nFound by the factory while working on #{n}."
-            _gh("issue", "create", "--title", f["title"], "--body", body)
-    if station == "triage":
-        _edit_labels(n, ["triaged", *([target] if target else [])], [])
+            try:
+                _gh("issue", "create", "--title", f["title"], "--body", body)
+            except subprocess.CalledProcessError:
+                print(f"factory: could not file follow-up {f['title']!r}", file=sys.stderr)
+        _gh("issue", "comment", str(n), "--body", run_comment(report, capped))
+    if station == "triage" and not target:
+        _edit_labels(n, ["triaged"], [])
     else:
-        _edit_labels(n, [target], [s for s in states if s != target])
+        add = ["triaged", target] if station == "triage" else [target]
+        _edit_labels(n, add, [s for s in states if s != target])
     link = f" · {pr['url']}" if pr else ""
     print(f"#{n}: {HEADLINE[(station, verdict)]}{' · capped' if capped else ''}{link}")
     print(f"next: {'none' if capped else DISPATCH.get((station, verdict), 'none')}")

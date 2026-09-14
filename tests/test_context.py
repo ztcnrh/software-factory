@@ -56,6 +56,23 @@ def test_pr_packet_makes_open_threads_the_worklist(raw, tmp_path):
     assert "### github-actions[bot] (bot) · commented · at faf132cea76b" in pr
 
 
+def test_pr_packet_keeps_a_bodyless_human_review_and_survives_a_deleted_author(raw, tmp_path):
+    """A human who clicks Request changes and puts the words in inline comments still sent the
+    PR back; the verdict must show. A thread whose author deleted their account renders too."""
+    reviews = json.loads((raw / "reviews.json").read_text())
+    reviews.append({"id": 1, "state": "CHANGES_REQUESTED", "body": "", "submitted_at":
+                    "2026-09-13T16:00:00Z", "user": {"login": "tianchi-fetch", "type": "User"},
+                    "author_association": "OWNER", "commit_id": "159c8292ab9e"})
+    (raw / "reviews.json").write_text(json.dumps(reviews))
+    threads = json.loads((raw / "threads.json").read_text())
+    threads[0]["comments"]["nodes"][0]["author"] = None
+    (raw / "threads.json").write_text(json.dumps(threads))
+    context.build("implement", raw, tmp_path / "out")
+    pr = (tmp_path / "out" / "pr.md").read_text()
+    assert "### tianchi-fetch (OWNER) · changes requested · at 159c8292ab9e" in pr
+    assert "_(no text)_" in pr and "**ghost**" not in pr  # resolved threads fold to one line
+
+
 def test_spec_packet_is_the_issue_alone_before_a_pr_exists(raw, tmp_path):
     """A first spec pass has nothing to revise; the packet is the issue alone."""
     for name in ("pr.json", "reviews.json", "threads.json"):
@@ -140,8 +157,15 @@ def test_retro_packet_lists_only_human_touches_per_item(raw, tmp_path):
     shutil.copy(raw / "commits.json", item / "commits-13.json")
     (item / "pr_comments-13.json").write_text(json.dumps([{
         "user": {"login": "tianchi-fetch", "type": "User"}, "body": "Nice, but keep it terser."}]))
+    threads = json.loads((item / "threads-13.json").read_text())
+    threads.append({"id": "PRRT_h", "isResolved": False, "path": "README.md", "line": 2,
+                    "comments": {"nodes": [{"databaseId": 9, "author": {"login": "tianchi-fetch"},
+                                            "body": "Typo here.",
+                                            "createdAt": "2026-09-13T16:00:00Z"}]}})
+    (item / "threads-13.json").write_text(json.dumps(threads))
     assert context.build("retro", raw, tmp_path / "out") == ["items.md", "metrics.json"]
     items = (tmp_path / "out" / "items.md").read_text()
+    assert "- human reply on `README.md:2` (open): Typo here." in items
     assert "## #6 · shipped · $3.20 · 5 runs · 1 steers" in items
     assert "- factory: **factory · triage → automatable**" in items
     assert "- tianchi-fetch · 2026-09-13 03:16: **factory · triage → needs_info**" in items

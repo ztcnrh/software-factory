@@ -64,7 +64,8 @@ jobs:
           station= issue= pr= branch= head=
           case "$GITHUB_EVENT_NAME" in
             issues)
-              issue=$(q .issue.number); label=$(q .label.name); human=$([ "$(q .sender.type)" != Bot ] && echo yes || true)
+              issue=$(q .issue.number); label=$(q .label.name)
+              human=$([ "$(q .sender.type)" != Bot ] && [ "$(q .issue.state)" = open ] && echo yes || true)
               case "$(q .action)" in
                 opened|reopened) station=triage ;;
                 labeled)
@@ -79,11 +80,12 @@ jobs:
                 type=${BASH_REMATCH[1]}; issue=${BASH_REMATCH[2]}
                 case "$(q .action)" in
                   opened|synchronize|reopened|ready_for_review)
-                    if [ "$type" != spec ] && [ "$(q .pull_request.draft)" = false ]; then
+                    if [ "$type" != spec ] && [ "$(q .pull_request.draft)" != true ]; then
                       station=review; head=$(q .pull_request.head.sha)
                     fi ;;
                   closed)
-                    if [ "$type" = spec ] && [ "$(q .pull_request.merged)" = true ]; then
+                    if [ "$type" = spec ] && [ "$(q .pull_request.merged)" = true ] \
+                       && [ "$(gh issue view "$issue" --json state -q .state)" = OPEN ]; then
                       gh issue edit "$issue" --add-label factory:ready-to-implement --remove-label factory:spec-review
                       station=implement; pr=; branch=
                     fi ;;
@@ -226,6 +228,15 @@ jobs:
         with:
           ref: ${{ needs.route.outputs.ref }}
           fetch-depth: 0
+      # The station's instructions come from the default branch, never from the branch it is
+      # working on: a PR that edited .claude/ must not be able to steer its own review or build.
+      - name: Trust only the default branch's skills
+        env:
+          BASE: ${{ needs.route.outputs.base }}
+        run: |
+          if [ "$(git rev-parse --abbrev-ref HEAD)" != "$BASE" ]; then
+            rm -rf .claude && git checkout -q "origin/$BASE" -- .claude
+          fi
       - uses: actions/checkout@v7
         with:
           repository: ${{ inputs.toolkit }}
@@ -278,6 +289,15 @@ jobs:
         with:
           ref: ${{ needs.route.outputs.ref }}
           fetch-depth: 0
+      # The station's instructions come from the default branch, never from the branch it is
+      # working on: a PR that edited .claude/ must not be able to steer its own review or build.
+      - name: Trust only the default branch's skills
+        env:
+          BASE: ${{ needs.route.outputs.base }}
+        run: |
+          if [ "$(git rev-parse --abbrev-ref HEAD)" != "$BASE" ]; then
+            rm -rf .claude && git checkout -q "origin/$BASE" -- .claude
+          fi
       - uses: actions/checkout@v7
         with:
           repository: ${{ inputs.toolkit }}

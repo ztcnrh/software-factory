@@ -56,14 +56,15 @@ def report(station="triage", verdict="ready_to_implement", **extra):
     return base | extra
 
 
-def review(state, bot, at, verdict=None, session="s0"):
+def review(state, bot, at, verdict=None, session="s0", association="OWNER"):
     rec = f'{cli.REVIEW_MARK}{{"verdict":"{verdict}","head":"x","session_id":"{session}"}} -->'
     return {"state": state, "submitted_at": at, "user": {"type": "Bot" if bot else "User"},
-            "body": rec if verdict else ""}
+            "author_association": "NONE" if bot else association, "body": rec if verdict else ""}
 
 
-def commit(email, at):
-    return {"commit": {"author": {"email": email, "date": at}}}
+def commit(email, at, committed=None):
+    return {"commit": {"author": {"email": email, "date": at},
+                       "committer": {"email": email, "date": committed or at}}}
 
 
 def write(tmp_path, r):
@@ -186,6 +187,20 @@ def test_sendbacks_counts_factory_send_backs_since_the_last_human_touch():
     assert cli.sendbacks(reviews, [], session_id="c") == 1
 
 
+def test_sendbacks_trusts_only_maintainers_and_uses_committer_dates():
+    """A drive-by comment from a non-collaborator must not buy the loop another round; a human
+    fix that was rebased keeps its old author date, so the committer date is what orders it; a
+    pending review has no timestamp and must not crash the count."""
+    reviews = [review("COMMENTED", True, f"2026-01-01T0{i}:00:00Z", "request_changes", f"s{i}")
+               for i in range(1, 4)]
+    assert cli.sendbacks(reviews, []) == 3
+    assert cli.sendbacks(reviews + [review("COMMENTED", False, "2026-01-01T04:00:00Z",
+                                           association="NONE")], []) == 3
+    assert cli.sendbacks(reviews + [review("PENDING", False, None)], []) == 3
+    rebased = commit("human@x", "2025-12-01T00:00:00Z", committed="2026-01-01T04:00:00Z")
+    assert cli.sendbacks(reviews, [rebased]) == 0
+
+
 def test_apply_caps_the_fourth_send_back_and_stops_dispatching(gh, tmp_path):
     """The loop must not run forever: after three factory send-backs with no human in between,
     the review is still posted but the item goes to needs-human and nothing is dispatched."""
@@ -292,14 +307,33 @@ def test_apply_review_posts_the_review_before_the_label_and_resolves_threads(gh,
     assert capsys.readouterr().out.rstrip().endswith("next: implement")
 
 
-def test_apply_review_of_a_stale_head_is_dropped_without_error(gh, tmp_path, capsys):
-    """A human pushed while the review ran: the push already triggered a fresh review, so the
-    stale one is neither posted nor applied, and the job stays green."""
+def test_apply_review_of_a_stale_head_redispatches_review(gh, tmp_path, capsys):
+    """A human pushed while the review ran, and that push fires no run: the stale review is
+    neither posted nor applied, and review is dispatched again against the new head."""
     gh.responses[("issue", "view")] = issue_json("in-review")
     gh.responses[("pr", "list")] = pr_json(oid="c" * 40)
     cli.cmd_apply(7, write(tmp_path, report("review", "approve", head="a" * 40)))
     assert not gh.argv("api", "--method", "POST") and not gh.argv("issue", "edit")
-    assert capsys.readouterr().out.rstrip().endswith("next: none")
+    assert capsys.readouterr().out.rstrip().endswith("next: review")
+
+
+def test_apply_refuses_implemented_on_a_draft_pr(gh, tmp_path):
+    """Review never runs on drafts, so accepting `implemented` for one would park the item."""
+    gh.responses[("issue", "view")] = issue_json("ready-to-implement")
+    gh.responses[("pr", "list")] = json.dumps([{"number": 12, "url": "u", "headRefName": "fix/7-a",
+                                                "headRefOid": "a" * 40, "isDraft": True}])
+    with pytest.raises(SystemExit, match="draft"):
+        cli.cmd_apply(7, write(tmp_path, report("implement", "implemented")))
+
+
+def test_apply_triage_needs_info_supersedes_a_stale_state(gh, tmp_path):
+    """A reopened issue can still carry an old state; needs-info replaces it so at most one
+    state label remains."""
+    gh.responses[("issue", "view")] = issue_json("in-review")
+    cli.cmd_apply(7, write(tmp_path, report(verdict="needs_info")))
+    [(edit, _)] = gh.argv("issue", "edit")
+    assert edit[3:] == ("--add-label", "factory:triaged", "--add-label", "factory:needs-info",
+                        "--remove-label", "factory:in-review")
 
 
 def test_apply_files_followups_as_plain_issues(gh, tmp_path):
@@ -310,6 +344,8 @@ def test_apply_files_followups_as_plain_issues(gh, tmp_path):
     cli.cmd_apply(7, write(tmp_path, r))
     [(create, _)] = gh.argv("issue", "create")
     assert create[3] == "README invocation fails" and "working on #7" in create[5]
+    order = [a[:2] for a, _ in gh.calls]
+    assert order.index(("issue", "create")) < order.index(("issue", "comment"))
 
 
 def test_post_review_skips_a_reviewed_head_and_survives_a_failed_resolve(gh, tmp_path):
