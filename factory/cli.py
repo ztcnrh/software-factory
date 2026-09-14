@@ -247,7 +247,8 @@ def schema(station: str) -> dict:
 
 
 # A structured-output call that went wrong leaks the tool-call envelope into a string field.
-MALFORMED = re.compile(r"<parameter name=|</(summary|notes|body|verdict)>")
+# `</summary>` is not a signal: review bodies fold their rule table under <details><summary>.
+MALFORMED = re.compile(r"<parameter name=|</parameter>|</(notes|body|verdict)>")
 # What the workflow's run step adds to the station's structured output.
 RUNNER_KEYS = {"station", "model", "cost_usd", "session_id", "turns", "duration_ms", "run_url",
                "ts", "head", "pr"}

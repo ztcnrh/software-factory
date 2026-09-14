@@ -205,9 +205,10 @@ jobs:
           wc -c "$RUNNER_TEMP"/context/*
       - uses: actions/upload-artifact@v5
         with:
-          name: context-${{ github.run_id }}-${{ github.run_attempt }}
+          name: context-${{ github.run_id }}
           path: ${{ runner.temp }}/context
           retention-days: 7
+          overwrite: true
 
   # Triage and review only read: their token cannot label, comment, or push, so nothing an issue
   # or PR says can make the agent act on GitHub. Every write they want rides the report.
@@ -235,7 +236,7 @@ jobs:
           python-version: "3.13"
       - uses: actions/download-artifact@v6
         with:
-          name: context-${{ github.run_id }}-${{ github.run_attempt }}
+          name: context-${{ github.run_id }}
           path: ${{ runner.temp }}/context
       - name: Run the station
         env:
@@ -257,9 +258,10 @@ jobs:
       - uses: actions/upload-artifact@v5
         if: always()
         with:
-          name: run-${{ github.run_id }}-${{ github.run_attempt }}
+          name: run-${{ github.run_id }}
           path: ${{ runner.temp }}/run
           retention-days: 7
+          overwrite: true
 
   # Spec, implement, and retro push branches and open PRs, so they hold the write token.
   run-write:
@@ -286,7 +288,7 @@ jobs:
           python-version: "3.13"
       - uses: actions/download-artifact@v6
         with:
-          name: context-${{ github.run_id }}-${{ github.run_attempt }}
+          name: context-${{ github.run_id }}
           path: ${{ runner.temp }}/context
       - name: Run the station
         env:
@@ -308,9 +310,10 @@ jobs:
       - uses: actions/upload-artifact@v5
         if: always()
         with:
-          name: run-${{ github.run_id }}-${{ github.run_attempt }}
+          name: run-${{ github.run_id }}
           path: ${{ runner.temp }}/run
           retention-days: 7
+          overwrite: true
 
   # The job that writes to GitHub never talks to the model.
   apply:
@@ -334,7 +337,7 @@ jobs:
           python-version: "3.13"
       - uses: actions/download-artifact@v6
         with:
-          name: run-${{ github.run_id }}-${{ github.run_attempt }}
+          name: run-${{ github.run_id }}
           path: ${{ runner.temp }}/run
       - name: Apply the report and dispatch the next station
         env:

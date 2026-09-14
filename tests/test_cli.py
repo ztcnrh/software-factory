@@ -112,6 +112,15 @@ def test_validate_refuses_a_summary_carrying_tool_call_markup():
         cli.validate(bad, "triage")
 
 
+def test_validate_accepts_a_folded_details_block_in_a_review_body():
+    """The style contract asks for `<details><summary>Rules</summary>` in review bodies; the
+    leaked-markup guard must not mistake that closing tag for a broken tool call."""
+    body = "## TL;DR\nok\n\n<details><summary>Rules</summary>\n\n- 1 holds\n\n</details>"
+    cli.validate(report("review", "approve", body=body), "review")
+    with pytest.raises(SystemExit, match="malformed"):
+        cli.validate(report("review", "approve", body="x</body>\n<parameter name=\"v\">"), "review")
+
+
 def test_validate_checks_review_comment_shape():
     """A malformed inline comment would 422 the whole PR review at post time; catch it first."""
     bad = report("review", "approve", comments=[{"path": "a.py", "body": "x"}])
