@@ -156,9 +156,11 @@ def pr_md(pr: dict, reviews: list[dict], threads: list[dict], talk: list[dict]) 
     """Everything said on a PR: description, every review with a body, every thread, and the
     conversation. Open threads and human comments are what the next pass must answer."""
     head, base = pr.get("head") or {}, pr.get("base") or {}
+    flags = (" · draft" if pr.get("draft") else "") + (
+        f" · CONFLICTS with `{base.get('ref')}`" if pr.get("mergeable") is False else "")
     out = [f"# PR #{pr['number']}: {pr.get('title', '')}",
            f"By {who(pr)} · `{head.get('ref')}` at {(head.get('sha') or '')[:12]} → "
-           f"`{base.get('ref')}`{' · draft' if pr.get('draft') else ''} · {pr.get('html_url', '')}",
+           f"`{base.get('ref')}`{flags} · {pr.get('html_url', '')}",
            "", "## Description", "", strip(pr.get("body")) or "_(no description)_"]
     # A human's review counts even with no body: the verdict itself is the message. A bot's
     # bodyless review is the artifact of a reply posted inside a thread.

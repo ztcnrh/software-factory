@@ -73,6 +73,20 @@ def test_pr_packet_keeps_a_bodyless_human_review_and_survives_a_deleted_author(r
     assert "_(no text)_" in pr and "**ghost**" not in pr  # resolved threads fold to one line
 
 
+def test_pr_packet_flags_a_conflict_with_the_base_branch(raw, tmp_path):
+    """GitHub runs no PR events on a conflicted PR, so the packet has to say so: review turns
+    it into a send-back and implement merges the base first."""
+    pr = json.loads((raw / "pr.json").read_text())
+    pr["mergeable"] = False
+    (raw / "pr.json").write_text(json.dumps(pr))
+    context.build("implement", raw, tmp_path / "out")
+    assert "→ `main` · CONFLICTS with `main` · https://" in (tmp_path / "out" / "pr.md").read_text()
+    pr["mergeable"] = None
+    (raw / "pr.json").write_text(json.dumps(pr))
+    context.build("implement", raw, tmp_path / "out2")
+    assert "CONFLICTS" not in (tmp_path / "out2" / "pr.md").read_text()
+
+
 def test_spec_packet_is_the_issue_alone_before_a_pr_exists(raw, tmp_path):
     """A first spec pass has nothing to revise; the packet is the issue alone."""
     for name in ("pr.json", "reviews.json", "threads.json"):

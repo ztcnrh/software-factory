@@ -66,7 +66,7 @@ The adopter's caller workflow (`templates/factory.yml`) forwards these to the re
 | `workflow_dispatch` | `station`, `issue` | that station |
 | `schedule` weekly, or `workflow_dispatch` `retro` | | retro |
 
-Everything the factory writes uses `GITHUB_TOKEN`, which fires no events that run (a PR it opens or pushes to leaves a `pull_request` run GitHub holds for approval, which is why the caller does not subscribe to `opened` or `synchronize`). So `factory apply` ends with `next: <station>` or `next: none`, and the workflow dispatches itself for the next station. Human actions fire events on their own.
+Everything the factory writes uses `GITHUB_TOKEN`, which fires no events that run (a PR it opens or pushes to leaves a `pull_request` run GitHub holds for approval, which is why the caller does not subscribe to `opened` or `synchronize`). So `factory apply` ends with `next: <station>` or `next: none`, and the workflow dispatches itself for the next station. Human actions fire events on their own, with one exception GitHub imposes: no `pull_request` or `pull_request_review` workflow runs for a PR that conflicts with its base. The review station therefore treats a conflict as a finding, and its send-back reaches implement through the dispatch path; a human can also start any station from the Actions tab.
 
 ## The four jobs
 

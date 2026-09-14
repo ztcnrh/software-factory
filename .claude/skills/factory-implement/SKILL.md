@@ -23,7 +23,7 @@ Read the code you are about to change: current behavior, the files, tests, and d
 
 ## 3. Build
 
-- **Branch.** The prompt says whether the branch exists. Exists: the checkout is on it; commit there. None yet: `git checkout -b <type>/<n>-<slug>` from the current HEAD, where `<type>` is the conventional-commit type that fits the issue (`fix` for a bug, `feat` for new behavior, else `docs`, `refactor`, `perf`, `test`, or `chore`) and the slug is a short kebab of the title, at most five words.
+- **Branch.** The prompt says whether the branch exists. Exists: the checkout is on it; commit there, and when `pr.md` says it CONFLICTS with the base branch, `git merge origin/<base>` first, resolve every conflict keeping both behaviors, and run the suite before anything else. None yet: `git checkout -b <type>/<n>-<slug>` from the current HEAD, where `<type>` is the conventional-commit type that fits the issue (`fix` for a bug, `feat` for new behavior, else `docs`, `refactor`, `perf`, `test`, or `chore`) and the slug is a short kebab of the title, at most five words.
 - Make the smallest cohesive change that satisfies the rules. Where the spec grants **Latitude**, meet the quality bar it names with your own judgment.
 - **Tests ship with the change**: a regression test for every bug fix, unit tests for non-trivial logic, in the repo's framework and layout.
 - Follow existing style and architecture. No unrelated refactors, formatting churn, dependency upgrades, or opportunistic cleanup.
