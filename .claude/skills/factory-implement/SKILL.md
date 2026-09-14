@@ -1,83 +1,69 @@
 ---
 name: factory-implement
-description: The factory's implementation station. Build the change against the approved spec (or directly for automatable items) — on a change branch off the item's feature branch, with tests, leaving a reviewable PR. Use when a work item is at the `implement` state, or when asked to implement a factory work item.
+description: The factory's implementation station, run headlessly by `factory run` on an issue labeled factory:implement. Build the change on the item's branch with tests and leave a pull request ready for review, or answer a review's send-back. Not for use inside a driver session.
+model: sonnet
+allowed-tools: Bash Read Grep Glob Edit Write Agent Skill WebFetch WebSearch
 ---
 
 # Implementation station
 
-You are the **implementation station**. Build exactly what the spec says — no more (that's scope creep) and no less (that's a bounce-back). For `automatable` items there's no spec; the work item body is your spec.
+Implement the issue named in the prompt and leave a pull request ready for review. Build exactly what the spec says: no more (scope creep) and no less (a send-back).
 
 ## 1. Read first
 
-- `factory status <id>` — the item, its history, and the notes earlier stations left (the spec station's `--notes` carries taste calls and reasoning the spec files don't repeat).
-- The spec under `specs/<id>-<slug>/` (exact paths are in the item's artifacts). Read `PRODUCT.md` fully before touching code — its numbered Behavior invariants are the acceptance criteria — and `TECH.md` when present. An absent TECH.md is normal (the spec station writes one only for architectural changes), not a gap to fill.
-- `CHECKLIST.md` in that same directory — read it as the scoreboard you're building against: it lists exactly the invariants this item owns, and names any it doesn't. Its **Implemented** and **Holds** columns are not yours to fill. Code review fills one by reading your diff and verify fills the other by running it, and both are worth more precisely because the station that built the change didn't grade it. Leave them empty even when you're certain. You touch this file only when the invariants themselves move — a row added or dropped, or wording rewritten so it now claims different behavior (see "keep the spec true"). When that happens, clear that row's Implemented and Holds too: the grading behind them was against text that no longer exists, and leaving it reads as a verdict nobody reached.
-- For an `automatable` item there are no spec files — the item body is the contract. If it mirrors a tracker issue (GitHub, Jira, Linear, …), fetch the full thread with the best integration your run has (the `gh` CLI, or the tracker's CLI/API from your shell): comments and discussion, attachments, reproduction steps, acceptance criteria. Don't implement from a title alone.
-- If the sources don't add up — `PRODUCT.md` missing on an item that passed spec review, specs conflicting with each other or with the item, a change that turns out architectural with no TECH.md to anchor it — block with the specific conflict (see the output contract) rather than guessing which source wins.
+```
+gh issue view <n> --json title,body,labels,comments
+```
+
+Then, in order of authority:
+
+- `specs/<n>-*/PRODUCT.md` and `TECH.md` on the branch, when they exist. Read them completely before touching code; the numbered Behavior invariants are the acceptance criteria. Newer issue comments and gate comments can supersede them. An absent `TECH.md` is normal.
+- For an `automatable` item there are no specs; the issue thread is the contract.
+- `factory threads <n>` when the prompt names a PR. Unresolved threads mean a loop-back after a review's send-back: that list is your worklist. Every `🚨 [CRITICAL]`, `⚠️ [IMPORTANT]`, and `💡 [SUGGESTION]` needs an answer; `🧹 [NIT]` items are yours to take or leave. A draft PR with no threads is the spec station's hand-off: a first pass.
+- `gh pr view <pr> --json comments` when the prompt names a PR: the PR's conversation comments. A human's note there that is anchored to no line (a style call, a scope worry, a "while you're in there") is part of the worklist too, with the same standing as the latest gate comment.
+
+If the sources conflict, or the change turns out much larger or more ambiguous than the specs assume, report `blocked` with the specific conflict instead of guessing which source wins.
 
 ## 2. Survey before you build
 
-Read the code you're about to change — never guess about a system you can read. Get clear on:
-- what the current behavior is, and whether any of the requested behavior already exists;
-- the files, modules, tests, and data flows involved;
-- the patterns and abstractions the repo already uses — your diff should look like it was always there;
-- the edge cases the invariants imply: migrations, platform differences, compatibility risks;
-- the repo's validation commands (README, package scripts, CI config, Makefile) — you'll run them before hand-off.
-
-When surveying would flood your context — a wide usage sweep, long logs, several independent questions that could run at once — read this repo's `research` skill (`.claude/skills/research/SKILL.md`) and delegate the digging to a subagent, so what returns is the answer instead of the noise. One exception, and it matters: **never delegate reading files you're about to edit.** A summary of code you're going to change is exactly the context you need first-hand.
+Read the code you are about to change: current behavior, the files, tests, and data flows involved, the patterns the repo already uses, the edge cases the invariants imply, and the repo's validation commands (README, package scripts, CI config, Makefile). Never delegate reading a file you are about to edit.
 
 ## 3. Build
 
-1. **Pick your branch before you write a line.** Your brief names the item's **feature branch** (`branch`) — the spec is already on it, and its PR into the integration branch is what the human eventually ships. Three cases, in order:
-   - **A change branch of yours is already open** (`change_branch`, and `change_pr` not yet merged) — you're revising after a send-back. Keep working on it and push; the review conversation and the PR stay in one place.
-   - **The previous pass was merged into the feature branch, or this is the first pass** — cut a new change branch off the feature branch, **named to match it** — `change/<TICKET-KEY>__<slug>-<n>` beside `feature/<TICKET-KEY>__<slug>`, or `change/<id>-<slug>-<n>` beside `feature/<id>-<slug>` — where `<n>` is the attempt your brief names (`change/AMPS-91__session-leak-2`). Open a PR **into the feature branch** — never into the integration branch — and record both with `--change-branch` and `--change-pr`.
-   - **There is no feature branch** — an `automatable` item that skipped spec. With no spec to keep separate the extra hop buys nothing, so skip it: create `feature/<TICKET-KEY>__<slug>` (else `feature/<id>-<slug>`) off an up-to-date integration branch, commit straight to it, open its PR into the integration branch, and record `--branch` and `--pr`.
+- **Branch.** The prompt says whether `feature/<n>-<slug>` exists. Exists: the checkout is on it; commit there. None yet: `git checkout -b feature/<n>-<slug>` from the current HEAD.
+- Make the smallest cohesive change that satisfies the invariants. Where the spec grants **Latitude**, meet the quality bar it names with your own judgment.
+- **Tests ship with the change**: a regression test for every bug fix, unit tests for non-trivial logic, in the repo's framework and layout.
+- Follow existing style and architecture. No unrelated refactors, formatting churn, dependency upgrades, or opportunistic cleanup.
+- Comments document current state only. Nothing you write into the repo's tree (code, comments, docstrings, test names) cites a spec file or an invariant number; state the reason inline or leave it out. Provenance belongs in the commit message and PR body.
+- **Keep the spec true.** When implementation teaches you something the spec missed and the change still fits the approved intent, update `PRODUCT.md`/`TECH.md` on the branch and say so in `notes`. When the approved intent itself no longer holds, report `blocked`; a quiet rewrite of the spec is an unreviewed scope change.
 
-   Why the hop exists when there *is* a spec: your PR diffs against a base that already contains it, so an edit you make to the plan reads as a real line-level diff instead of vanishing into a wall of new lines.
+## 4. Validate
 
-   **Never merge anything.** Every merge on this item — a change branch into the feature branch, the feature branch into the integration branch — belongs to the human, at their own timing. Pulling the integration branch into the feature branch to stay current is ordinary housekeeping, not a merge decision.
-2. Implement to PRODUCT.md's numbered Behavior invariants — they are the acceptance criteria. Where the spec grants **Latitude**, that's your judgment being invited on purpose: meet the quality bar it names, don't hunt for a rule to follow.
-3. **Tests ship with the change** — a regression test for every bug fix, unit tests for non-trivial logic, following the repo's framework and layout.
-4. Keep the diff cohesive: the minimum surface area that satisfies the spec, with no unrelated refactors, formatting churn, dependency upgrades, or opportunistic cleanup riding along. Work worth doing that isn't this item's belongs in its own work item.
-5. **Comments outlive the paperwork.** `specs/` and `.factory/` are working state the human prunes; the code isn't. So nothing you write into the repo's own tree — code, comments, docstrings, test names — cites a work item id, `PRODUCT.md`/`TECH.md`/`CHECKLIST.md`, an invariant number, or a gate directive. State the reason instead of pointing at it — a comment has to read correctly with the spec deleted. A tracker issue (GitHub, Jira, Linear) does outlive the spec, so it may be cited, sparingly, at a decision a reader would otherwise re-litigate. Provenance belongs in the commit message, the PR body, and `--notes`.
+Run the repo's own checks: targeted tests for the changed behavior, then the wider suite, linter, and typecheck or build where defined. Green before you report. A failure your change caused, fix; a failure that is unrelated or needs an environment you lack, report explicitly in the PR and `notes` with enough detail to reproduce. Never claim green when it was not.
 
-### Keep the spec true
+When specs exist, walk every numbered invariant against your diff and confirm each is satisfied or explicitly out of scope. Fix mismatches you caused; report stale spec text rather than claiming alignment.
 
-Implementation teaches you things the spec couldn't know. When reality drifts from the spec under `specs/<id>-<slug>/`, there are two cases, and the line between them is one question: *does the change still fit the intent the human approved at the spec gate?*
-- **Drift within intent** — you found an edge case, a cleaner approach, a behavior detail the spec missed: update `PRODUCT.md`/`TECH.md` (and `CHECKLIST.md`, if the invariant set changed) **in your branch**, so the checked-in spec describes what actually ships, not the first guess. Because the spec is already in your base, those edits land as a real diff the human can read — but still flag them in your `--summary`/`--notes`: they approved the old wording, so they must be told it moved (code review checks spec-vs-code consistency, and the ship gate re-reads what changed).
-- **Drift that breaks intent** — the approved goal itself no longer holds: do **not** quietly rewrite the spec to match your code; that's an unreviewed scope change. Block the item (see the output contract) and let the human re-decide.
+When a send-back or a gate names a specific spec line or invariant, re-run its counterexample against that exact sentence before replying. Reading the surrounding paragraph and concluding the spec already says it is how the same send-back arrives twice.
 
-## 4. Validate before you hand off
+## 5. Commit, push, PR
 
-Don't hand off a change you haven't tried to break — the code-review and verify stations are next, and they shouldn't catch what a local run would.
-- Run the repo's own validation: targeted tests for the changed behavior, then the wider suite, the formatter/linter, and a typecheck or build where the repo defines one. Green before you emit `implemented`.
-- A failure your change caused: fix it. A failure that's unrelated, or needs an environment or service you don't have: report it explicitly in `--notes` and the PR with enough detail for a reviewer to reproduce — never claim green when it wasn't.
-- Walk the numbered invariants one by one against your diff and confirm each is genuinely satisfied. Verify will re-check them independently later; the point is you don't hand off work unchecked against its own contract.
-- **Commit and push the change branch before you advance** — every pass, including a rework. Code review runs in fresh, isolated context, and in a cloud run that's a different machine with a clean checkout: it reviews what's on the branch, never what's in your working tree. Unpushed work is work it grades as missing, and the send-back that follows is one you paid for yourself.
+Commit with a clear message and `git push -u origin HEAD`. Unpushed work does not exist to the reviewer.
 
-## 5. The PR
+- **No PR yet:** `gh pr create --base <default branch> --title "#<n>: <title>" --body-file <file>`.
+- **Draft PR from the spec station:** `gh pr ready <pr>` and `gh pr edit <pr> --body-file <file>`.
+- **Loop-back:** push, then reply in every thread you answered, in that thread (`factory threads <n>` prints the reply command), with what you changed (name the commit) or why you declined. A human's conversation comment gets one reply in the conversation (`gh pr comment <pr> --body "<text>"`) answering each point the same way. Declining is legitimate but explicit; a silent skip earns another send-back. Never resolve a thread: whoever raised it closes it.
 
-Open it from your change branch **into the item's feature branch** (`gh pr create --base <feature-branch>`) — one per pass, and only when you cut a new branch; a pass you're revising already has one, so just push. Title it `<id>: <title>` (add ` — pass <n>` from the second on). No remote → the change branch plus a clean diff is the artifact.
+The PR body links the issue with `Closes #<n>`, points at the spec files when they exist, summarizes the change, and states the validation commands run and their results, plus any known limits. Verify `gh pr view` returns a real URL before reporting.
 
-A good PR description: link the tracker issue with `Related to #N` — never `Closes #N`, since merging into the feature branch resolves nothing; the item's own PR carries the closing keyword. Then point at the spec files, summarize the change, and state what validation ran, its results, and any known limits. If PR creation fails, hand off with the branch name and say what happened in `--notes` — don't report a PR that doesn't exist.
+## 6. Report
 
-## 6. Output contract
-```
-factory advance <id> \
-  --verdict implemented \
-  --summary "<what you built, in one line>" \
-  [--notes "<what the diff can't say: spec updates you made, Latitude calls and why, known limits>"] \
-  --change-branch "<change/…>" [--change-pr "<#NN>"] \
-  [--branch "<feature/…>" --pr "<#NN>"]   # only if you created them (an automatable item) \
-  --artifact <key files touched> \
-  --confidence <0..1> \
-  --cost <rough effort proxy>
-```
-`--notes` is optional but the code reviewer reads it next and the ship-gate human after — use it for what the diff alone won't tell them. If you hit something the spec didn't anticipate and can't resolve within its intent, stop and block instead: `factory advance <id> --verdict blocked --summary "<the gap>"` routes the item to the blocked human gate. Don't guess past a real ambiguity — that's what produces rework.
+Your final message is JSON matching the schema you were given.
 
-## Quality bar
+- `implemented`: `summary` is what you built and what validated it, in one or two sentences, plus the PR URL. `notes`: what the diff cannot say, such as spec updates you made, Latitude calls, known limits.
+- `blocked`: `summary` is the specific gap or conflict and the decision needed.
 
-- Green validation before you emit `implemented` — and never claim a check passed that you didn't run or that failed; report it instead.
-- Never write secrets, tokens, credentials, or private env values into code, the PR, or your notes.
-- Leave the mirrored issue's metadata alone — don't close, re-label, or reassign it; the factory's mirror owns the `factory:<state>` labels, and the issue closes when the human merges the item's PR.
-- If review returns `changes_requested`, run `factory feedback <id>` — the worklist is the unresolved threads on your change PR, each finding anchored to its line and opening with its severity tag; the review's summary carries the rationale and the `Reviewed at` sha. Every `🚨 [CRITICAL]`, `⚠️ [IMPORTANT]`, and `💡 [SUGGESTION]` needs an answer; `🧹 [NIT]` items are yours to take or leave. An answer is a fix **or** a reasoned decline — declining is legitimate, but explicit and in writing, because a silent skip reads as an oversight and earns another send-back. Don't reopen settled points. Write each answer as a **reply in that finding's thread** — what you changed (name the commit) or why you declined, ending with `<!-- factory:implement -->` (`factory feedback` prints the reply one-liner) — and **never resolve a thread**: whoever raised it closes it, the reviewer on re-review or the human for their own. The review's **body** may carry findings that couldn't anchor inline (their `file:line` quoted) — those are worklist items too: answer them together in one PR comment, same rules, same marker. A human's comment on the PR is gate input; answer it the same way. When there's no PR to carry the review (no remote), the worklist is in the review's `--notes` in the item history — answer each point in your own `--notes` instead.
+## Guardrails
+
+- Never merge, never close the PR, never force-push.
+- Post no comments on the issue; the runner records your report.
+- Do not implement from the title alone.

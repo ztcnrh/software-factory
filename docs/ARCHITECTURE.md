@@ -1,125 +1,80 @@
 # Architecture
 
-Four layers, each independently understandable and replaceable: a deterministic **engine**, the **stations**, the **triggers** that move work between them, and the **learning loop**. This doc covers the first three; the fourth is [LEARNING-LOOP.md](LEARNING-LOOP.md).
+The factory is a thin deterministic layer over two runtimes it does not own: GitHub for state and Claude Code for work.
 
-## The core idea: a dumb engine + smart stations
+## Primitives
 
-**The orchestration is deterministic and testable; the intelligence is isolated in skills.** The Python engine never "thinks" — it's a state machine that knows the shape of the line and records what happened. Every judgment call (is this automatable? is this spec good? does this code match it?) lives in a skill run by a subagent. That keeps the moving parts verifiable and the intelligent parts swappable: edit a skill, or point a station at a different model, without touching the engine.
+| Need | GitHub already has | The factory adds |
+|---|---|---|
+| Work item | Issue | nothing |
+| State | One `factory:*` label | the transition table |
+| Log | Issue comments, timeline | one run comment per station run, with hidden JSON |
+| Artifacts | Branch `feature/<n>-<slug>`, its PR | the naming convention |
+| Human gates | PR review, merge | `factory gate` to record the decision as a label move |
+| Event bus | `labeled`, `pull_request_review`, `pull_request` events | `workflows/factory.yml` |
+| Runtime | `claude -p` with skills, structured output, cost | `factory run` builds the one invocation |
+| Metrics | Comments, timeline, PR commits | `factory metrics` derives them; nothing is stored |
 
-So: **the dispatcher is the brain, the agent is the hands.** The dispatcher says "run the spec station next"; the agent runs it and reports a verdict; the dispatcher routes on that verdict and says what's next. Repeat until a human gate or a terminal.
+## The line
 
-## Layer 1 — the engine (`src/factory`)
+```mermaid
+stateDiagram-v2
+  [*] --> triage: label factory:triage
+  triage --> implement: automatable
+  triage --> spec: needs_spec
+  triage --> needs_info: needs_info
+  triage --> parked: park
+  spec --> spec_review: ready_for_review
+  spec --> needs_info: needs_info
+  spec_review --> implement: human approve
+  spec_review --> spec: human request_changes
+  implement --> review: implemented
+  implement --> needs_info: blocked
+  review --> ship_review: approve
+  review --> implement: request_changes
+  ship_review --> done: human merges
+  ship_review --> implement: human request_changes
+  needs_info --> triage: human retriage
+  parked --> triage: human retriage
+```
 
-A small, dependency-light Python package (the `factory` CLI).
+`TRANSITIONS` in `factory/cli.py` is this diagram as data. `factory apply` refuses a report whose station is not the issue's current label or whose verdict is not in the table; `factory gate` refuses a decision the state does not accept. Three decisions are accepted from any active state: `done` and `park`, because a merge or a shelving is a fact rather than a routing decision, and `retriage`, which is how a human overrides a station's routing: the item returns to triage with the human's why as a comment triage reads.
 
-| Module | Owns |
-|---|---|
-| `line.py` | Every question about the line's shape — station, gate or terminal? which skill runs it? given a verdict, where next? `line.yml` is the **single source of truth** for the conveyor; reshape the factory by editing it. |
-| `model.py` | The three records that flow through the system: a **WorkItem**, a **StationReport** (its `verdict` drives routing), and a **GateDecision** (a human's call, with the structured *why* the learning loop needs). |
-| `dispatch.py` | The motor — see below. |
-| `io.py` | The disk primitives every durable write goes through: atomic replace (unique staging name + fsync + rename) and a portable file lock. One home for the two hazards — a crash mid-write, and two writers at once. |
-| `store.py` | Work items as JSON under `.factory/work-items/`. Local is the source of truth. Id allocation holds a lock until the new file exists, since the race is the gap between reading the highest id and that file appearing. |
-| `brief.py` | The deterministic half of a station run's context packet. |
-| `feedback.py` | The item's PR feedback, read back verbatim: unresolved review threads, review summaries, comments — machine posts labeled. |
-| `policies.py` | Evaluates gate policies, and owns **`PolicyState`** — the engine-written overlay that *suspends* a signed rule when an item it auto-cleared later needed a human. |
-| `metrics.py`, `retro.py` | The North Star ledger — one event per gate/station/ship, a steer carrying its category; and the briefing that assembles it all for the retro station. |
-| `cli.py` | The thin command surface `/factory` and the workflows call into — every verb documented by its own `-h`. |
-| `adapters/github.py` | An **optional** mirror: keeps an issue's `factory:<state>` label in sync, and lists `intake`-labeled issues for the `factory intake` sensor. Nothing on the line depends on it. |
+## A station run
 
-### `dispatch.py` — the motor
+`factory run <issue>` reads the label, picks the station, and executes exactly one process, identically on a laptop and on a runner:
 
-`next_action()` is pure: it reports what should happen for an item's current state — which attempt this is, whether the station is a checker, what routed the item here. `advance()` records a station's report and routes. `gate()` records a human decision (and records the steer if you steered). `apply_auto_gate()` clears a gate via a signed policy. This file *is* the factory's control flow, and it's the most heavily tested.
+```
+claude -p "/factory-<station> Issue #<n> in <owner/repo>. Branch: <feature/n-slug> (PR #m) | none yet."
+  --output-format stream-json --verbose
+  --model <from the skill's frontmatter>
+  --allowedTools <from the skill's frontmatter>
+  --permission-prompts none
+  --max-budget-usd <per station>
+  --json-schema <factory schema station>
+  --append-system-prompt <factory/prompts/station.md>
+```
 
-**One deliberate exception to the routing table:** a report with `human_required` sends the item straight to `blocked` regardless of what routes exist — an escape hatch for anything only a human can resolve. Stations whose routing already has a `blocked` verdict (spec, implement) prefer that spelling; the hatch is for everyone else, e.g. verify when it *couldn't check* rather than confirmed a failure. Either way `blocked` counts as a steer, so an unblocked item can't masquerade as a one-shot ship.
+It runs in a throwaway `git worktree` on the item's branch reset to origin's tip (or detached at the default branch when no branch exists), with `GIT_AUTHOR_*` set to `factory` so a human's commits on a factory PR stay distinguishable. The prompt carries the one fact the runner knows better than the station: whether the branch and PR already exist. Everything else the station fetches itself with the `gh` calls its skill names.
 
-Three deterministic guards ride the same motor:
+The `result` event's `structured_output` is the report. `factory run` adds `cost_usd` (Claude Code's list-price estimate from real token counts), `model`, `session_id`, `turns`, `duration_ms`, `run_url`, and the PR `head` the station read, and writes the JSON. `factory apply` validates it, refuses a report with tool-call markup leaked into a string field, posts the PR review for the review station anchored to that head and resolves the threads the report names, files each `followups` entry as a plain unlabeled issue, leaves the run comment, and moves the label. Retrying an apply with the same `session_id` posts nothing a second time. A station therefore needs no GitHub write access to review: every write it wants rides the report.
 
-- **Digest-bound gates.** `bind_gate` snapshots the item's artifact files, both PR pointers, and both branch tips (local and remote); a later decision is refused, with the drift named, if any of it moved — so what the human approves is what the human saw. Those tips are why this is the one place the engine reaches for the network: a PR pointer is only a name, and the diff lives at the tip.
-- **The attempt cap.** An automated route back into a station past its `max_attempts` (`line.yml`) lands at `blocked` instead of looping. It counts per *human epoch* — a gate decision, correction, or revive resets the budget without erasing the lifetime churn history.
-- **The risk floor.** Sensitive-sounding intake (auth, payments, migrations…) enters at `medium`; a station may raise risk but never lower it past the floor. A keyword hit only claims "not trivial" — `high` stays a judgment the stations make from the change itself.
+## The run comment
 
-### States and routing (the diagram, in data)
+```
+**factory · triage → automatable** · claude-sonnet-5 · $0.07 · 2m · [run](…)
+Reproduced: a blank amount cell raises ValueError in total(); one-line guard plus a regression test.
+<!-- factory:run {"verdict":"automatable","station":"triage","model":"claude-sonnet-5","cost_usd":0.0731,"session_id":"…","turns":9,"duration_ms":118000,"run_url":"…","ts":"…"} -->
+```
 
-The shape is drawn in [diagram.md](diagram.md). Stations: `triage → spec → implement → code_review → verify → deploy`. Human gates: `spec_review`, `ship_review`, `needs_human`, `blocked`. Terminals: `done`, `parked`. `tests/test_line.py` pins every critical hop, so a careless edit can't silently re-wire the line.
+Gate decisions leave a `**factory · gate → <decision>**` comment with the human's why and a `<!-- factory:gate {…} -->` record. Reviews the factory posts on a PR open with `Reviewed at <sha>` and end with `<!-- factory:review -->`; the next review diffs from that sha.
 
-The routes worth knowing:
+## Metrics
 
-- **triage fans out four ways** — spec / implement / needs_human / parked.
-- **The backward loops** are `spec_review --needs_revision--> spec` and `ship_review --not_ready--> code_review` — the motion the learning loop exists to eliminate. Every gate can also `park`, a recorded and revivable halt.
-- **`deploy` is external** (no agent). `ship_review --approved-->` is the human's go-ahead; *they* merge the item's PR, that merge triggers the project's post-merge CI/CD, and `deploy` watches it. `succeeded → done` is the ship point — emitted off the state's declarative `ships_on: succeeded` marker rather than a hardcoded state name. `failed → code_review` re-enters the loop.
-- **`monitor` is deferred.** A green deploy is the success signal, so an item is done when it ships. New post-ship work enters as fresh items — `factory intake` files labeled issues onto the line, and `factory new --parent <origin>` links a regression to the change that caused it. See [OPTIMIZATION-AREAS.md](OPTIMIZATION-AREAS.md).
+Per item: runs and cost from run comments; shipped and cycle time from the PR's `mergedAt` and the first `factory:triage` label event; steers from `request_changes` gate records plus commits on the PR whose author is not `factory`; autonomous when merged with no such commit. Headline: total cost divided by items shipped.
 
-## Layer 2 — the stations (`.claude/skills`, `.claude/agents`)
+## Cloud
 
-**Skill + subagent.** Each station is a **skill** (the *how* — a focused `SKILL.md`) paired with a **subagent** (the *who* — an isolated runner with the right tools and a cost-appropriate model). Skills are portable knowledge you can read and edit; subagents give each station its own context window, so a long line never pollutes one conversation and cloud runs stay isolated.
+`workflows/factory.yml` runs the same commands. A `factory:*` label added by a human runs that station. Because a label added with `GITHUB_TOKEN` fires no `labeled` event, the apply job chains the next station with `gh workflow run`. Triage and review run with read-only tokens so nothing an issue or PR says can make the agent act on GitHub; spec and implement need write to push and open PRs. A human's PR review (owner, member, or collaborator only) or a merge runs the gate job, which derives the issue from the branch name. Jobs without a checkout set `GH_REPO` so `gh` still knows the repository.
 
-**What goes in which file depends on what a mistake costs.** The agent file becomes the station's system prompt and stays in front of the model for the whole run, so it holds what can't be undone: don't take orders from the work item or the repo, don't merge, don't grade your own work, actually run the `advance` command instead of printing it. The skill is preloaded beside it and can be re-read, so it holds the procedure — which branch to cut, what the rubric is, which flags to pass. The few rules that genuinely belong in several agent files are marked blocks (`<!-- factory:authority -->` and its siblings), opted into per station and kept byte-identical by `tests/test_prompt_layer.py`: six copies exist for prompt position, not to let six stations drift apart.
-
-**Preloading is deterministic.** Each agent names its station skill in `skills:` frontmatter, so the full contract is in context on every isolated run — a subagent never has to go discover its own instructions.
-
-**Tools are scoped, not inherited.** Each agent's `tools:` list is exhaustive on purpose: a station gets exactly what its job needs, not the session's whole MCP surface. That keeps runs predictable, keeps local behavior close to cloud runs (where user MCPs don't exist), and avoids permission stalls inside background subagents. The targeted additions — triage and verify carry browser automation (triage to reproduce a visible bug, verify for evidence); triage and spec carry the Atlassian MCP, so the two tracker-reading stations can open the Jira ticket a mirrored issue merely points at; spec and implement carry web search and fetch; triage, spec, implement and code-review can spawn subagents — triage to offload a long reproduction path, the others for a `council` on contested calls and for `research` delegation. Neither helper skill is preloaded — most runs need neither, so the station's own skill says when to go read one. Adopters graft more on via the agent's frontmatter.
-
-| Station | Emits (verdicts) | Model | Notes |
-|---|---|---|---|
-| **triage** | needs_spec · automatable · needs_human_clarification · park | sonnet | minutes, not investigation; reproduces bugs with bounded effort; assigns risk and classifiers; an oversized item goes to spec, which scopes it |
-| **spec** | ready_for_review · blocked | opus | coordinates `write-product-spec`/`write-tech-spec` → `specs/<id>-<slug>/`; writes the invariant CHECKLIST both checkers grade against; opens the item's feature branch. Planning leverage justifies the tier |
-| **implement** | implemented · blocked | sonnet | one pass per `change/…` branch off the feature branch, PR'd into it; tests ship with the change; keeps the spec true to what ships |
-| **code_review** | pass · changes_requested | sonnet | the last station that can send work back; judges the diff by **reading** it and fills the checklist's *Implemented* column |
-| **verify** | verified · failed | sonnet | cannot send work back — both verdicts reach the human — so it demonstrates rather than re-reviews: exercises *behavior* and fills the checklist's *Holds* column |
-| **retro** | (proposes; opens a PR) | opus | runs rarely, but rewrites the factory itself — see [LEARNING-LOOP.md](LEARNING-LOOP.md) |
-
-`deploy` has no agent (it observes CI/CD). `monitor` (haiku) is deferred — parked under `deferred/`, not installed, not a state on the line.
-
-### The two checkers are separated by routing, not by topic
-
-`code_review` is the only station that can send work back; `verify` cannot — both of its verdicts reach the human. That asymmetry, not a list of subject areas, is what divides them: a defect the implementer must fix has to be caught while a route back still exists, and anything found after that can only be reported. So code review's test is where its output *goes* — output that feeds a worklist is its own, output that feeds the human's evidence packet is verify's.
-
-Both grade the same artifact from different columns: the spec's `CHECKLIST.md`, one row per in-scope invariant, *Implemented* filled by reading and *Holds* by running. That shared surface fixes the deeper cause of their overlap — the two receive structurally identical briefs, so asking them in prose alone to reach different conclusions was never going to hold. The engine backs it with one guard per column, each refusing that station's clean verdict while a row is unanswered: `pass` needs every *Implemented* graded `yes` or `no`, `verified` needs every *Holds* disposed, and `no` / `blocked` / `accepted` / `out-of-scope` are all honest answers. The only thing it forbids is silence — which is why each column needs an explicit negative, or "the diff misses this" and "nobody read this row" would be the same blank cell.
-
-### One branch ships one item
-
-The **spec station is a thin coordinator** — it owns context intake, the human's taste, the spec directory, and the draft PR, and delegates the writing to `write-product-spec` (every item) and `write-tech-spec` (architectural changes only). Spec is the highest-leverage station, so its writing guidance gets room to be exhaustive without bloating the coordinator.
-
-It also opens the item's **feature branch** and its draft PR into the integration branch. That branch is the item's unit of delivery, open from spec onward. Each implementation pass is a **change branch** cut from it with its own PR *into* it — so the code reviews against a base that already holds the spec, and a send-back is the next pass rather than a rebuild. **Nothing on the line merges anything:** stations branch, commit, push, and open PRs; every merge is the human's, at their own timing. What they eventually merge is the plan and the change as one reviewable unit.
-
-### Two helpers for the high-stakes moments
-
-**`council`** — several subagents investigate one contested question from genuinely different angles in parallel, the caller synthesizes by evidence quality, and when the seats diverge an optional cross-critique round has them critique each other before the synthesis. Spec and code-review convene it themselves, spawning seats as nested subagents and folding the synthesis into their verdict. It is deliberately **rare and cheap by default** — seats run on sonnet unless the stakes lift them, and the trigger is four conditions ANDed, the sharpest being that the outcome must actually change what the station produces. The reason is economic: a council is the biggest discretionary spend on an item, and this line already routes every item past a human, so a fork a station can frame but not settle is better *written down* for that human than deliberated by a panel.
-
-**`research`** — its quieter sibling. Delegate a wide, noisy investigation (usage sweeps, long logs, big diffs) to a nested subagent and work from the distilled answer, so the survey's byproducts never crowd out the caller's actual job. Just as useful to the driver as to a station.
-
-### The handoff is a packet, not a vibe
-
-A station's contract is simple: read the item, do the work, and finish by **running** the `factory advance --verdict …` call itself — so the report lands durably the moment the work ends rather than being relayed through a summary. That call carries no agency: the routing table decides where the item goes, and illegal verdicts are rejected.
-
-Before dispatching, the driver runs `factory brief <id>` for the deterministic packet — identity, risk, lineage, the request, artifact pointers, what routed it here — and appends session-only context under its one marked section. For the stations `line.yml` marks `checking: true`, that section stays **empty by design**: a checker converges on the frozen spec and the persisted artifacts, never chat steering. Steering that should move the acceptance bar goes through the spec station, not a checker's ear. The packet lives at `runs/<state>-brief.md` (a retry appends its own section, so a retrying station sees what its predecessor was told), so *what each worker was fed* is a file on disk rather than a memory of chat.
-
-### Stations are stateless; continuity rides on durable state
-
-Each run is a fresh context — a subagent locally, a `claude -p` invocation in cloud — so there's no long-lived agent and no in-memory carry-over, even across the `code_review ↔ implement` loop. What the next run sees is whatever landed in durable state: the item's `history`, its `artifacts`, the PR diff, and the `specs/<id>-<slug>/` files. This buys determinism, cloud-resumability, and no context rot down a long line — at the cost that **only what a station writes down survives**.
-
-Where that bites hardest, the handoff is structured — and it lives on the change PR, where review conversations belong: a send-back posts one PR review (the summary carrying the rationale, the `Reviewed at` sha, and what was checked and found sound; each finding an inline comment anchored to its line), and the implementer answers each finding in its own thread. `factory feedback <id>` reads it all back for any station — unresolved threads are the live worklist, resolution is the done-signal, and machine posts are labeled so nobody eats their own output as human feedback. Each fresh run reads the conversation at reasoning granularity, not a one-line summary. (With no remote, the same content degrades into the advance's `--notes`.)
-
-One bounded exception: within a single local session the driver may *resume* a station's subagent on a loop-back instead of spawning fresh. That's an optimization, never the channel — the persisted conversation remains the contract, and cloud runs always spawn fresh. Resuming a checker is a judgment call rather than a default, since the tradeoff is anchoring: a resumed reviewer must re-scan the whole change, and substantial rework favors fresh eyes. The invariant that never bends: **no checker shares the session that built the change.**
-
-### Memory is committed; scratch isn't
-
-Statelessness means the factory writes a lot, and without a rule for which of it matters, a work item's pull request arrives buried under the machinery that produced it. The rule: **if the engine can rebuild it from state that survives, it's scratch; if nothing else holds it, it's memory.**
-
-Specs, the checklist, the metrics ledger, and the decisions a human actually made are memory — committed, and the reason a teammate cloning the repo sees the same board. (The review conversation is memory too, but the PR holds it, not the tree.) Station briefs and scratchpads are scratch: they live under `runs/`, are gitignored, and `factory sweep` removes them when the item terminates. A gate's review packet is a *message*, not a file, for the same reason — it renders from state already on disk, and what has to survive (the decision, its signature, its why) is in the item's history.
-
-The sweep is safe to run automatically because it derives what to keep from the item's own record: a file survives because a station **registered it as an artifact**, the same act that makes it visible to the next station and hashed at a gate binding — and because it refuses any path resolving outside the item's directory. What stays committed but noisy (`.factory/` itself) ships marked `linguist-generated`, so it collapses in pull-request diffs rather than competing with the change under review.
-
-## Layer 3 — the triggers (how work moves)
-
-Two ways to move the conveyor, sharing one engine and one `line.yml`:
-
-**Local / interactive — the `/factory` command.** The default. It resolves a target item, then loops: `factory next` → read the directive → run the station → `factory advance` → repeat, until a gate or a terminal. A deterministic loop around an intelligent core. The `SessionStart` hook injects the board so every session is factory-aware.
-
-**Cloud / unattended — GitHub Actions.** Opt-in, shipped disabled. GitHub becomes the conveyor: a `factory:<state>` label triggers that station headlessly, which advances the item and re-labels the issue, triggering the next run. Human-gate labels deliberately don't auto-run — they wait and comment the review packet. See [CLOUD-AUTONOMY.md](CLOUD-AUTONOMY.md). The layers are independent: local works with no cloud at all, and disabling cloud loses nothing.
-
-## Why these substrates
-
-- **Local JSON is the truth, GitHub is a mirror.** Zero accounts required, and the factory's memory lives in your repo, version-controlled, where the learning loop can reach it across time. Issues and labels are the *visible* conveyor when you want one, and the trigger for cloud mode.
-- **Skills + subagents over a bespoke agent framework.** Skills are portable and inspectable, subagents give isolation and per-station model control for free, and hooks wire it into a normal session without a separate runtime.
-- **A declarative line.** Because the topology is data, the same `line.yml` drives the local driver, the cloud workflows, and the tests — and you can add a station or move a gate without touching code.
+Locally, a PR opened with your own token cannot be approved by you, so the spec gate is `/factory <n> approve`; in the cloud the bot owns the PR and the GitHub Approve button works. Merging is the ship approval in both.
