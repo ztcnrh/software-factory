@@ -1,0 +1,122 @@
+[
+  {
+    "id": 5191097557,
+    "node_id": "PRR_kwDOUYQzws8AAAABNWnc1Q",
+    "user": {
+      "login": "github-actions[bot]",
+      "id": 41898282,
+      "node_id": "MDM6Qm90NDE4OTgyODI=",
+      "avatar_url": "https://avatars.githubusercontent.com/in/15368?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/github-actions%5Bbot%5D",
+      "html_url": "https://github.com/apps/github-actions",
+      "followers_url": "https://api.github.com/users/github-actions%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/github-actions%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/github-actions%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/github-actions%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/github-actions%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/github-actions%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/github-actions%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/github-actions%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/github-actions%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Reviewed at faf132cea76b\n\n## Findings\n\n**⚠️ [IMPORTANT] — `src/tally/__init__.py:48`: blanket comma stripping turns loud errors into silently wrong totals.** `cell.replace(\",\", \"\")` removes every comma regardless of position, so cells that previously failed with a row number now sum to a wrong number and exit 0. Verified against the built CLI on this head:\n\n| cell | before | after |\n|---|---|---|\n| `1.234,56` (European) | error, exit 1 | `1.23` |\n| `1,3` | error, exit 1 | `13.00` |\n| `12,34,5` | error, exit 1 | `12345.00` |\n\nThe first row is a ~1000× error reported as trustworthy. This is the same failure class as the issue itself (\"the number tally prints doesn't match what finance has\"), and it works against `specs/4-group-by-and-format/PRODUCT.md` invariant 28 — exit 0 must mean the printed result is trustworthy. Inline comment carries a validated fix (restrict stripping to well-formed thousands groups); it needs a test case asserting rejection.\n\nFound: 0 critical, 1 important, 0 suggestions\n\n**Request changes**\n\n## Acceptance criteria\n\nIssue #6 went triage → implement with no `specs/6-*` spec, so there are no numbered invariants of its own. The reporter's stated criterion holds: on the exact sample from the issue, `uv run python -m tally finance.csv --column amount` prints `1246.56`, exit 0 (verified).\n\nStatus of the `specs/4-group-by-and-format/PRODUCT.md` invariants governing the touched code:\n\n- **3, 6** (group key is the numeric column's raw, untrimmed cell text) — implemented and shown to hold: `--group-by amount --format json` emits groups `\"$1,234.56\"` and `\"$12.00\"`, unmodified.\n- **25** (non-blank non-number names column, value, 1-based row; exit 1) — implemented and shown to hold for values the parser still rejects; the original cell text is preserved in the message (`-$100.00` → exit 1 with `'-$100.00'`). Narrowed in practice by the finding above.\n- **28** (exit 0 means the result is trustworthy) — regressed for the malformed-comma inputs above.\n- **30** (ungrouped total bit-identical for existing files) — implemented and not exercised for this change; unaffected for cells without `$` or `,`, and the 37 pre-existing tests pass unchanged.\n\n`uv run pytest -q`: 38 passed.\n\n## Notes, not send-backs\n\n- `-$100.00` and `($100.00)` (leading-sign and parenthesized negatives, plausible in a finance export with refunds) still exit 1 with a clear message. Triage scoped these out as unevidenced and they fail loudly rather than silently, so this is correctly deferred — not a defect in this PR.\n- Untouched, for context only: `tally()` line 61 sums the ungrouped path with plain `sum()`, while invariant 5 of spec 4 describes that path as using \"compensated summation\". Pre-existing, belongs to issue #4, and no bearing on this change.\n- No spec-file or invariant-number citations appear in the added code or test names.\n\n<!-- factory:review -->",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/tianchi-fetch/factory-sandbox/pull/13#pullrequestreview-5191097557",
+    "pull_request_url": "https://api.github.com/repos/tianchi-fetch/factory-sandbox/pulls/13",
+    "author_association": "NONE",
+    "_links": {
+      "html": {
+        "href": "https://github.com/tianchi-fetch/factory-sandbox/pull/13#pullrequestreview-5191097557"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/tianchi-fetch/factory-sandbox/pulls/13"
+      }
+    },
+    "submitted_at": "2026-09-13T15:05:11Z",
+    "commit_id": "faf132cea76b53c02019e074afad3bfb78ea8089"
+  },
+  {
+    "id": 5191103749,
+    "node_id": "PRR_kwDOUYQzws8AAAABNWn1BQ",
+    "user": {
+      "login": "github-actions[bot]",
+      "id": 41898282,
+      "node_id": "MDM6Qm90NDE4OTgyODI=",
+      "avatar_url": "https://avatars.githubusercontent.com/in/15368?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/github-actions%5Bbot%5D",
+      "html_url": "https://github.com/apps/github-actions",
+      "followers_url": "https://api.github.com/users/github-actions%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/github-actions%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/github-actions%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/github-actions%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/github-actions%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/github-actions%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/github-actions%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/github-actions%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/github-actions%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/tianchi-fetch/factory-sandbox/pull/13#pullrequestreview-5191103749",
+    "pull_request_url": "https://api.github.com/repos/tianchi-fetch/factory-sandbox/pulls/13",
+    "author_association": "NONE",
+    "_links": {
+      "html": {
+        "href": "https://github.com/tianchi-fetch/factory-sandbox/pull/13#pullrequestreview-5191103749"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/tianchi-fetch/factory-sandbox/pulls/13"
+      }
+    },
+    "submitted_at": "2026-09-13T15:08:13Z",
+    "commit_id": "159c8292ab9e0dadd2b0bfd90473b83b0e8bc832"
+  },
+  {
+    "id": 5191110281,
+    "node_id": "PRR_kwDOUYQzws8AAAABNWoOiQ",
+    "user": {
+      "login": "github-actions[bot]",
+      "id": 41898282,
+      "node_id": "MDM6Qm90NDE4OTgyODI=",
+      "avatar_url": "https://avatars.githubusercontent.com/in/15368?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/github-actions%5Bbot%5D",
+      "html_url": "https://github.com/apps/github-actions",
+      "followers_url": "https://api.github.com/users/github-actions%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/github-actions%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/github-actions%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/github-actions%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/github-actions%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/github-actions%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/github-actions%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/github-actions%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/github-actions%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "body": "Reviewed at 159c8292ab9e\n\n## Findings\n\nNo actionable findings. The one send-back from the prior review is fixed and verified at `159c829`.\n\nFound: 0 critical, 0 important, 0 suggestions\n\n**Approve**\n\n## Prior finding\n\n**⚠️ [IMPORTANT] blanket comma stripping turned loud errors into silently wrong totals** — fixed. `src/tally/__init__.py:52` now rejects a comma that is not a well-formed thousands group before stripping (`_THOUSANDS.fullmatch`), so the malformed shapes reach the existing `ValueError` path. Re-ran every counterexample from the thread against the built CLI on this head:\n\n| cell | at `faf132c` | at `159c829` |\n|---|---|---|\n| `1.234,56` | `1.23`, exit 0 | exit 1, row named |\n| `1,3` | `13.00`, exit 0 | exit 1, row named |\n| `12,34,5` | `12345.00`, exit 0 | exit 1, row named |\n| `,234` | exit 1 | exit 1, row named |\n\nAlso confirmed the accepting side did not narrow: `$1,234.56`, `$12.00`, `1,234,567.89`, `-1,234.56`, `+1,234.56`, `1,234` and plain `1234.56` all parse; `1,000,00`, `1,234.`, `1,23 4`, `1,234.5.6`, `1,234e2`, `$ 1,234.56` and `$` all exit 1 with the row number and the original cell text. `test_total_rejects_a_malformed_comma_grouping` covers the regression path that was asked for.\n\n## Acceptance criteria\n\nIssue #6 has no `specs/6-*` of its own (triage → implement), so there are no numbered invariants for the change itself. The reporter's stated criterion holds: on the exact sample from the issue, `uv run python -m tally finance.csv --column amount` prints `1246.56`, exit 0 (verified on this head).\n\n`specs/4-group-by-and-format/PRODUCT.md` invariants governing the touched code:\n\n- **3, 6** (group key is the numeric column's raw, untrimmed text) — implemented and shown to hold: `--group-by amount --format json` on the reporter's file emits groups `\"$1,234.56\"` and `\"$12.00\"`, unmodified, with `total` 1246.56.\n- **25** (non-blank non-number names column, value, 1-based row; exit 1) — implemented and shown to hold; the message still carries the original cell text, not the stripped numeral.\n- **28** (exit 0 means the printed result is trustworthy) — regression from the prior pass is resolved; every previously-silent input above is loud again.\n- **30** (ungrouped total bit-identical for existing files) — implemented and not exercised directly for this change; cells with no `$` and no `,` take `float(cell)` unchanged, and the 37 pre-existing tests pass untouched.\n\n`uv run pytest -q`: 39 passed.\n\n## Notes, not send-backs\n\n- `$-100.00` now parses to `-100.00` where it previously exited 1. The value is correct, so this is a widening, not a wrong total. `-$100.00` and `($100.00)` still exit 1 with a clear message — triage scoped leading-sign and parenthesized negatives out as unevidenced, and they fail loudly.\n- The accepted numeric surface (leading `$`, well-formed thousands groups) is pinned only by tests; no `PRODUCT.md` enumerates it. Spec 4 never described cell number parsing, so nothing there is stale — worth a line in a spec if this format becomes a documented contract.\n- Untouched, for context only: `tally()` line 67 sums the ungrouped path with plain `sum()` while invariant 5 of spec 4 describes it as compensated summation. Pre-existing, belongs to issue #4, no bearing here.\n- No spec-file or invariant-number citations appear in the added code or test names.\n\n<!-- factory:review -->",
+    "state": "COMMENTED",
+    "html_url": "https://github.com/tianchi-fetch/factory-sandbox/pull/13#pullrequestreview-5191110281",
+    "pull_request_url": "https://api.github.com/repos/tianchi-fetch/factory-sandbox/pulls/13",
+    "author_association": "NONE",
+    "_links": {
+      "html": {
+        "href": "https://github.com/tianchi-fetch/factory-sandbox/pull/13#pullrequestreview-5191110281"
+      },
+      "pull_request": {
+        "href": "https://api.github.com/repos/tianchi-fetch/factory-sandbox/pulls/13"
+      }
+    },
+    "submitted_at": "2026-09-13T15:11:25Z",
+    "commit_id": "159c8292ab9e0dadd2b0bfd90473b83b0e8bc832"
+  }
+]
