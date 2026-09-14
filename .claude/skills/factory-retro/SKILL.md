@@ -36,7 +36,7 @@ Exactly one outcome:
 - `nothing_to_learn`: report and stop. Do not open an empty PR.
 - `proposed`: edit the relevant skill files under `.claude/skills/` and open a PR.
 
-For an observation the factory cannot fix by editing a skill (a stale direction, a missing environment, an engine limit), open a plain issue describing it; it is triaged like any other.
+For an observation the factory cannot fix by editing a skill (a stale direction, a missing environment, an engine limit), open a plain issue describing it (`gh issue create --title "<title>" --body-file <file>`); it is triaged like any other.
 
 ## 5. Apply edits carefully
 

@@ -28,11 +28,6 @@ on:
         description: the toolkit ref to check out; the same one the caller's `uses:` line names
         type: string
         default: main
-    secrets:
-      CLAUDE_CODE_OAUTH_TOKEN:
-        required: false
-      ANTHROPIC_API_KEY:
-        required: false
 
 env:
   GH_TOKEN: ${{ github.token }}
@@ -52,6 +47,7 @@ jobs:
       branch: ${{ steps.route.outputs.branch }}
       head: ${{ steps.route.outputs.head }}
       ref: ${{ steps.route.outputs.ref }}
+      base: ${{ steps.route.outputs.base }}
     steps:
       - name: Decide the station and the item
         id: route
@@ -121,9 +117,9 @@ jobs:
             echo "station=$station"; echo "issue=$issue"; echo "pr=$pr"
             echo "branch=$branch"; echo "head=$head"
             echo "ref=${branch:-$(q .repository.default_branch)}"
+            echo "base=$(q .repository.default_branch)"
           } >> "$GITHUB_OUTPUT"
           echo "route: ${station:-skip}${issue:+ issue=#$issue}${pr:+ pr=#$pr}${branch:+ branch=$branch}"
-          echo "debug: job_workflow_sha=${{ github.job_workflow_sha }} workflow_ref=${{ github.workflow_ref }} workflow_sha=${{ github.workflow_sha }}"
 
   context:
     needs: route
@@ -243,6 +239,7 @@ jobs:
           PR: ${{ needs.route.outputs.pr }}
           BRANCH: ${{ needs.route.outputs.branch }}
           HEAD: ${{ needs.route.outputs.head }}
+          BASE: ${{ needs.route.outputs.base }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -293,6 +290,7 @@ jobs:
           PR: ${{ needs.route.outputs.pr }}
           BRANCH: ${{ needs.route.outputs.branch }}
           HEAD: ${{ needs.route.outputs.head }}
+          BASE: ${{ needs.route.outputs.base }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

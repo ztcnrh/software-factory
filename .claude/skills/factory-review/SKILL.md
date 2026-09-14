@@ -23,7 +23,7 @@ Prioritize, in this order: correctness, security, error handling, regressions, m
 
 - Findings must be grounded in the annotated diff and nearby checkout code. If you cannot point at the line or trace the path that breaks, you have a hunch, not a finding.
 - Inline comments only on paths and lines present in the annotated diff; anything else goes in `body`.
-- Run the repo's tests. Where the diff alone cannot prove an acceptance criterion, run the behavior: invoke the CLI with real inputs, hit the endpoint, drive the UI if your run carries browser tools. Evidence over assertion.
+- Run the repo's tests. Where the diff alone cannot prove an acceptance criterion, run the behavior: invoke the CLI with real inputs, hit the endpoint, exercise the code path from a script. Evidence over assertion.
 - A bug fix without a regression test is `⚠️ [IMPORTANT]`. Ask for new tests only for distinct paths or edge cases nothing already covers.
 - Style and nits only with a concrete suggestion block.
 - V0 or initial PRs: timeouts, retries, and lifecycle as optional unless correctness, security, or data loss is at stake.
@@ -45,7 +45,7 @@ When `followup.md` carries a last review: determine whether each earlier finding
 | `[NEW:n]` | `RIGHT`, line `n` |
 | `[OLD:n,NEW:m]` context | `RIGHT`, line `m` |
 
-Copy `path`, `side`, and `line` from a real annotation. No annotation, no inline comment.
+Copy `path`, `side`, and `line` from a real annotation. For a range, `start_line` is the first annotated line and `line` the last, both on the same side. No annotation, no inline comment.
 
 ## Comments
 

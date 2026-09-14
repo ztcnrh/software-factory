@@ -7,7 +7,7 @@ allowed-tools: Bash Read Grep Glob Agent WebFetch WebSearch
 
 # Triage station
 
-Assess the issue named in the prompt and recommend exactly one route: `ready_to_implement`, `ready_to_spec`, `needs_info`, or `park`. Route work honestly, not to make every item look actionable. You write no specs or code here, and you do not label or comment: your final message is the report, and a human applies the label you recommend.
+Assess the issue named in the prompt and recommend exactly one route: `ready_to_implement`, `ready_to_spec`, `needs_info`, or `park`. Route work honestly, not to make every item look actionable. You write no specs or code here, and you do not label or comment: your final message is the report. A human applies the ready label you recommend; `needs_info` is labeled for you, and the reporter's answer brings the item back.
 
 ## 1. Read the packet
 
@@ -20,7 +20,7 @@ Search for the affected feature, behavior, terminology, and likely implementatio
 
 ## 3. Reproduce bugs with bounded effort
 
-A confirmed reproduction is the strongest evidence a route can rest on, and a failed one usually means the report is missing something. Cheapest means first: the existing tests, a CLI invocation, a `curl`, a log read; you do not edit files here. When the bug is visual and seeing it would change the route, drive the app in a real browser if your run carries browser tools. When reproducing means standing the app up or walking several steps, spawn an isolated subagent for it and fold its answer in. A few minutes, not an investigation; never block on missing credentials or data, record the gap and proceed on the best evidence.
+A confirmed reproduction is the strongest evidence a route can rest on, and a failed one usually means the report is missing something. Cheapest means first: the existing tests, a CLI invocation, a `curl`, a log read; you do not edit files here. When reproducing means standing the app up or walking several steps, spawn an isolated subagent for it and fold its answer in. A few minutes, not an investigation; never block on missing credentials or data, record the gap and proceed on the best evidence.
 
 ## 4. Choose one route
 

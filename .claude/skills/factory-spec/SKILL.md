@@ -9,7 +9,7 @@ allowed-tools: Bash Read Grep Glob Edit Write Agent Skill WebFetch WebSearch
 
 Create checked-in product and technical specs for the issue named in the prompt. Do not implement the change. Everything downstream builds and reviews against what you write: strict and explicit where correctness lives, deliberate freedom where it does not.
 
-The spec content comes from two skills in this repo; read the file before writing, and never write a substitute from memory:
+The spec content comes from two skills in this repo; read the file with the Read tool before writing, and never write a substitute from memory:
 
 - `.claude/skills/write-product-spec/SKILL.md` for `PRODUCT.md`, every item.
 - `.claude/skills/write-tech-spec/SKILL.md` for `TECH.md`, when the change spans modules or carries a real architectural choice.
@@ -39,7 +39,7 @@ Decide what is decidable. A product call you can frame but not settle goes in th
 
 Commit the spec files with a clear message and push: `git push -u origin HEAD`.
 
-- **No PR yet:** `gh pr create --base <default branch> --title "spec(<area>): <title> (#<n>)" --body-file <file>`. The body: first line `Spec for #<n>` (never `Resolves`; the code that resolves the issue is not here). Then `## TL;DR`, what the plan decides, at most three sentences. Then `## You decide`, the questions the reviewer must answer, at most three, one sentence each, or "Nothing open." Then a `<details>` block with the spec paths and anything else worth saying.
+- **No PR yet:** `gh pr create --base <the base branch the prompt names> --title "spec(<area>): <title> (#<n>)" --body-file <file>`, where `<area>` is a one-word name for the part of the product the change touches. The body: first line `Spec for #<n>` (never `Resolves`; the code that resolves the issue is not here). Then `## TL;DR`, what the plan decides, at most three sentences. Then `## You decide`, the questions the reviewer must answer, at most three, one sentence each, or "Nothing open." Then a `<details>` block with the spec paths and anything else worth saying.
 - **PR exists:** push to it, then update the body the same way (`gh pr edit <pr> --body-file <file>`). Reply in each thread you addressed with what changed (`gh api -X POST repos/<owner/repo>/pulls/<pr>/comments/<comment id>/replies -f body='<text>'`; `pr.md` names the id), and answer a human's conversation comment with one conversation reply (`gh pr comment <pr> --body "<text>"`). Resolving threads is the human's.
 
 Verify `gh pr view <pr> --json url` returns a real URL before reporting.

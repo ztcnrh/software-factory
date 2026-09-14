@@ -4,6 +4,7 @@
 #
 #   STATION  triage | spec | implement | review | retro
 #   ISSUE PR BRANCH HEAD   what route found; empty when there is none
+#   BASE     the default branch, where PRs go
 #   PACKET   directory of Markdown the context job built
 #   OUT      where report.json and the raw stream go
 #   OAUTH_TOKEN / API_KEY   one of them; exported under the name Claude Code expects
@@ -28,7 +29,7 @@ case $STATION in
     if [ -z "${BRANCH:-}" ]; then where="Branch: none yet."
     elif [ -n "${PR:-}" ]; then where="Branch: $BRANCH (PR #$PR)."
     else where="Branch: $BRANCH (no PR yet)."; fi
-    prompt="/factory-$STATION Issue #$ISSUE. Packet: $PACKET/. $where" ;;
+    prompt="/factory-$STATION Issue #$ISSUE. Packet: $PACKET/. Base: ${BASE:-main}. $where" ;;
   review) prompt="/factory-review PR #$PR for issue #$ISSUE. Packet: $PACKET/." ;;
   retro) prompt="/factory-retro Packet: $PACKET/." ;;
   *) echo "::error::unknown station $STATION"; exit 1 ;;

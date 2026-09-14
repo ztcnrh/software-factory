@@ -42,7 +42,7 @@ When a send-back names a specific spec line or rule, re-run its counterexample a
 
 Commit with a conventional message (`<type>(<scope>): <summary>`) and `git push -u origin HEAD`. Unpushed work does not exist to the reviewer.
 
-- **No PR yet:** `gh pr create --base <default branch> --title "<type>(<scope>): <summary> (#<n>)" --body-file <file>`.
+- **No PR yet:** `gh pr create --base <the base branch the prompt names> --title "<type>(<scope>): <summary> (#<n>)" --body-file <file>`, where `<scope>` is a one-word name for the module or area you changed.
 - **Loop-back:** push, then reply in every open thread you answered (`gh api -X POST repos/<owner/repo>/pulls/<pr>/comments/<comment id>/replies -f body='<text>'`; `pr.md` names the id) with what you changed (name the commit) or why you declined. A human's conversation comment gets one reply in the conversation (`gh pr comment <pr> --body "<text>"`). Declining is legitimate but explicit; a silent skip earns another send-back. Never resolve a thread: whoever raised it closes it. Refresh the body when the change moved (`gh pr edit <pr> --body-file <file>`).
 
 The PR body: first line `Resolves #<n>`. `## TL;DR`, at most three sentences. `## What changed`, at most six bullets. `## How to check`, the commands you ran and their results, one line each. A `<details>` block for the rest: spec paths, latitude calls, known limits. Verify `gh pr view <pr> --json url` returns a real URL before reporting.

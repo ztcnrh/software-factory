@@ -205,6 +205,8 @@ def schema(station: str) -> dict:
             },
         },
     }
+    if station == "retro":
+        del props["followups"]
     required = ["verdict", "summary"]
     if station == "review":
         props["body"] = {
