@@ -336,16 +336,19 @@ def test_apply_triage_needs_info_supersedes_a_stale_state(gh, tmp_path):
                         "--remove-label", "factory:in-review")
 
 
-def test_apply_files_followups_as_plain_issues(gh, tmp_path):
-    """An out-of-scope defect a station finds must land somewhere durable; a plain, unlabeled
-    issue is triaged like any other."""
+def test_apply_files_followups_as_plain_issues_and_names_them_for_triage(gh, tmp_path, capsys):
+    """An out-of-scope defect a station finds must land somewhere durable. The issue is opened
+    with the workflow's token, which fires no event, so apply names its number for the workflow
+    to dispatch triage."""
     gh.responses[("issue", "view")] = issue_json()
+    gh.responses[("issue", "create")] = "https://github.com/o/r/issues/19\n"
     r = report(followups=[{"title": "README invocation fails", "body": "no [project.scripts]"}])
     cli.cmd_apply(7, write(tmp_path, r))
     [(create, _)] = gh.argv("issue", "create")
     assert create[3] == "README invocation fails" and "working on #7" in create[5]
     order = [a[:2] for a, _ in gh.calls]
     assert order.index(("issue", "create")) < order.index(("issue", "comment"))
+    assert "followup: 19\n" in capsys.readouterr().out
 
 
 def test_post_review_skips_a_reviewed_head_and_survives_a_failed_resolve(gh, tmp_path):

@@ -365,7 +365,11 @@ jobs:
         run: |
           out=$(python3 -m factory.cli apply "$ISSUE" "$RUNNER_TEMP/run/report.json")
           echo "$out"
+          caller=$(basename "${GITHUB_WORKFLOW_REF%@*}")
           next=$(sed -n 's/^next: //p' <<<"$out" | tail -1)
           if [ -n "$next" ] && [ "$next" != none ]; then
-            gh workflow run "$(basename "${GITHUB_WORKFLOW_REF%@*}")" -f station="$next" -f issue="$ISSUE"
+            gh workflow run "$caller" -f station="$next" -f issue="$ISSUE"
           fi
+          for new in $(sed -n 's/^followup: //p' <<<"$out"); do
+            gh workflow run "$caller" -f station=triage -f issue="$new"
+          done

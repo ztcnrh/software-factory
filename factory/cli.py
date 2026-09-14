@@ -400,9 +400,13 @@ def cmd_apply(n: int, report_path: str) -> None:
         for f in report.get("followups") or []:
             body = f"{f['body'].strip()}\n\nFound by the factory while working on #{n}."
             try:
-                _gh("issue", "create", "--title", f["title"], "--body", body)
+                url = _gh("issue", "create", "--title", f["title"], "--body", body).strip()
             except subprocess.CalledProcessError:
                 print(f"factory: could not file follow-up {f['title']!r}", file=sys.stderr)
+                continue
+            # An issue opened with the workflow's token fires no event; the workflow triages it
+            # from this line.
+            print(f"followup: {url.rsplit('/', 1)[-1]}")
         _gh("issue", "comment", str(n), "--body", run_comment(report, capped))
     if station == "triage" and not target:
         _edit_labels(n, ["triaged"], [])

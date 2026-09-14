@@ -40,6 +40,9 @@ export GIT_AUTHOR_NAME=factory GIT_AUTHOR_EMAIL=factory@users.noreply.github.com
 export GIT_COMMITTER_NAME=factory GIT_COMMITTER_EMAIL=factory@users.noreply.github.com
 echo "factory: $prompt  [$model]"
 
+# A structured-output call occasionally leaks its tool-call envelope into a string field; that
+# report would be refused by apply, so the run is repeated once before giving up.
+for attempt in 1 2; do
 # shellcheck disable=SC2086  # $tools is a space-separated list by design
 claude -p "$prompt" \
   --output-format stream-json --verbose \
@@ -73,4 +76,11 @@ jq -n --argjson r "$result" --arg station "$STATION" --arg run_url "${RUN_URL:-}
      head: (if $head == "" then null else $head end),
      pr: (if $pr == "" then null else ($pr | tonumber) end)}' > "$OUT/report.json" \
   || { echo "::error::no station report came back"; jq 'del(.structured_output)' <<<"$result"; exit 1; }
+if grep -q '<parameter name=' "$OUT/report.json" && [ "$attempt" = 1 ]; then
+  echo "::warning::the report carries tool-call markup (malformed structured output); running again"
+  mv "$OUT/stream.jsonl" "$OUT/stream-malformed.jsonl"
+  continue
+fi
+break
+done
 jq -r '"factory: \(.station) → \(.verdict) · $\(.cost_usd) · \(.turns) turns"' "$OUT/report.json"
