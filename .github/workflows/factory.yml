@@ -1,0 +1,340 @@
+# The software factory, as one reusable workflow. An adopter's caller (templates/factory.yml)
+# forwards its events here. Four jobs: route decides which station runs and on what; context
+# packages what the station reads; run-read / run-write execute the station with the least
+# write access it needs; apply records the report and dispatches the next station.
+#
+# Every label, comment, review, and push the factory makes uses GITHUB_TOKEN, which fires no
+# events, so the line advances through `gh workflow run` from apply. Human actions fire events
+# on their own.
+
+name: factory
+
+on:
+  workflow_call:
+    inputs:
+      station:
+        description: station to run (from workflow_dispatch); retro needs no issue
+        type: string
+        default: ""
+      issue:
+        description: issue number (from workflow_dispatch)
+        type: string
+        default: ""
+      toolkit:
+        description: the repository this workflow lives in, checked out for its CLI and prompt
+        type: string
+        default: ztcnrh/software-factory
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  route:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # a merged spec PR moves its issue to ready-to-implement
+      pull-requests: read
+    outputs:
+      station: ${{ steps.route.outputs.station }}
+      issue: ${{ steps.route.outputs.issue }}
+      pr: ${{ steps.route.outputs.pr }}
+      branch: ${{ steps.route.outputs.branch }}
+      head: ${{ steps.route.outputs.head }}
+      ref: ${{ steps.route.outputs.ref }}
+    steps:
+      - name: Decide the station and the item
+        id: route
+        env:
+          INPUT_STATION: ${{ inputs.station }}
+          INPUT_ISSUE: ${{ inputs.issue }}
+        run: |
+          q() { jq -r "$1 // \"\"" "$GITHUB_EVENT_PATH"; }
+          station= issue= pr= branch= head=
+          case "$GITHUB_EVENT_NAME" in
+            issues)
+              issue=$(q .issue.number); label=$(q .label.name); human=$([ "$(q .sender.type)" != Bot ] && echo yes || true)
+              case "$(q .action)" in
+                opened|reopened) station=triage ;;
+                labeled)
+                  if [ -n "$human" ] && [ "$label" = factory:ready-to-spec ]; then station=spec; fi
+                  if [ -n "$human" ] && [ "$label" = factory:ready-to-implement ]; then station=implement; fi ;;
+                unlabeled)
+                  if [ -n "$human" ] && [ "$label" = factory:needs-info ]; then station=triage; fi ;;
+              esac ;;
+            pull_request)
+              branch=$(q .pull_request.head.ref); pr=$(q .pull_request.number)
+              if [[ $branch =~ ^([a-z]+)/([0-9]+)- ]]; then
+                type=${BASH_REMATCH[1]}; issue=${BASH_REMATCH[2]}
+                case "$(q .action)" in
+                  opened|synchronize|reopened|ready_for_review)
+                    if [ "$type" != spec ] && [ "$(q .pull_request.draft)" = false ]; then
+                      station=review; head=$(q .pull_request.head.sha)
+                    fi ;;
+                  closed)
+                    if [ "$type" = spec ] && [ "$(q .pull_request.merged)" = true ]; then
+                      gh issue edit "$issue" --add-label factory:ready-to-implement --remove-label factory:spec-review
+                      station=implement; pr=; branch=
+                    fi ;;
+                esac
+              fi ;;
+            pull_request_review)
+              branch=$(q .pull_request.head.ref); pr=$(q .pull_request.number)
+              if [ "$(q .review.state)" = changes_requested ] && [ "$(q .review.user.type)" != Bot ] \
+                 && [[ "$(q .review.author_association)" =~ ^(OWNER|MEMBER|COLLABORATOR)$ ]] \
+                 && [[ $branch =~ ^([a-z]+)/([0-9]+)- ]]; then
+                issue=${BASH_REMATCH[2]}
+                if [ "${BASH_REMATCH[1]}" = spec ]; then station=spec; else station=implement; fi
+              fi ;;
+            workflow_dispatch) station=$INPUT_STATION; issue=$INPUT_ISSUE ;;
+            schedule) station=retro ;;
+          esac
+
+          # Spec and implement need the item's branch and PR if they already exist; review,
+          # when dispatched by apply, needs the PR it is to review.
+          if [ -n "$station" ] && [ -n "$issue" ] && [ -z "$pr" ] && [ "$station" != triage ]; then
+            spec=$([ "$station" = spec ] && echo true || echo false)
+            found=$(gh pr list --state open --limit 100 --json number,headRefName,headRefOid \
+              --jq "[.[] | select(.headRefName | test(\"^[a-z]+/${issue}-\"))
+                          | select((.headRefName | startswith(\"spec/\")) == $spec)]
+                     | sort_by(.number) | .[0] // empty")
+            if [ -n "$found" ]; then
+              pr=$(jq -r .number <<<"$found"); branch=$(jq -r .headRefName <<<"$found"); head=$(jq -r .headRefOid <<<"$found")
+            else
+              branch=$(gh api "repos/$GH_REPO/branches?per_page=100" --paginate --jq '.[].name' \
+                | grep -E "^[a-z]+/${issue}-" | { if [ "$spec" = true ]; then grep '^spec/'; else grep -v '^spec/'; fi; } | head -1 || true)
+            fi
+            if [ "$station" = review ] && [ -z "$pr" ]; then echo "no open PR for #$issue to review"; station=; fi
+          fi
+
+          {
+            echo "station=$station"; echo "issue=$issue"; echo "pr=$pr"
+            echo "branch=$branch"; echo "head=$head"
+            echo "ref=${branch:-$(q .repository.default_branch)}"
+          } >> "$GITHUB_OUTPUT"
+          echo "route: ${station:-skip}${issue:+ issue=#$issue}${pr:+ pr=#$pr}${branch:+ branch=$branch}"
+
+  context:
+    needs: route
+    if: needs.route.outputs.station != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.route.outputs.ref }}
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.toolkit }}
+          ref: ${{ github.job_workflow_sha }}
+          path: .factory-toolkit
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Fetch what the station reads and build its packet
+        env:
+          STATION: ${{ needs.route.outputs.station }}
+          ISSUE: ${{ needs.route.outputs.issue }}
+          PR: ${{ needs.route.outputs.pr }}
+          HEAD: ${{ needs.route.outputs.head }}
+        run: |
+          mv .factory-toolkit "$RUNNER_TEMP/toolkit"
+          export PYTHONPATH=$RUNNER_TEMP/toolkit
+          raw=$RUNNER_TEMP/raw; mkdir -p "$raw"
+          owner=${GH_REPO%/*}; name=${GH_REPO#*/}
+          paged() { gh api --paginate --slurp "$1" | jq '[.[][]]'; }
+          threads() {
+            gh api graphql -F owner="$owner" -F name="$name" -F pr="$1" -f query='
+              query($owner:String!,$name:String!,$pr:Int!){ repository(owner:$owner,name:$name){
+                pullRequest(number:$pr){ reviewThreads(first:100){ nodes{ id isResolved path line
+                  comments(first:50){ nodes{ databaseId author{login} body createdAt } } } } } } }' \
+              --jq '.data.repository.pullRequest.reviewThreads.nodes'
+          }
+          if [ -n "$ISSUE" ]; then
+            gh api "repos/$GH_REPO/issues/$ISSUE" > "$raw/issue.json"
+            paged "repos/$GH_REPO/issues/$ISSUE/comments?per_page=100" > "$raw/comments.json"
+          fi
+          if [ "$STATION" = triage ]; then
+            gh issue list --state open --limit 50 --json number,title,labels > "$raw/open_issues.json"
+            gh pr list --state open --limit 30 --json number,title,headRefName > "$raw/open_prs.json"
+          fi
+          if [ -n "$PR" ]; then
+            gh api "repos/$GH_REPO/pulls/$PR" > "$raw/pr.json"
+            paged "repos/$GH_REPO/pulls/$PR/reviews?per_page=100" > "$raw/reviews.json"
+            paged "repos/$GH_REPO/issues/$PR/comments?per_page=100" > "$raw/pr_comments.json"
+            threads "$PR" > "$raw/threads.json"
+          fi
+          if [ "$STATION" = review ]; then
+            gh api -H "Accept: application/vnd.github.v3.diff" "repos/$GH_REPO/pulls/$PR" > "$raw/diff.patch"
+            prev=$(python3 -m factory.context select "$raw")
+            if [ -n "$prev" ] && [ "$prev" != "$HEAD" ]; then
+              gh api -H "Accept: application/vnd.github.v3.diff" "repos/$GH_REPO/compare/$prev...$HEAD" \
+                > "$raw/delta.patch" || rm -f "$raw/delta.patch"
+            fi
+          fi
+          if [ "$STATION" = retro ]; then
+            python3 -m factory.cli metrics --since 30d --json > "$raw/metrics.json"
+            for n in $(jq -r '.items[].issue' "$raw/metrics.json"); do
+              mkdir -p "$raw/items/$n"
+              paged "repos/$GH_REPO/issues/$n/comments?per_page=100" > "$raw/items/$n/comments.json"
+              for m in $(jq -r ".items[] | select(.issue == $n) | .prs[]" "$raw/metrics.json"); do
+                paged "repos/$GH_REPO/pulls/$m/reviews?per_page=100" > "$raw/items/$n/reviews-$m.json"
+                paged "repos/$GH_REPO/issues/$m/comments?per_page=100" > "$raw/items/$n/pr_comments-$m.json"
+                paged "repos/$GH_REPO/pulls/$m/commits?per_page=100" > "$raw/items/$n/commits-$m.json"
+                threads "$m" > "$raw/items/$n/threads-$m.json"
+              done
+            done
+          fi
+          python3 -m factory.context "$STATION" "$raw" "$RUNNER_TEMP/context"
+          wc -c "$RUNNER_TEMP"/context/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: context-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/context
+          retention-days: 7
+
+  # Triage and review only read: their token cannot label, comment, or push, so nothing an issue
+  # or PR says can make the agent act on GitHub. Every write they want rides the report.
+  run-read:
+    needs: [route, context]
+    if: contains(fromJSON('["triage","review"]'), needs.route.outputs.station)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.route.outputs.ref }}
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.toolkit }}
+          ref: ${{ github.job_workflow_sha }}
+          path: .factory-toolkit
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          name: context-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/context
+      - name: Run the station
+        env:
+          STATION: ${{ needs.route.outputs.station }}
+          ISSUE: ${{ needs.route.outputs.issue }}
+          PR: ${{ needs.route.outputs.pr }}
+          BRANCH: ${{ needs.route.outputs.branch }}
+          HEAD: ${{ needs.route.outputs.head }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          mv .factory-toolkit "$RUNNER_TEMP/toolkit"
+          curl -fsSL https://claude.ai/install.sh | bash
+          export PATH="$HOME/.local/bin:$PATH"
+          TOOLKIT=$RUNNER_TEMP/toolkit PACKET=$RUNNER_TEMP/context OUT=$RUNNER_TEMP/run \
+            bash "$RUNNER_TEMP/toolkit/.github/scripts/run-station.sh"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/run
+          retention-days: 7
+
+  # Spec, implement, and retro push branches and open PRs, so they hold the write token.
+  run-write:
+    needs: [route, context]
+    if: contains(fromJSON('["spec","implement","retro"]'), needs.route.outputs.station)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.route.outputs.ref }}
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.toolkit }}
+          ref: ${{ github.job_workflow_sha }}
+          path: .factory-toolkit
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          name: context-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/context
+      - name: Run the station
+        env:
+          STATION: ${{ needs.route.outputs.station }}
+          ISSUE: ${{ needs.route.outputs.issue }}
+          PR: ${{ needs.route.outputs.pr }}
+          BRANCH: ${{ needs.route.outputs.branch }}
+          HEAD: ${{ needs.route.outputs.head }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          mv .factory-toolkit "$RUNNER_TEMP/toolkit"
+          curl -fsSL https://claude.ai/install.sh | bash
+          export PATH="$HOME/.local/bin:$PATH"
+          TOOLKIT=$RUNNER_TEMP/toolkit PACKET=$RUNNER_TEMP/context OUT=$RUNNER_TEMP/run \
+            bash "$RUNNER_TEMP/toolkit/.github/scripts/run-station.sh"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/run
+          retention-days: 7
+
+  # The job that writes to GitHub never talks to the model.
+  apply:
+    needs: [route, run-read, run-write]
+    if: >-
+      always() && needs.route.outputs.station != '' && needs.route.outputs.station != 'retro' &&
+      (needs.run-read.result == 'success' || needs.run-write.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.toolkit }}
+          ref: ${{ github.job_workflow_sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          name: run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/run
+      - name: Apply the report and dispatch the next station
+        env:
+          ISSUE: ${{ needs.route.outputs.issue }}
+        run: |
+          out=$(python3 -m factory.cli apply "$ISSUE" "$RUNNER_TEMP/run/report.json")
+          echo "$out"
+          next=$(sed -n 's/^next: //p' <<<"$out" | tail -1)
+          if [ -n "$next" ] && [ "$next" != none ]; then
+            gh workflow run "$(basename "${GITHUB_WORKFLOW_REF%@*}")" -f station="$next" -f issue="$ISSUE"
+          fi

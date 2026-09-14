@@ -584,3 +584,7 @@ def main(argv: list[str] | None = None) -> None:
     except subprocess.CalledProcessError as e:
         sys.stderr.write(e.stderr or e.stdout or "")
         fail(f"`{' '.join(e.cmd)}` failed")
+
+
+if __name__ == "__main__":
+    main()
