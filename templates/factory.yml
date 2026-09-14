@@ -43,6 +43,7 @@ jobs:
   factory:
     uses: ztcnrh/software-factory/.github/workflows/factory.yml@main
     with:
+      ref: main # the same ref as the line above
       station: ${{ inputs.station }}
       issue: ${{ inputs.issue }}
     secrets: inherit

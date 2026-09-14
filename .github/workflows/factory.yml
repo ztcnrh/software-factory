@@ -24,6 +24,10 @@ on:
         description: the repository this workflow lives in, checked out for its CLI and prompt
         type: string
         default: ztcnrh/software-factory
+      ref:
+        description: the toolkit ref to check out; the same one the caller's `uses:` line names
+        type: string
+        default: main
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         required: false
@@ -119,6 +123,7 @@ jobs:
             echo "ref=${branch:-$(q .repository.default_branch)}"
           } >> "$GITHUB_OUTPUT"
           echo "route: ${station:-skip}${issue:+ issue=#$issue}${pr:+ pr=#$pr}${branch:+ branch=$branch}"
+          echo "debug: job_workflow_sha=${{ github.job_workflow_sha }} workflow_ref=${{ github.workflow_ref }} workflow_sha=${{ github.workflow_sha }}"
 
   context:
     needs: route
@@ -129,16 +134,16 @@ jobs:
       issues: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.route.outputs.ref }}
           fetch-depth: 0
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: ${{ inputs.toolkit }}
-          ref: ${{ github.job_workflow_sha }}
+          ref: ${{ inputs.ref }}
           path: .factory-toolkit
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - name: Fetch what the station reads and build its packet
@@ -197,7 +202,7 @@ jobs:
           fi
           python3 -m factory.context "$STATION" "$raw" "$RUNNER_TEMP/context"
           wc -c "$RUNNER_TEMP"/context/*
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: context-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/context
@@ -215,19 +220,19 @@ jobs:
       issues: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.route.outputs.ref }}
           fetch-depth: 0
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: ${{ inputs.toolkit }}
-          ref: ${{ github.job_workflow_sha }}
+          ref: ${{ inputs.ref }}
           path: .factory-toolkit
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           name: context-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/context
@@ -247,7 +252,7 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           TOOLKIT=$RUNNER_TEMP/toolkit PACKET=$RUNNER_TEMP/context OUT=$RUNNER_TEMP/run \
             bash "$RUNNER_TEMP/toolkit/.github/scripts/run-station.sh"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: always()
         with:
           name: run-${{ github.run_id }}-${{ github.run_attempt }}
@@ -265,19 +270,19 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.route.outputs.ref }}
           fetch-depth: 0
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: ${{ inputs.toolkit }}
-          ref: ${{ github.job_workflow_sha }}
+          ref: ${{ inputs.ref }}
           path: .factory-toolkit
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           name: context-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/context
@@ -297,7 +302,7 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           TOOLKIT=$RUNNER_TEMP/toolkit PACKET=$RUNNER_TEMP/context OUT=$RUNNER_TEMP/run \
             bash "$RUNNER_TEMP/toolkit/.github/scripts/run-station.sh"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: always()
         with:
           name: run-${{ github.run_id }}-${{ github.run_attempt }}
@@ -317,14 +322,14 @@ jobs:
       pull-requests: write
       actions: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: ${{ inputs.toolkit }}
-          ref: ${{ github.job_workflow_sha }}
-      - uses: actions/setup-python@v5
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           name: run-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/run
