@@ -10,14 +10,13 @@ You run the adoption lifecycle for the human from this toolkit's root. `./instal
 ## Install
 
 1. Confirm the target path is a git repository with a GitHub remote and that `gh auth status` is logged in for it.
-2. `./install.sh <target>` copies `.claude/skills/factory*`, `.claude/skills/{write-product-spec,write-tech-spec,council,research}` into the target and creates the `factory:*` labels. Add `--with-cloud` to also copy `.github/workflows/factory.yml`.
-3. `uv tool install <toolkit path>` puts the `factory` CLI on PATH.
-4. Tell them to commit the installed files, and, for cloud, to add the `CLAUDE_CODE_OAUTH_TOKEN` secret (`claude setup-token`), set the `FACTORY_TOOLKIT_GIT` repository variable to a pip-installable ref of this toolkit, and enable "Allow GitHub Actions to create and approve pull requests" in the repository's Actions settings.
-5. First drive, in a Claude Code session in the target: `/factory new "<something small>"`.
+2. `./install.sh <target>` copies the five station skills plus `write-product-spec`, `write-tech-spec`, `council`, and `research` into `.claude/skills/`, copies `templates/factory.yml` to `.github/workflows/factory.yml`, and creates the `factory:*` labels.
+3. Tell them the three steps the installer printed: commit the files (and point the workflow's `uses:` line at their fork of the toolkit if they have one), add the `CLAUDE_CODE_OAUTH_TOKEN` secret (`claude setup-token`) or `ANTHROPIC_API_KEY`, and allow GitHub Actions to create and approve pull requests in the repository's Actions settings.
+4. First drive: open a small issue in the target; the factory triages it and says what to do next.
 
 ## Upgrade
 
-Pull the latest toolkit, rerun `./install.sh <target>` with the same flags, and have them read `git diff` in the target. The installer overwrites the factory's files and touches nothing else; a local edit they want to keep shows up as a reverted hunk, and git is the merge tool.
+Pull the latest toolkit, rerun `./install.sh <target>`, and have them read `git diff` in the target. The installer overwrites the factory's files and touches nothing else; a local edit they want to keep shows up as a reverted hunk, and git is the merge tool. The reusable workflow itself updates with the toolkit's `main`; nothing to reinstall for that.
 
 ## Uninstall
 

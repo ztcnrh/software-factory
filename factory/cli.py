@@ -1,10 +1,12 @@
-"""factory — the deterministic layer of a GitHub-native software factory.
+"""factory — the deterministic layer of a software factory that runs inside GitHub Actions.
 
-GitHub holds every piece of state: an issue is a work item, its `factory:*` label is its state,
-its comments are its log, and its `feature/<n>-*` branch and pull request are its artifacts.
-This module does only what GitHub has no primitive for: the transition table, one `claude -p`
-invocation per station run, applying a station's report, the human gates, and metrics derived
-from the record. All GitHub access goes through `gh` via `_gh`, so tests stub one function.
+GitHub holds every piece of state: an issue is a work item, its `factory:*` labels are its state,
+its comments are its log, and its `<type>/<n>-<slug>` branches and pull requests are its
+artifacts. The workflow decides when a station runs and packages what it reads; this module does
+only what must be shared across stations and right once: the label set, the report schema each
+station answers, applying a report (validation, the PR review, the run comment, the label move,
+the attempt cap, the dispatch decision), and metrics derived from the record. All GitHub access
+goes through `gh` via `_gh`, so tests stub one function.
 """
 
 from __future__ import annotations
@@ -16,51 +18,86 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Iterator
-from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 PREFIX = "factory:"
-STATES = (
-    "triage", "spec", "spec-review", "implement", "review", "ship-review",
-    "done", "needs-info", "parked", "retro",
-)
+# Yellow marks every label that waits on a human.
+LABELS = {
+    "triaged": "5319E7",
+    "needs-info": "FBCA04",
+    "ready-to-spec": "1D76DB",
+    "spec-review": "FBCA04",
+    "ready-to-implement": "0E8A16",
+    "in-review": "006B75",
+    "ship-review": "FBCA04",
+    "needs-human": "FBCA04",
+}
+# `triaged` stays for the life of the issue; the rest are states, at most one at a time.
+STATES = tuple(name for name in LABELS if name != "triaged")
 STATIONS = ("triage", "spec", "implement", "review")
-GATES = ("spec-review", "ship-review")
+MAX_SENDBACKS = 3
 
-# (state, station verdict) -> next state. The only routing that exists.
+# (station, verdict) -> the state label apply sets. None: the state is left alone, because the
+# verdict is a recommendation a human acts on by applying a label. The only routing that exists.
 TRANSITIONS = {
-    ("triage", "automatable"): "implement",
-    ("triage", "needs_spec"): "spec",
+    ("triage", "ready_to_implement"): None,
+    ("triage", "ready_to_spec"): None,
     ("triage", "needs_info"): "needs-info",
-    ("triage", "park"): "parked",
+    ("triage", "park"): None,
     ("spec", "ready_for_review"): "spec-review",
-    ("spec", "needs_info"): "needs-info",
-    ("implement", "implemented"): "review",
-    ("implement", "blocked"): "needs-info",
+    ("spec", "blocked"): "needs-human",
+    ("implement", "implemented"): "in-review",
+    ("implement", "blocked"): "needs-human",
     ("review", "approve"): "ship-review",
-    ("review", "request_changes"): "implement",
+    ("review", "request_changes"): "in-review",
 }
-# (state, human decision) -> next state. `done`, `park`, and `retriage` are accepted from any
-# active state: a merge or a shelving is a fact, and re-triage with a comment is how a human
-# overrides a station's routing without labeling by hand.
-GATE_MOVES = {
-    ("spec-review", "approve"): "implement",
-    ("spec-review", "request_changes"): "spec",
-    ("ship-review", "request_changes"): "implement",
+# (station, verdict) -> the station the workflow runs next. Everything else waits on a human or
+# on an event GitHub fires by itself.
+DISPATCH = {("implement", "implemented"): "review", ("review", "request_changes"): "implement"}
+# The states a station's report may arrive at. A report from anywhere else is stale or misrouted.
+RUNS_AT = {
+    "spec": {"ready-to-spec", "spec-review"},
+    "implement": {"ready-to-implement", "in-review", "ship-review", "needs-human"},
+    "review": {"in-review", "ship-review", "needs-human"},
 }
-DECISIONS = ("approve", "request_changes", "park", "done", "retriage")
 
-LABEL_COLORS = {
-    "triage": "FBCA04", "spec": "1D76DB", "spec-review": "5319E7", "implement": "0E8A16",
-    "review": "006B75", "ship-review": "5319E7", "done": "BFDADC", "needs-info": "D93F0B",
-    "parked": "CCCCCC", "retro": "C5DEF5",
+HEADLINE = {
+    ("triage", "ready_to_implement"): "Triage · recommends ready-to-implement",
+    ("triage", "ready_to_spec"): "Triage · recommends ready-to-spec",
+    ("triage", "needs_info"): "Triage · needs info",
+    ("triage", "park"): "Triage · recommends closing",
+    ("spec", "ready_for_review"): "Spec · ready for your review",
+    ("spec", "blocked"): "Spec · blocked",
+    ("implement", "implemented"): "Implement · PR ready for review",
+    ("implement", "blocked"): "Implement · blocked",
+    ("review", "approve"): "Review · approved",
+    ("review", "request_changes"): "Review · changes requested",
 }
-BUDGET_USD = {"triage": 2.0, "spec": 6.0, "implement": 12.0, "review": 6.0, "retro": 6.0}
+NEXT_STEP = {
+    ("triage", "ready_to_implement"): "To start, add the `factory:ready-to-implement` label.",
+    ("triage", "ready_to_spec"): "To start, add the `factory:ready-to-spec` label.",
+    ("triage", "needs_info"): "Answer here, then remove the `factory:needs-info` label to triage "
+    "again.",
+    ("triage", "park"): "If you agree, close this issue as not planned. To go ahead anyway, add "
+    "a ready label.",
+    ("spec", "ready_for_review"): "Merge the spec PR to start implementation, or request changes "
+    "on it.",
+    ("spec", "blocked"): "Answer here, then add the `factory:ready-to-spec` label again.",
+    ("implement", "implemented"): "The factory is reviewing the PR.",
+    ("implement", "blocked"): "Answer here and add `factory:ready-to-implement` again, or answer "
+    "in a Request changes review on the PR.",
+    ("review", "approve"): "Merge the PR to ship, or request changes on it.",
+    ("review", "request_changes"): "The factory is addressing the review.",
+}
+CAPPED_STEP = (
+    f"{MAX_SENDBACKS} review rounds without a human. Take a look at the PR: merge it if it is "
+    "good, or request changes and the factory picks it up again."
+)
+
 BOT_NAME, BOT_EMAIL = "factory", "factory@users.noreply.github.com"
-RUN_MARK, GATE_MARK = "<!-- factory:run ", "<!-- factory:gate "
-REVIEW_MARK = "<!-- factory:review -->"
+RUN_MARK, REVIEW_MARK = "<!-- factory:run ", "<!-- factory:review "
+BRANCH = re.compile(r"^([a-z]+)/(\d+)-")
 
 
 def fail(msg: str) -> None:
@@ -88,57 +125,47 @@ def _repo() -> str:
     ).strip()
 
 
-@functools.cache
-def _default_branch() -> str:
-    return _gh("repo", "view", "--json", "defaultBranchRef", "-q", ".defaultBranchRef.name").strip()
+def _paginated(endpoint: str) -> list:
+    return [x for page in _gh_json("api", "--paginate", "--slurp", endpoint) or [] for x in page]
 
 
 def _issue(n: int) -> dict:
     return _gh_json("issue", "view", str(n), "--json", "number,title,labels,state")
 
 
-def _states(issue: dict) -> list[str]:
+def _labels(issue: dict) -> list[str]:
     names = [lb["name"] for lb in issue.get("labels", [])]
     return [s[len(PREFIX):] for s in names if s.startswith(PREFIX)]
 
 
-def _set_state(n: int, state: str, current: list[str]) -> None:
-    args = ["issue", "edit", str(n), "--add-label", PREFIX + state]
-    for old in current:
-        if old != state:
-            args += ["--remove-label", PREFIX + old]
-    _gh(*args)
+def _edit_labels(n: int, add: list[str], remove: list[str]) -> None:
+    args = ["issue", "edit", str(n)]
+    for name in add:
+        args += ["--add-label", PREFIX + name]
+    for name in remove:
+        args += ["--remove-label", PREFIX + name]
+    if len(args) > 3:
+        _gh(*args)
 
 
-def _item_branch(n: int) -> str | None:
-    """The item's `feature/<n>-*` branch on origin, found by name; None when none exists yet."""
-    out = subprocess.run(
-        ["git", "ls-remote", "--heads", "origin", f"feature/{n}-*"], capture_output=True, text=True
-    ).stdout
-    refs = sorted(line.split("refs/heads/")[-1] for line in out.splitlines() if line.strip())
-    return refs[0] if refs else None
+def branch_issue(head: str) -> tuple[str, int] | None:
+    """(type, issue) from a `<type>/<n>-<slug>` branch name, or None for any other branch."""
+    m = BRANCH.match(head)
+    return (m[1], int(m[2])) if m else None
 
 
-def _item_pr(n: int) -> dict | None:
-    """The pull request from the item's `feature/<n>-*` branch: the open one if any, else the
-    newest (merged or closed), else None. Found through PR search rather than the branch, so it
-    survives the branch being deleted after merge. `headRefOid` is the commit a review anchors
-    to."""
-    prs = _gh_json(
-        "pr", "list", "--state", "all", "--limit", "20", "--search", f"head:feature/{n}-",
-        "--json", "number,url,state,isDraft,mergedAt,headRefOid,headRefName,createdAt",
-    )
-    prs = [p for p in prs if p["headRefName"].startswith(f"feature/{n}-")]
-    prs.sort(key=lambda p: (p["state"] != "OPEN", -_parse_ts(p["createdAt"]).timestamp()))
-    return prs[0] if prs else None
-
-
-def _paginated(endpoint: str) -> list:
-    return [x for page in _gh_json("api", "--paginate", "--slurp", endpoint) or [] for x in page]
-
-
-def _comments(n: int) -> list[dict]:
-    return _paginated(f"repos/{_repo()}/issues/{n}/comments")
+def _open_pr(n: int, spec: bool) -> dict | None:
+    """The item's open PR of one kind: from `spec/<n>-*` when spec, else from any other
+    `<type>/<n>-*` branch. Oldest first when there are several."""
+    prs = _gh_json("pr", "list", "--state", "open", "--limit", "100",
+                   "--json", "number,url,headRefName,headRefOid,isDraft")
+    mine = []
+    for p in prs:
+        kind = branch_issue(p["headRefName"])
+        if kind and kind[1] == n and (kind[0] == "spec") == spec:
+            mine.append(p)
+    mine.sort(key=lambda p: p["number"])
+    return mine[0] if mine else None
 
 
 # ----------------------------------------------------------------------------- report contract
@@ -155,19 +182,21 @@ def schema(station: str) -> dict:
         "verdict": {"type": "string", "enum": verdicts},
         "summary": {
             "type": "string",
-            "description": "At most two short sentences, under 60 words, read on the issue by a "
-            "human: the verdict and its why. Details belong in notes or the PR. For needs_info "
-            "or blocked, the concrete questions whose answers unblock it.",
+            "description": "One or two plain sentences a colleague skims on the issue: the "
+            "outcome and its why, in everyday words (no internal vocabulary such as station, "
+            "verdict, packet, or invariant numbers). For needs_info or blocked: the concrete "
+            "questions whose answers unblock the work, one line each.",
         },
         "notes": {
             "type": "string",
-            "description": "What the next station or the human must know that the summary and the "
-            "artifacts do not carry. Omit when there is nothing.",
+            "description": "What the next reader must know that the summary and the artifacts do "
+            "not carry: a fork you settled and why, a limit, a spec you changed. Rendered "
+            "collapsed under the summary. Omit when there is nothing.",
         },
         "followups": {
             "type": "array",
-            "description": "Real defects or gaps you found outside this item's scope. The runner "
-            "files each as a plain issue for a human to triage. Omit when there are none.",
+            "description": "Real defects or gaps you found outside this item's scope. Each is "
+            "filed as a plain issue for a human to triage. Omit when there are none.",
             "items": {
                 "type": "object",
                 "properties": {"title": {"type": "string"}, "body": {"type": "string"}},
@@ -176,16 +205,23 @@ def schema(station: str) -> dict:
             },
         },
     }
+    if station == "retro":
+        del props["followups"]
     required = ["verdict", "summary"]
     if station == "review":
         props["body"] = {
             "type": "string",
-            "description": "The GitHub review body: findings by severity, then "
-            "'Found: X critical, Y important, Z suggestions' and the disposition.",
+            "description": "The review body, in this shape: `## TL;DR` one line; `## Concerns` "
+            "up to five bullets, each starting with its severity tag and naming a file:line, "
+            "at most two sentences each, or one line saying there are none; `## Verdict` "
+            "`Found: X critical, Y important, Z suggestions · Approve` or `· Request changes`. "
+            "When a spec exists, a `<details>` block with one line per numbered rule and its "
+            "status. Do not include change summaries, praise, or a restatement of the diff.",
         }
         props["comments"] = {
             "type": "array",
-            "description": "Inline findings. path/line/side must come from the annotated diff.",
+            "description": "Inline findings. path, line, and side are copied from the annotated "
+            "diff; anything without an annotation goes in body instead.",
             "items": {
                 "type": "object",
                 "properties": {
@@ -201,8 +237,8 @@ def schema(station: str) -> dict:
         }
         props["resolve"] = {
             "type": "array",
-            "description": "Thread ids from `factory threads` whose fix you verified; the runner "
-            "resolves them.",
+            "description": "Ids of earlier review threads whose fix you verified on this head; "
+            "they are resolved for you.",
             "items": {"type": "string"},
         }
         required += ["body", "comments"]
@@ -211,9 +247,11 @@ def schema(station: str) -> dict:
 
 
 # A structured-output call that went wrong leaks the tool-call envelope into a string field.
-MALFORMED = re.compile(r"<parameter name=|</(summary|notes|body|verdict)>")
+# `</summary>` is not a signal: review bodies fold their rule table under <details><summary>.
+MALFORMED = re.compile(r"<parameter name=|</parameter>|</(notes|body|verdict)>")
+# What the workflow's run step adds to the station's structured output.
 RUNNER_KEYS = {"station", "model", "cost_usd", "session_id", "turns", "duration_ms", "run_url",
-               "ts", "head"}
+               "ts", "head", "pr"}
 
 
 def validate(report: dict, station: str) -> None:
@@ -235,22 +273,25 @@ def validate(report: dict, station: str) -> None:
             fail(f"comments[{i}] does not match the review schema")
 
 
-# ----------------------------------------------------------------------------- run comment
+# ----------------------------------------------------------------------------- the record
 
 
-def run_comment(report: dict) -> str:
+def run_comment(report: dict, capped: bool = False) -> str:
+    """The issue comment that records one station run: headline, outcome, next step, folded
+    notes, and the hidden JSON that metrics and retro read back."""
     ms = report.get("duration_ms") or 0
     took = f"{ms / 60000:.0f}m" if ms >= 60000 else f"{ms / 1000:.0f}s"
-    head = (
-        f"**factory · {report['station']} → {report['verdict']}** · {report.get('model', '?')}"
-        f" · ${report.get('cost_usd', 0):.2f} · {took}"
-    )
+    key = (report["station"], report["verdict"])
+    head = f"**{HEADLINE[key]}** · ${report.get('cost_usd') or 0:.2f} · {took}"
     if report.get("run_url"):
         head += f" · [run]({report['run_url']})"
-    body = [head, report["summary"]]
+    body = [head, report["summary"].strip(), CAPPED_STEP if capped else NEXT_STEP[key]]
     if report.get("notes"):
-        body += ["", report["notes"]]
+        body += ["<details><summary>Details</summary>", "", report["notes"].strip(), "",
+                 "</details>"]
     record = {k: report.get(k) for k in ("verdict", *RUNNER_KEYS)}
+    if capped:
+        record["capped"] = True
     body += [f"{RUN_MARK}{json.dumps(record, separators=(',', ':'))} -->"]
     return "\n".join(body)
 
@@ -260,167 +301,43 @@ def parse_marks(text: str, mark: str) -> list[dict]:
     return [json.loads(m) for m in re.findall(pattern, text, flags=re.S)]
 
 
-# ----------------------------------------------------------------------------- station runs
-
-
-def skill_meta(station: str, root: Path = Path(".")) -> dict:
-    """model and allowed-tools from the station skill's frontmatter."""
-    text = (root / ".claude" / "skills" / f"factory-{station}" / "SKILL.md").read_text()
-    front = text.split("---", 2)[1] if text.startswith("---") else ""
-    meta = {}
-    for line in front.splitlines():
-        if ":" in line:
-            key, _, value = line.partition(":")
-            meta[key.strip()] = value.strip()
-    if "model" not in meta:
-        fail(f"factory-{station}/SKILL.md has no model: in its frontmatter")
-    return {"model": meta["model"], "tools": meta.get("allowed-tools", "").split()}
-
-
-def build_prompt(station: str, repo: str, n: int | None, branch: str | None,
-                 pr: dict | None) -> str:
-    if station == "retro":
-        return f"/factory-retro Repository {repo}."
-    where = "Branch: none yet." if not branch else f"Branch: {branch}"
-    if branch and pr:
-        where += f" (PR #{pr['number']}{', draft' if pr.get('isDraft') else ''})"
-    elif branch:
-        where += " (no PR)"
-    return f"/factory-{station} Issue #{n} in {repo}. {where}"
-
-
-def build_argv(station: str, prompt: str, meta: dict, budget: float, system: str) -> list[str]:
-    return [
-        "claude", "-p", prompt,
-        "--output-format", "stream-json", "--verbose",
-        "--model", meta["model"],
-        *(["--allowedTools", *meta["tools"]] if meta["tools"] else []),
-        "--permission-prompts", "none",
-        "--max-budget-usd", f"{budget:g}",
-        "--json-schema", json.dumps(schema(station), separators=(",", ":")),
-        "--append-system-prompt", system,
-    ]
-
-
-@contextmanager
-def worktree(n: int | str, branch: str | None) -> Iterator[Path]:
-    """A throwaway checkout per run: the item branch when it exists, else the default branch tip.
-
-    Keeps a station's checkouts and edits out of the caller's working tree, and makes local and
-    Actions runs start from the same place.
-    """
-    git = lambda *a: subprocess.run(["git", *a], check=True, capture_output=True, text=True)  # noqa: E731
-    common = Path(git("rev-parse", "--git-common-dir").stdout.strip()).resolve()
-    path = common / "factory-worktrees" / str(n)
-    git("fetch", "--quiet", "--prune", "origin")
-    if path.exists():
-        git("worktree", "remove", "--force", str(path))
-    if branch:
-        git("worktree", "add", "--quiet", "-B", branch, str(path), f"origin/{branch}")
-    else:
-        git("worktree", "add", "--quiet", "--detach", str(path), f"origin/{_default_branch()}")
-    try:
-        yield path
-    finally:
-        subprocess.run(["git", "worktree", "remove", "--force", str(path)], capture_output=True)
-
-
-def _progress(event: dict) -> str | None:
-    if event.get("type") != "assistant":
-        return None
+def _factory_reviews(reviews: list[dict]) -> list[tuple[dict, dict]]:
+    """(review, its hidden record) for each review the factory posted."""
     out = []
-    for block in event.get("message", {}).get("content", []):
-        if block.get("type") == "tool_use":
-            arg = block.get("input", {})
-            hint = arg.get("command") or arg.get("file_path") or arg.get("pattern") or arg.get(
-                "description") or ""
-            out.append(f"  ▸ {block['name']} {str(hint)[:110]}")
-        elif block.get("type") == "text" and block["text"].strip():
-            out.append(f"  · {block['text'].strip()[:200]}")
-    return "\n".join(out) or None
+    for r in reviews:
+        if (r.get("user") or {}).get("type") == "Bot":
+            marks = parse_marks(r.get("body") or "", REVIEW_MARK)
+            if marks:
+                out.append((r, marks[0]))
+    return out
 
 
-def cmd_run(target: str, out: str | None, budget: float | None) -> None:
-    repo = _repo()
-    if target == "retro":
-        station, n, branch, pr = "retro", None, None, None
-    else:
-        n = int(target)
-        states = _states(_issue(n))
-        active = [s for s in states if s in STATIONS]
-        if len(active) != 1:
-            fail(f"#{n} is at {states or ['no factory label']}; nothing for a station to run")
-        station = active[0]
-        branch = _item_branch(n)
-        pr = _item_pr(n)
-    meta = skill_meta(station)
-    system = (Path(__file__).parent / "prompts" / "station.md").read_text()
-    prompt = build_prompt(station, repo, n, branch, pr)
-    argv = build_argv(station, prompt, meta, budget or BUDGET_USD[station], system)
-    env = os.environ | {
-        "GIT_AUTHOR_NAME": BOT_NAME, "GIT_AUTHOR_EMAIL": BOT_EMAIL,
-        "GIT_COMMITTER_NAME": BOT_NAME, "GIT_COMMITTER_EMAIL": BOT_EMAIL,
-    }
-    print(f"factory: {prompt}  [{meta['model']}, ≤${budget or BUDGET_USD[station]:g}]",
-          file=sys.stderr)
-    if os.environ.get("ANTHROPIC_API_KEY") is not None:
-        print("factory: ANTHROPIC_API_KEY is set, so this run bills that key rather than a Claude "
-              "subscription (it outranks CLAUDE_CODE_OAUTH_TOKEN and /login even when empty)",
-              file=sys.stderr)
-    result = None
-    with worktree(n or "retro", branch) as cwd:
-        with subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
-                              stdout=subprocess.PIPE, text=True) as proc:
-            for line in proc.stdout:
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if event.get("type") == "result":
-                    result = event
-                elif msg := _progress(event):
-                    print(msg, file=sys.stderr)
-        slug = re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
-    if not result:
-        fail("claude produced no result event")
-    structured = result.get("structured_output")
-    if not isinstance(structured, dict):
-        sys.stderr.write(json.dumps(result, indent=2) + "\n")
-        fail(f"no station report came back ({result.get('subtype')})")
-    usage = result.get("modelUsage") or {}
-    model = max(usage, key=lambda m: usage[m].get("costUSD", 0)) if usage else meta["model"]
-    report = structured | {
-        "station": station,
-        "model": model,
-        "cost_usd": round(result.get("total_cost_usd") or 0, 4),
-        "session_id": result.get("session_id"),
-        "turns": result.get("num_turns"),
-        "duration_ms": result.get("duration_ms"),
-        "run_url": _run_url(),
-        "ts": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "head": pr["headRefOid"] if pr else None,
-    }
-    text = json.dumps(report, indent=2)
-    if out:
-        Path(out).write_text(text + "\n")
-    else:
-        print(text)
-    print(
-        f"factory: {station} → {report['verdict']} · ${report['cost_usd']:.2f} · "
-        f"{report['turns']} turns · transcript "
-        f"~/.claude/projects/{slug}/{report['session_id']}.jsonl",
-        file=sys.stderr,
-    )
+TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
 
 
-def _run_url() -> str | None:
-    if run_id := os.environ.get("GITHUB_RUN_ID"):
-        return f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/" \
-               f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/{run_id}"
-    return None
+def sendbacks(reviews: list[dict], commits: list[dict], session_id: str | None = None) -> int:
+    """Consecutive factory send-backs on a PR since the last review by a maintainer or commit by a
+    human. The review from `session_id` is left out so a retried apply counts the same as the
+    first. Commits count by committer date: a rebase keeps the author date of the original."""
+    events: list[tuple[str, str]] = []
+    for r in reviews:
+        if (r.get("user") or {}).get("type") != "Bot" and r.get("author_association") in TRUSTED:
+            events.append((r.get("submitted_at") or "", "human"))
+    for r, rec in _factory_reviews(reviews):
+        if rec.get("verdict") == "request_changes" and rec.get("session_id") != session_id:
+            events.append((r.get("submitted_at") or "", "sendback"))
+    for c in commits:
+        if (c["commit"]["author"] or {}).get("email") != BOT_EMAIL:
+            events.append(((c["commit"]["committer"] or {}).get("date") or "", "human"))
+    count = 0
+    for _, kind in sorted(events, reverse=True):
+        if kind == "human":
+            break
+        count += 1
+    return count
 
 
-# ----------------------------------------------------------------------------- apply and gate
+# ----------------------------------------------------------------------------- apply
 
 
 def cmd_apply(n: int, report_path: str) -> None:
@@ -429,20 +346,44 @@ def cmd_apply(n: int, report_path: str) -> None:
     if station not in STATIONS:
         fail(f"report station {station!r} is not one of {STATIONS}")
     validate(report, station)
-    states = _states(_issue(n))
-    if station not in states:
-        fail(f"#{n} is at {states}, not {station}; refusing to apply a {station} report")
-    target = TRANSITIONS.get((station, verdict))
-    if not target:
-        fail(f"{station} cannot report {verdict!r}")
-    pr = _item_pr(n)
-    if verdict in ("ready_for_review", "implemented") and not (pr and pr["state"] == "OPEN"):
-        fail(f"{verdict} reported but #{n} has no open PR from a feature/{n}-* branch")
-    if station == "review" and not pr:
-        fail(f"review reported but #{n} has no PR")
+    issue = _issue(n)
+    if issue["state"] != "OPEN":
+        fail(f"#{n} is closed; nothing to apply")
+    states = [s for s in _labels(issue) if s in STATES]
+    if station in RUNS_AT and not set(states) & RUNS_AT[station]:
+        fail(f"#{n} is at {states or ['no state']}, where no {station} run belongs")
+    target = TRANSITIONS[(station, verdict)]
+    pr = None
+    if station == "spec":
+        pr = _open_pr(n, spec=True)
+    elif station in ("implement", "review"):
+        pr = _open_pr(n, spec=False)
+    if verdict in ("ready_for_review", "implemented"):
+        if not pr:
+            fail(f"{verdict} reported but #{n} has no open PR from a "
+                 f"{'spec' if station == 'spec' else '<type>'}/{n}-* branch")
+        if pr.get("isDraft"):
+            fail(f"{verdict} reported but PR #{pr['number']} is still a draft")
+    if station == "review":
+        if not pr:
+            fail(f"review reported but #{n} has no open PR")
+        if report.get("head") and report["head"] != pr["headRefOid"]:
+            print(f"factory: PR #{pr['number']} moved to {pr['headRefOid'][:12]} since this "
+                  f"review of {report['head'][:12]}; reviewing the new head instead")
+            print("next: review")
+            return
+    capped = False
+    if (station, verdict) == ("review", "request_changes"):
+        repo = _repo()
+        reviews = _paginated(f"repos/{repo}/pulls/{pr['number']}/reviews")
+        commits = _paginated(f"repos/{repo}/pulls/{pr['number']}/commits")
+        capped = sendbacks(reviews, commits, report.get("session_id")) >= MAX_SENDBACKS
+        if capped:
+            target = "needs-human"
     already = any(
         r.get("session_id") == report.get("session_id")
-        for c in _comments(n) for r in parse_marks(c["body"], RUN_MARK)
+        for c in _paginated(f"repos/{_repo()}/issues/{n}/comments")
+        for r in parse_marks(c["body"], RUN_MARK)
     )
     if already:
         print(f"factory: run {report.get('session_id')} already recorded on #{n}", file=sys.stderr)
@@ -454,34 +395,44 @@ def cmd_apply(n: int, report_path: str) -> None:
                     _gh("api", "graphql", "-f", "query=mutation($id:ID!){resolveReviewThread("
                         "input:{threadId:$id}){thread{isResolved}}}", "-f", f"id={thread}")
                 except subprocess.CalledProcessError:
-                    print(f"factory: could not resolve thread {thread} (the token may not); "
-                          "resolve it by hand", file=sys.stderr)
-        _gh("issue", "comment", str(n), "--body", run_comment(report))
+                    print(f"factory: could not resolve thread {thread}; resolve it by hand",
+                          file=sys.stderr)
         for f in report.get("followups") or []:
-            body = f"{f['body'].strip()}\n\nSurfaced by the factory's {station} run on #{n}."
-            _gh("issue", "create", "--title", f["title"], "--body", body)
-    _set_state(n, target, states)
+            body = f"{f['body'].strip()}\n\nFound by the factory while working on #{n}."
+            try:
+                url = _gh("issue", "create", "--title", f["title"], "--body", body).strip()
+            except subprocess.CalledProcessError:
+                print(f"factory: could not file follow-up {f['title']!r}", file=sys.stderr)
+                continue
+            # An issue opened with the workflow's token fires no event; the workflow triages it
+            # from this line.
+            print(f"followup: {url.rsplit('/', 1)[-1]}")
+        _gh("issue", "comment", str(n), "--body", run_comment(report, capped))
+    if station == "triage" and not target:
+        _edit_labels(n, ["triaged"], [])
+    else:
+        add = ["triaged", target] if station == "triage" else [target]
+        _edit_labels(n, add, [s for s in states if s != target])
     link = f" · {pr['url']}" if pr else ""
-    print(f"#{n}: {station} → {verdict} → {PREFIX}{target}{link}")
+    print(f"#{n}: {HEADLINE[(station, verdict)]}{' · capped' if capped else ''}{link}")
+    print(f"next: {'none' if capped else DISPATCH.get((station, verdict), 'none')}")
 
 
 def _post_review(pr: dict, report: dict) -> None:
     """Post the station's review; degrade the anchor or the event before ever dropping a finding."""
     event = "APPROVE" if report["verdict"] == "approve" else "REQUEST_CHANGES"
     head = report.get("head") or pr["headRefOid"]
-    text = report["body"].strip().removesuffix(REVIEW_MARK).strip()
-    text = re.sub(r"\A[Rr]eviewed at [0-9a-f]{7,40}\s*", "", text)
-    body = f"Reviewed at {head[:12]}\n\n{text}\n\n{REVIEW_MARK}"
+    record = {"verdict": report["verdict"], "head": head, "session_id": report.get("session_id")}
+    footer = f"<sub>factory review · [run]({report['run_url']})</sub>" if report.get(
+        "run_url") else "<sub>factory review</sub>"
+    mark = f"{REVIEW_MARK}{json.dumps(record, separators=(',', ':'))} -->"
+    body = f"{report['body'].strip()}\n\n{footer}\n{mark}"
     posted = _paginated(f"repos/{_repo()}/pulls/{pr['number']}/reviews")
-    if any(REVIEW_MARK in (r.get("body") or "") and f"Reviewed at {head[:12]}" in r["body"]
-           for r in posted):
+    if any(rec.get("head") == head for _, rec in _factory_reviews(posted)):
         print(f"factory: review at {head[:12]} already on PR #{pr['number']}", file=sys.stderr)
         return
-    comments = [
-        {**c, "body": f"{c['body'].strip().removesuffix(REVIEW_MARK).strip()}\n\n{REVIEW_MARK}"}
-        for c in report["comments"]
-    ]
-    payload = {"event": event, "body": body, "comments": comments, "commit_id": head}
+    payload = {"event": event, "body": body, "comments": list(report["comments"]),
+               "commit_id": head}
     endpoint = f"repos/{_repo()}/pulls/{pr['number']}/reviews"
     for _ in range(3):
         try:
@@ -491,10 +442,10 @@ def _post_review(pr: dict, report: dict) -> None:
             err = (e.stdout + e.stderr).lower()
             if payload["comments"] and ("line" in err or "path" in err or "position" in err):
                 folded = "\n".join(
-                    f"- `{c['path']}:{c['line']}` — {c['body'].replace(REVIEW_MARK, '').strip()}"
+                    f"- `{c['path']}:{c['line']}` — {c['body'].strip()}"
                     for c in payload["comments"]
                 )
-                payload["body"] = body.replace(REVIEW_MARK, f"Findings:\n{folded}\n\n{REVIEW_MARK}")
+                payload["body"] = body.replace(footer, f"Findings:\n{folded}\n\n{footer}")
                 payload["comments"] = []
             elif payload["event"] != "COMMENT" and ("approve" in err or "own pull" in err
                                                    or "not permitted" in err):
@@ -505,117 +456,20 @@ def _post_review(pr: dict, report: dict) -> None:
     fail("posting the PR review failed after fallbacks")
 
 
-def cmd_gate(n: int, decision: str, why: str | None) -> None:
-    states = _states(_issue(n))
-    if len(states) != 1:
-        fail(f"#{n} carries {states or 'no factory label'}; fix the labels first")
-    state = states[0]
-    if decision == "done" and state != "done":
-        target = "done"
-    elif decision == "park" and state not in ("done", "parked"):
-        target = "parked"
-    elif decision == "retriage" and state not in ("done", "triage"):
-        target = "triage"
-    else:
-        target = GATE_MOVES.get((state, decision))
-    if not target:
-        hint = " (merge the PR instead)" if (state, decision) == ("ship-review", "approve") else ""
-        fail(f"{decision!r} is not a decision at {state}{hint}")
-    record = {"decision": decision, "from": state, "to": target,
-              "ts": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")}
-    body = f"**factory · gate → {decision}**"
-    if why:
-        body += f"\n{why}"
-    body += f"\n{GATE_MARK}{json.dumps(record, separators=(',', ':'))} -->"
-    _gh("issue", "comment", str(n), "--body", body)
-    _set_state(n, target, states)
-    print(f"#{n}: {state} → {decision} → {PREFIX}{target}")
-
-
-# ----------------------------------------------------------------------------- reading the record
+# ----------------------------------------------------------------------------- labels
 
 
 def cmd_labels() -> None:
-    for state, color in LABEL_COLORS.items():
-        _gh("label", "create", PREFIX + state, "--color", color, "--force",
-            "--description", f"factory: {state}")
-    print(f"{len(LABEL_COLORS)} labels ensured on {_repo()}")
-
-
-def cmd_board() -> None:
-    issues = _gh_json("issue", "list", "--state", "open", "--limit", "200",
-                      "--json", "number,title,labels")
-    by_state: dict[str, list] = {s: [] for s in STATES}
-    for issue in issues:
-        for s in _states(issue):
-            by_state.setdefault(s, []).append(issue)
-    for state in by_state:
-        if not by_state[state]:
-            continue
-        tag = " (human)" if state in GATES else ""
-        print(f"{PREFIX}{state}{tag}")
-        for i in by_state[state]:
-            print(f"  #{i['number']}  {i['title']}")
-
-
-def cmd_threads(n: int) -> None:
-    pr = _item_pr(n)
-    if not pr:
-        fail(f"#{n} has no PR")
-    owner, name = _repo().split("/")
-    query = """query($owner:String!,$name:String!,$pr:Int!){ repository(owner:$owner,name:$name){
-      pullRequest(number:$pr){ reviewThreads(first:100){ nodes{ id isResolved path line
-        comments(first:50){ nodes{ databaseId author{login} body } } } } } } }"""
-    data = _gh_json("api", "graphql", "-f", f"query={query}", "-f", f"owner={owner}",
-                    "-f", f"name={name}", "-F", f"pr={pr['number']}")
-    threads = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
-    open_threads = [t for t in threads if not t["isResolved"]]
-    print(f"PR #{pr['number']}: {len(open_threads)} unresolved thread(s)")
-    for t in open_threads:
-        root = t["comments"]["nodes"][0]["databaseId"]
-        print(f"\n{t['path']}:{t['line']}  thread {t['id']}  comment {root}")
-        for c in t["comments"]["nodes"]:
-            print(f"  @{c['author']['login']}: {c['body'].replace(REVIEW_MARK, '').strip()}")
-    if open_threads:
-        repo = _repo()
-        print(f"\nreply:   gh api -X POST repos/{repo}/pulls/{pr['number']}/comments/<comment>"
-              "/replies -f body='...'")
-        print("resolve: gh api graphql -f query='mutation{resolveReviewThread("
-              "input:{threadId:\"<thread>\"}){thread{isResolved}}}'")
-
-
-HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
-
-
-def annotate(patch: str) -> str:
-    """Prefix each diff line with its side and number so inline review comments can cite it."""
-    out, old, new = [], None, None
-    for line in patch.splitlines():
-        if line.startswith(("diff --git ", "Binary files ")):
-            old = new = None
-        elif m := HUNK.match(line):
-            old, new = int(m[1]), int(m[2])
-        elif old is not None and line[:1] == "-":
-            out.append(f"[OLD:{old}] {line[1:]}")
-            old += 1
-            continue
-        elif old is not None and line[:1] == "+":
-            out.append(f"[NEW:{new}] {line[1:]}")
-            new += 1
-            continue
-        elif old is not None and line[:1] == " ":
-            out.append(f"[OLD:{old},NEW:{new}] {line[1:]}")
-            old, new = old + 1, new + 1
-            continue
-        out.append(line)
-    return "\n".join(out)
-
-
-def cmd_diff(n: int) -> None:
-    pr = _item_pr(n)
-    if not pr:
-        fail(f"#{n} has no PR")
-    print(annotate(_gh("pr", "diff", str(pr["number"]))))
+    for name, color in LABELS.items():
+        _gh("label", "create", PREFIX + name, "--color", color, "--force",
+            "--description", f"factory: {name}")
+    existing = _gh_json("label", "list", "--limit", "200", "--json", "name") or []
+    stale = [lb["name"] for lb in existing
+             if lb["name"].startswith(PREFIX) and lb["name"][len(PREFIX):] not in LABELS]
+    for name in stale:
+        _gh("label", "delete", name, "--yes")
+    print(f"{len(LABELS)} labels ensured on {_repo()}"
+          + (f", {len(stale)} stale removed" if stale else ""))
 
 
 # ----------------------------------------------------------------------------- metrics
@@ -625,26 +479,31 @@ def _parse_ts(s: str) -> datetime:
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
-def item_metrics(n: int, comments: list[dict], timeline: list[dict], pr: dict | None,
+def item_metrics(issue: dict, comments: list[dict], prs: list[dict], reviews: list[dict],
                  commits: list[dict]) -> dict:
+    """One item's row from its comments, its PRs, the reviews on them, and the code PR's commits."""
     runs = [r for c in comments for r in parse_marks(c["body"], RUN_MARK)]
-    gates = [g for c in comments for g in parse_marks(c["body"], GATE_MARK)]
-    started = min((e["created_at"] for e in timeline
-                   if e.get("event") == "labeled" and e["label"]["name"] == PREFIX + "triage"),
-                  default=None)
-    merged = pr.get("mergedAt") if pr else None
+    code = [p for p in prs if branch_issue(p["headRefName"])[0] != "spec"]
+    merged = next((p["mergedAt"] for p in code if p.get("mergedAt")), None)
+    shipped = issue["state"] == "CLOSED" and issue.get("stateReason") == "COMPLETED" and bool(
+        merged)
     human_commits = [c for c in commits if (c["commit"]["author"] or {}).get("email") != BOT_EMAIL]
+    human_sendbacks = [r for r in reviews if (r.get("user") or {}).get("type") != "Bot"
+                       and r.get("state") == "CHANGES_REQUESTED"]
+    steers = len(human_sendbacks) + len(human_commits)
     return {
-        "issue": n,
-        "pr": pr.get("number") if pr else None,
+        "issue": issue["number"],
+        "prs": [p["number"] for p in prs],
         "runs": len(runs),
         "cost_usd": round(sum(r.get("cost_usd") or 0 for r in runs), 4),
-        "shipped": bool(merged),
-        "cycle_hours": round((_parse_ts(merged) - _parse_ts(started)).total_seconds() / 3600, 1)
-        if merged and started else None,
-        "steers": sum(g["decision"] in ("request_changes", "retriage") for g in gates)
-        + len(human_commits),
-        "autonomous": bool(merged) and not human_commits,
+        "shipped": shipped,
+        "parked": issue["state"] == "CLOSED" and issue.get("stateReason") == "NOT_PLANNED",
+        "cycle_hours": round(
+            (_parse_ts(merged) - _parse_ts(issue["createdAt"])).total_seconds() / 3600, 1)
+        if shipped else None,
+        "steers": steers,
+        "autonomous": shipped and steers == 0,
+        "needs_human": any(r.get("verdict") == "blocked" or r.get("capped") for r in runs),
     }
 
 
@@ -662,6 +521,7 @@ def aggregate(items: list[dict]) -> dict:
         if shipped else None,
         "steers_per_shipped": round(sum(i["steers"] for i in shipped) / len(shipped), 2)
         if shipped else None,
+        "needs_human": sum(i["needs_human"] for i in items),
         "runs": sum(i["runs"] for i in items),
     }
 
@@ -671,16 +531,27 @@ def cmd_metrics(since: str, as_json: bool) -> None:
     cutoff = (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%d")
     repo = _repo()
     issues = _gh_json("issue", "list", "--state", "all", "--limit", "500",
-                      "--search", f"updated:>={cutoff}", "--json", "number,labels")
+                      "--search", f"updated:>={cutoff}",
+                      "--json", "number,labels,state,stateReason,createdAt")
+    prs = _gh_json("pr", "list", "--state", "all", "--limit", "500",
+                   "--search", f"updated:>={cutoff}", "--json", "number,headRefName,mergedAt")
+    by_issue: dict[int, list[dict]] = {}
+    for p in prs:
+        if kind := branch_issue(p["headRefName"]):
+            by_issue.setdefault(kind[1], []).append(p)
     items = []
     for issue in issues:
-        if not set(_states(issue)) & set(STATIONS + GATES + ("done", "needs-info", "parked")):
+        if "triaged" not in _labels(issue):
             continue
         n = issue["number"]
-        pr = _item_pr(n)
-        commits = _paginated(f"repos/{repo}/pulls/{pr['number']}/commits") if pr else []
-        timeline = _paginated(f"repos/{repo}/issues/{n}/timeline")
-        items.append(item_metrics(n, _comments(n), timeline, pr, commits))
+        mine = sorted(by_issue.get(n, []), key=lambda p: p["number"])
+        reviews = [r for p in mine
+                   for r in _paginated(f"repos/{repo}/pulls/{p['number']}/reviews")]
+        code = [p for p in mine if branch_issue(p["headRefName"])[0] != "spec"]
+        commits = [c for p in code
+                   for c in _paginated(f"repos/{repo}/pulls/{p['number']}/commits")]
+        comments = _paginated(f"repos/{repo}/issues/{n}/comments")
+        items.append(item_metrics(issue, comments, mine, reviews, commits))
     summary = aggregate(items)
     if as_json:
         print(json.dumps({"since_days": days, "summary": summary, "items": items}, indent=2))
@@ -692,10 +563,11 @@ def cmd_metrics(since: str, as_json: bool) -> None:
           else "  cost per shipped item  — (nothing shipped yet)")
     print(f"  total cost             ${s['total_cost_usd']}  (Claude Code list-price estimate)")
     print(f"  median cycle           {s['median_cycle_hours']} h")
-    print(f"  autonomy               {s['autonomy_pct']}% of shipped PRs had no human commit")
+    print(f"  autonomy               {s['autonomy_pct']}% of shipped items had no human steer")
     print(f"  steers per shipped     {s['steers_per_shipped']}")
+    print(f"  needs-human            {s['needs_human']} items")
     for i in items:
-        flag = "✓" if i["shipped"] else " "
+        flag = "✓" if i["shipped"] else ("×" if i["parked"] else " ")
         print(f"  {flag} #{i['issue']:<5} ${i['cost_usd']:<7.2f} {i['runs']} runs  "
               f"{i['steers']} steers")
 
@@ -706,49 +578,30 @@ def cmd_metrics(since: str, as_json: bool) -> None:
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="factory", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("labels", help="create or update the factory:* labels on this repo")
-    sub.add_parser("board", help="open issues grouped by factory:* label")
-    s = sub.add_parser("run", help="run the station an issue's label names (or `retro`)")
-    s.add_argument("issue", help="issue number, or `retro`")
-    s.add_argument("--out", help="write the report JSON here instead of stdout")
-    s.add_argument("--budget", type=float, help="USD cap for the run (default per station)")
-    s = sub.add_parser("apply", help="record a station report: run comment + label move")
+    sub.add_parser("labels", help="create the factory:* labels on this repo; remove stale ones")
+    s = sub.add_parser("schema", help="the report JSON schema for a station")
+    s.add_argument("station", choices=(*STATIONS, "retro"))
+    s = sub.add_parser("apply", help="record a station report: review, run comment, labels, next")
     s.add_argument("issue", type=int)
-    s.add_argument("report", help="path to the report JSON `factory run` wrote")
-    s = sub.add_parser("gate", help="record a human decision at a gate")
-    s.add_argument("issue", type=int)
-    s.add_argument("decision", choices=DECISIONS)
-    s.add_argument("--why", help="the reason; this is what retro reads")
-    s = sub.add_parser("threads", help="unresolved review threads on the item's PR")
-    s.add_argument("issue", type=int)
-    s = sub.add_parser("diff", help="the item's PR diff with [OLD:n]/[NEW:n] line markers")
-    s.add_argument("issue", type=int)
+    s.add_argument("report", help="path to the report JSON the run step wrote")
     s = sub.add_parser("metrics", help="cost per shipped item, cycle time, autonomy, steers")
     s.add_argument("--since", default="30d", help="window, e.g. 30d")
     s.add_argument("--json", action="store_true")
-    s = sub.add_parser("schema", help="the report JSON schema for a station")
-    s.add_argument("station", choices=(*STATIONS, "retro"))
     a = p.parse_args(argv)
     try:
         match a.cmd:
             case "labels":
                 cmd_labels()
-            case "board":
-                cmd_board()
-            case "run":
-                cmd_run(a.issue, a.out, a.budget)
-            case "apply":
-                cmd_apply(a.issue, a.report)
-            case "gate":
-                cmd_gate(a.issue, a.decision, a.why)
-            case "threads":
-                cmd_threads(a.issue)
-            case "diff":
-                cmd_diff(a.issue)
-            case "metrics":
-                cmd_metrics(a.since, a.json)
             case "schema":
                 print(json.dumps(schema(a.station), indent=2))
+            case "apply":
+                cmd_apply(a.issue, a.report)
+            case "metrics":
+                cmd_metrics(a.since, a.json)
     except subprocess.CalledProcessError as e:
         sys.stderr.write(e.stderr or e.stdout or "")
         fail(f"`{' '.join(e.cmd)}` failed")
+
+
+if __name__ == "__main__":
+    main()

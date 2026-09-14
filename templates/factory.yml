@@ -1,0 +1,53 @@
+# The software factory. Every job runs in the toolkit's reusable workflow; this file forwards
+# the events and grants the permissions it needs.
+#
+# Setup, once: the secret CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`, bills your Claude
+# subscription) or ANTHROPIC_API_KEY, and the repository setting "Allow GitHub Actions to create
+# and approve pull requests". Then open an issue.
+
+name: factory
+
+on:
+  issues:
+    types: [opened, reopened, labeled, unlabeled]
+  # Not opened or synchronize: a PR the factory opens or pushes to with GITHUB_TOKEN would leave
+  # a run GitHub holds for approval and never executes. Review starts from the apply job instead.
+  pull_request:
+    types: [reopened, ready_for_review, closed]
+  pull_request_review:
+    types: [submitted]
+  workflow_dispatch:
+    inputs:
+      station:
+        description: station to run
+        required: true
+        type: choice
+        options: [triage, spec, implement, review, retro]
+      issue:
+        description: issue number (not for retro)
+        required: false
+        type: string
+  schedule:
+    - cron: "0 13 * * 1" # retro, Mondays 13:00 UTC
+
+# One run per item at a time; a newer run waits for the current one to finish.
+concurrency:
+  group: factory-${{ github.event.issue.number || github.event.pull_request.number || inputs.issue || 'retro' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  factory:
+    uses: ztcnrh/software-factory/.github/workflows/factory.yml@main
+    with:
+      ref: main # the same ref as the line above
+      station: ${{ inputs.station }}
+      issue: ${{ inputs.issue }}
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

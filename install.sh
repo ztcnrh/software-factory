@@ -5,19 +5,18 @@ set -euo pipefail
 
 usage() {
   cat <<USAGE
-usage: install.sh <target-repo> [--with-cloud] [--uninstall]
+usage: install.sh <target-repo> [--uninstall]
 
-  --with-cloud   also copy .github/workflows/factory.yml (needs the CLAUDE_CODE_OAUTH_TOKEN
-                 secret and the FACTORY_TOOLKIT_GIT variable on the repo)
+  Copies the station skills and the caller workflow into the target and creates the
+  factory:* labels on its GitHub repository (needs \`gh\` logged in for it).
   --uninstall    remove exactly what this script installed; labels and issues stay
 USAGE
 }
 
 here=$(cd "$(dirname "$0")" && pwd)
-target="" cloud=0 uninstall=0
+target="" uninstall=0
 for arg in "$@"; do
   case $arg in
-    --with-cloud) cloud=1 ;;
     --uninstall) uninstall=1 ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "unknown flag $arg" >&2; usage; exit 2 ;;
@@ -27,7 +26,7 @@ done
 [ -n "$target" ] && [ -d "$target/.git" ] || { usage; exit 2; }
 target=$(cd "$target" && pwd)
 
-skills=(factory factory-triage factory-spec factory-implement factory-review factory-retro
+skills=(factory-triage factory-spec factory-implement factory-review factory-retro
         write-product-spec write-tech-spec council research)
 
 if [ $uninstall = 1 ]; then
@@ -37,19 +36,20 @@ if [ $uninstall = 1 ]; then
   exit 0
 fi
 
-mkdir -p "$target/.claude/skills"
+mkdir -p "$target/.claude/skills" "$target/.github/workflows"
 for s in "${skills[@]}"; do
   rm -rf "$target/.claude/skills/$s"
   cp -R "$here/.claude/skills/$s" "$target/.claude/skills/$s"
 done
-if [ $cloud = 1 ]; then
-  mkdir -p "$target/.github/workflows"
-  cp "$here/workflows/factory.yml" "$target/.github/workflows/factory.yml"
-fi
-if command -v factory >/dev/null; then
-  (cd "$target" && factory labels)
-else
-  echo "factory CLI not on PATH: run 'uv tool install $here' then 'factory labels' in $target"
-fi
-echo "installed into $target: ${#skills[@]} skills under .claude/skills/$([ $cloud = 1 ] && echo ', .github/workflows/factory.yml')"
-echo "next: commit these files, then in a Claude Code session there run  /factory new \"<title>\""
+cp "$here/templates/factory.yml" "$target/.github/workflows/factory.yml"
+(cd "$target" && PYTHONPATH=$here python3 -m factory.cli labels)
+
+cat <<NEXT
+installed into $target: ${#skills[@]} skills under .claude/skills/, .github/workflows/factory.yml
+
+next:
+  1. commit those files (the workflow's \`uses:\` line names the toolkit; point it at your fork if you have one)
+  2. add the CLAUDE_CODE_OAUTH_TOKEN secret (\`claude setup-token\`) or ANTHROPIC_API_KEY
+  3. in Settings → Actions → General, allow GitHub Actions to create and approve pull requests
+then open an issue: the factory triages it.
+NEXT

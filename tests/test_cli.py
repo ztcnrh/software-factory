@@ -29,44 +29,68 @@ class GH:
         return [(a, i) for a, i in self.calls if a[: len(prefix)] == prefix]
 
 
-def issue_json(*states):
-    return json.dumps({"number": 7, "title": "t", "state": "OPEN",
-                       "labels": [{"name": f"factory:{s}"} for s in states]})
+def issue_json(*labels, state="OPEN"):
+    names = ["triaged", *labels] if labels else []
+    return json.dumps({"number": 7, "title": "t", "state": state,
+                       "labels": [{"name": f"factory:{s}"} for s in names]})
 
 
-def pr_json(state="OPEN", merged=None, draft=False):
-    return json.dumps([{"number": 12, "url": "https://x/pr/12", "state": state, "isDraft": draft,
-                        "mergedAt": merged, "headRefOid": "a" * 40, "createdAt": "2026-01-01",
-                        "headRefName": "feature/7-slug"}])
+def pr_json(head="fix/7-slug", number=12, oid="a" * 40):
+    return json.dumps([{"number": number, "url": f"https://x/pr/{number}", "headRefName": head,
+                        "headRefOid": oid, "isDraft": False}])
 
 
 @pytest.fixture
 def gh(monkeypatch):
-    stub = GH(**{"repo view": "o/r\n"})
+    stub = GH(**{"repo view": "o/r\n", "api --paginate --slurp": "[[]]", "pr list": "[]"})
     monkeypatch.setattr(cli, "_gh", stub)
-    monkeypatch.setattr(cli, "_item_branch", lambda n: "feature/7-x")
     return stub
 
 
-def report(station="triage", verdict="automatable", **extra):
+def report(station="triage", verdict="ready_to_implement", **extra):
     base = {"station": station, "verdict": verdict, "summary": "why", "model": "m",
             "cost_usd": 0.1, "session_id": "s1", "turns": 3, "duration_ms": 1000,
-            "run_url": None, "ts": "2026-01-01T00:00:00Z"}
+            "run_url": "https://x/run/1", "ts": "2026-01-01T00:00:00Z", "head": None, "pr": None}
     if station == "review":
-        base |= {"body": "b", "comments": []}
+        base |= {"body": "b", "comments": [], "head": "a" * 40, "pr": 12}
     return base | extra
+
+
+def review(state, bot, at, verdict=None, session="s0", association="OWNER"):
+    rec = f'{cli.REVIEW_MARK}{{"verdict":"{verdict}","head":"x","session_id":"{session}"}} -->'
+    return {"state": state, "submitted_at": at, "user": {"type": "Bot" if bot else "User"},
+            "author_association": "NONE" if bot else association, "body": rec if verdict else ""}
+
+
+def commit(email, at, committed=None):
+    return {"commit": {"author": {"email": email, "date": at},
+                       "committer": {"email": email, "date": committed or at}}}
+
+
+def write(tmp_path, r):
+    p = tmp_path / "r.json"
+    p.write_text(json.dumps(r))
+    return str(p)
 
 
 # --------------------------------------------------------------------------- contract
 
 
 def test_schema_verdicts_are_exactly_the_transition_table():
-    """The schema is derived from TRANSITIONS, so a verdict the runner cannot route cannot be
+    """The schema is derived from TRANSITIONS, so a verdict apply cannot route cannot be
     produced, and a new transition needs no second edit."""
     for station in cli.STATIONS:
         expected = sorted(v for (s, v) in cli.TRANSITIONS if s == station)
         assert cli.schema(station)["properties"]["verdict"]["enum"] == expected
         assert cli.schema(station)["additionalProperties"] is False
+    assert cli.schema("retro")["properties"]["verdict"]["enum"] == ["proposed", "nothing_to_learn"]
+
+
+def test_every_transition_has_a_headline_and_a_next_step():
+    """The run comment is built from these tables by key; a transition missing from either would
+    crash apply after the station already spent its tokens."""
+    assert set(cli.HEADLINE) == set(cli.TRANSITIONS) == set(cli.NEXT_STEP)
+    assert set(cli.DISPATCH) <= set(cli.TRANSITIONS)
 
 
 def test_validate_refuses_unknown_key_missing_field_and_bad_verdict():
@@ -89,6 +113,15 @@ def test_validate_refuses_a_summary_carrying_tool_call_markup():
         cli.validate(bad, "triage")
 
 
+def test_validate_accepts_a_folded_details_block_in_a_review_body():
+    """The style contract asks for `<details><summary>Rules</summary>` in review bodies; the
+    leaked-markup guard must not mistake that closing tag for a broken tool call."""
+    body = "## TL;DR\nok\n\n<details><summary>Rules</summary>\n\n- 1 holds\n\n</details>"
+    cli.validate(report("review", "approve", body=body), "review")
+    with pytest.raises(SystemExit, match="malformed"):
+        cli.validate(report("review", "approve", body="x</body>\n<parameter name=\"v\">"), "review")
+
+
 def test_validate_checks_review_comment_shape():
     """A malformed inline comment would 422 the whole PR review at post time; catch it first."""
     bad = report("review", "approve", comments=[{"path": "a.py", "body": "x"}])
@@ -96,204 +129,246 @@ def test_validate_checks_review_comment_shape():
         cli.validate(bad, "review")
 
 
-def test_run_comment_round_trips_through_parse_marks():
-    """The hidden JSON in a run comment is the only machine record of a run; metrics and retro
-    must get back exactly what apply wrote."""
-    r = report(notes="n", cost_usd=0.0731, duration_ms=118000)
-    text = cli.run_comment(r)
-    assert text.startswith("**factory · triage → automatable** · m · $0.07 · 2m")
-    assert "\nwhy\n\nn\n" in text
+def test_run_comment_is_headline_outcome_next_step_and_folded_notes():
+    """The comment a human skims: outcome first, what to do next, everything else collapsed, and
+    the hidden JSON that metrics and retro read back unchanged."""
+    text = cli.run_comment(report(notes="the why", cost_usd=0.0731, duration_ms=118000))
+    lines = text.splitlines()
+    assert lines[0] == "**Triage · recommends ready-to-implement** · $0.07 · 2m · [run](https://x/run/1)"
+    assert lines[1] == "why"
+    assert lines[2] == "To start, add the `factory:ready-to-implement` label."
+    assert lines[3] == "<details><summary>Details</summary>" and "the why" in text
     [rec] = cli.parse_marks(text, cli.RUN_MARK)
-    assert (rec["cost_usd"], rec["session_id"], rec["verdict"]) == (0.0731, "s1", "automatable")
+    assert (rec["cost_usd"], rec["session_id"]) == (0.0731, "s1")
+    assert rec["verdict"] == "ready_to_implement"
+    assert "capped" not in rec
+    capped = cli.run_comment(report("review", "request_changes"), capped=True)
+    assert cli.CAPPED_STEP in capped and cli.parse_marks(capped, cli.RUN_MARK)[0]["capped"]
 
 
-# --------------------------------------------------------------------------- run
+def test_branch_issue_reads_type_and_number_from_factory_branches_only():
+    """The branch name is the link between a PR and its issue; anything not shaped
+    `<type>/<n>-…` belongs to no item."""
+    assert cli.branch_issue("fix/12-blank-cell") == ("fix", 12)
+    assert cli.branch_issue("spec/4-group-by") == ("spec", 4)
+    assert cli.branch_issue("factory/retro-2026-09-13") is None
+    assert cli.branch_issue("main") is None
 
 
-def test_build_prompt_carries_branch_and_pr_facts():
-    """The one deterministic fact the runner adds is the branch/PR state, so a station never
-    invents a second branch or PR for an item."""
-    assert cli.build_prompt("triage", "o/r", 7, None, None) == \
-        "/factory-triage Issue #7 in o/r. Branch: none yet."
-    assert cli.build_prompt("implement", "o/r", 7, "feature/7-x", None) == \
-        "/factory-implement Issue #7 in o/r. Branch: feature/7-x (no PR)"
-    pr = {"number": 12, "isDraft": True}
-    assert cli.build_prompt("review", "o/r", 7, "feature/7-x", pr).endswith("(PR #12, draft)")
-    assert cli.build_prompt("retro", "o/r", None, None, None) == "/factory-retro Repository o/r."
+def test_open_pr_picks_the_items_pr_of_the_asked_kind(gh):
+    """An item has a spec PR and a code PR at different times; #7's query must not return #70's
+    PR, and asking for the code PR must skip the spec one."""
+    gh.responses[("pr", "list")] = json.dumps([
+        {"number": 1, "headRefName": "spec/7-x", "headRefOid": "1", "isDraft": False, "url": ""},
+        {"number": 2, "headRefName": "fix/70-x", "headRefOid": "2", "isDraft": False, "url": ""},
+        {"number": 3, "headRefName": "feat/7-x", "headRefOid": "3", "isDraft": False, "url": ""},
+    ])
+    assert cli._open_pr(7, spec=True)["number"] == 1
+    assert cli._open_pr(7, spec=False)["number"] == 3
+    assert cli._open_pr(70, spec=True) is None
 
 
-def test_build_argv_is_the_exact_claude_invocation():
-    """Local and Actions runs must be the same command; pin every flag."""
-    meta = {"model": "sonnet", "tools": ["Bash", "Read"]}
-    argv = cli.build_argv("triage", "P", meta, 2.0, "SYS")
-    assert argv == [
-        "claude", "-p", "P", "--output-format", "stream-json", "--verbose", "--model", "sonnet",
-        "--allowedTools", "Bash", "Read", "--permission-prompts", "none", "--max-budget-usd", "2",
-        "--json-schema", json.dumps(cli.schema("triage"), separators=(",", ":")),
-        "--append-system-prompt", "SYS",
+# --------------------------------------------------------------------------- attempt cap
+
+
+def test_sendbacks_counts_factory_send_backs_since_the_last_human_touch():
+    """Three unanswered send-backs is the cap; a human review or commit in between resets the
+    count, and the review being applied (same session) is not counted twice on a retry."""
+    reviews = [
+        review("COMMENTED", True, "2026-01-01T01:00:00Z", "request_changes", "a"),
+        review("COMMENTED", False, "2026-01-01T02:00:00Z"),
+        review("COMMENTED", True, "2026-01-01T03:00:00Z", "request_changes", "b"),
+        review("COMMENTED", True, "2026-01-01T04:00:00Z"),
+        review("COMMENTED", True, "2026-01-01T05:00:00Z", "request_changes", "c"),
     ]
+    assert cli.sendbacks(reviews, []) == 2
+    assert cli.sendbacks(reviews, [commit("human@x", "2026-01-01T04:30:00Z")]) == 1
+    assert cli.sendbacks(reviews, [commit(cli.BOT_EMAIL, "2026-01-01T04:30:00Z")]) == 2
+    assert cli.sendbacks(reviews, [], session_id="c") == 1
 
 
-def test_skill_meta_reads_model_and_tools_from_frontmatter(tmp_path):
-    """The skill file is the single place a station's model and tool set are declared."""
-    d = tmp_path / ".claude" / "skills" / "factory-spec"
-    d.mkdir(parents=True)
-    (d / "SKILL.md").write_text(
-        "---\nname: factory-spec\nmodel: opus\nallowed-tools: Bash Read\n---\nbody")
-    assert cli.skill_meta("spec", tmp_path) == {"model": "opus", "tools": ["Bash", "Read"]}
-    (d / "SKILL.md").write_text("---\nname: x\n---\n")
-    with pytest.raises(SystemExit, match="no model"):
-        cli.skill_meta("spec", tmp_path)
+def test_sendbacks_trusts_only_maintainers_and_uses_committer_dates():
+    """A drive-by comment from a non-collaborator must not buy the loop another round; a human
+    fix that was rebased keeps its old author date, so the committer date is what orders it; a
+    pending review has no timestamp and must not crash the count."""
+    reviews = [review("COMMENTED", True, f"2026-01-01T0{i}:00:00Z", "request_changes", f"s{i}")
+               for i in range(1, 4)]
+    assert cli.sendbacks(reviews, []) == 3
+    assert cli.sendbacks(reviews + [review("COMMENTED", False, "2026-01-01T04:00:00Z",
+                                           association="NONE")], []) == 3
+    assert cli.sendbacks(reviews + [review("PENDING", False, None)], []) == 3
+    rebased = commit("human@x", "2025-12-01T00:00:00Z", committed="2026-01-01T04:00:00Z")
+    assert cli.sendbacks(reviews, [rebased]) == 0
+
+
+def test_apply_caps_the_fourth_send_back_and_stops_dispatching(gh, tmp_path):
+    """The loop must not run forever: after three factory send-backs with no human in between,
+    the review is still posted but the item goes to needs-human and nothing is dispatched."""
+    gh.responses[("issue", "view")] = issue_json("in-review")
+    gh.responses[("pr", "list")] = pr_json()
+    gh.responses[("api", "--paginate", "--slurp", "repos/o/r/pulls/12/reviews")] = json.dumps([[
+        review("COMMENTED", True, f"2026-01-01T0{i}:00:00Z", "request_changes", f"s{i}")
+        for i in range(1, 4)]])
+    cli.cmd_apply(7, write(tmp_path, report("review", "request_changes", session_id="s9")))
+    assert len(gh.argv("api", "--method", "POST")) == 1
+    [(comment, _)] = gh.argv("issue", "comment")
+    assert cli.CAPPED_STEP in comment[-1]
+    [(edit, _)] = gh.argv("issue", "edit")
+    assert edit[3:] == ("--add-label", "factory:needs-human", "--remove-label", "factory:in-review")
 
 
 # --------------------------------------------------------------------------- apply
 
 
-def write(tmp_path, r):
-    p = tmp_path / "r.json"
-    p.write_text(json.dumps(r))
-    return str(p)
-
-
-def test_apply_refuses_when_issue_is_not_at_the_reports_station(gh, tmp_path):
-    """No driving backwards: a stale or replayed report cannot move an item that has moved on."""
-    gh.responses[("issue", "view")] = issue_json("review")
-    with pytest.raises(SystemExit, match="not triage"):
-        cli.cmd_apply(7, write(tmp_path, report()))
+def test_apply_refuses_a_closed_issue_and_a_report_from_the_wrong_state(gh, tmp_path):
+    """A replayed or misrouted report must not move an item that has moved on."""
+    gh.responses[("issue", "view")] = issue_json("in-review", state="CLOSED")
+    with pytest.raises(SystemExit, match="closed"):
+        cli.cmd_apply(7, write(tmp_path, report("review", "approve")))
+    gh.responses[("issue", "view")] = issue_json("spec-review")
+    with pytest.raises(SystemExit, match="no implement run belongs"):
+        cli.cmd_apply(7, write(tmp_path, report("implement", "implemented")))
     assert not gh.argv("issue", "edit")
 
 
-def test_apply_refuses_implemented_without_an_open_pr(gh, tmp_path):
+def test_apply_refuses_implemented_and_ready_for_review_without_an_open_pr(gh, tmp_path):
     """`implemented` with no PR is the most common way a build run lies; the PR is the artifact."""
-    gh.responses[("issue", "view")] = issue_json("implement")
-    gh.responses[("pr", "list")] = "[]"
+    gh.responses[("issue", "view")] = issue_json("ready-to-implement")
     with pytest.raises(SystemExit, match="no open PR"):
         cli.cmd_apply(7, write(tmp_path, report("implement", "implemented")))
+    gh.responses[("issue", "view")] = issue_json("ready-to-spec")
+    gh.responses[("pr", "list")] = pr_json(head="fix/7-code-not-spec")
+    with pytest.raises(SystemExit, match="spec/7"):
+        cli.cmd_apply(7, write(tmp_path, report("spec", "ready_for_review")))
 
 
-def test_apply_comments_then_swaps_label_and_is_idempotent_on_session_id(gh, tmp_path):
+def test_apply_triage_adds_triaged_and_leaves_the_choice_to_a_human(gh, tmp_path, capsys):
+    """Triage recommends; only a human applies a ready label. needs_info is the one verdict that
+    sets a state, because the reporter has to act before anyone else can."""
+    gh.responses[("issue", "view")] = issue_json()
+    cli.cmd_apply(7, write(tmp_path, report()))
+    [(edit, _)] = gh.argv("issue", "edit")
+    assert edit == ("issue", "edit", "7", "--add-label", "factory:triaged")
+    assert capsys.readouterr().out.rstrip().endswith("next: none")
+    gh.calls.clear()
+    cli.cmd_apply(7, write(tmp_path, report(verdict="needs_info", session_id="s2")))
+    [(edit, _)] = gh.argv("issue", "edit")
+    assert edit[3:] == ("--add-label", "factory:triaged", "--add-label", "factory:needs-info")
+
+
+def test_apply_implemented_moves_to_in_review_and_dispatches_review(gh, tmp_path, capsys):
+    """Implement's push fires no event (GITHUB_TOKEN), so the dispatch line is how review starts;
+    the superseded state label goes away in the same edit."""
+    gh.responses[("issue", "view")] = issue_json("ready-to-implement")
+    gh.responses[("pr", "list")] = pr_json()
+    cli.cmd_apply(7, write(tmp_path, report("implement", "implemented")))
+    [(edit, _)] = gh.argv("issue", "edit")
+    assert edit[3:] == ("--add-label", "factory:in-review", "--remove-label",
+                        "factory:ready-to-implement")
+    out = capsys.readouterr().out
+    assert "https://x/pr/12" in out and out.rstrip().endswith("next: review")
+
+
+def test_apply_comments_once_per_session_but_always_fixes_the_label(gh, tmp_path):
     """A retried apply (Actions re-run, flaky network) must not duplicate the run comment, but
     must still leave the label correct."""
-    gh.responses[("issue", "view")] = issue_json("triage")
-    gh.responses[("pr", "list")] = "[]"
-    gh.responses[("api", "--paginate", "--slurp")] = "[[]]"
-    cli.cmd_apply(7, write(tmp_path, report()))
-    [(comment_args, _)] = gh.argv("issue", "comment")
-    assert cli.RUN_MARK in comment_args[-1]
-    [(edit_args, _)] = gh.argv("issue", "edit")
-    assert edit_args == ("issue", "edit", "7", "--add-label", "factory:implement",
-                         "--remove-label", "factory:triage")
+    gh.responses[("issue", "view")] = issue_json("ready-to-implement")
+    gh.responses[("pr", "list")] = pr_json()
+    r = report("implement", "implemented")
+    cli.cmd_apply(7, write(tmp_path, r))
+    assert len(gh.argv("issue", "comment")) == 1
     gh.calls.clear()
-    existing = json.dumps([[{"body": cli.run_comment(report())}]])
-    gh.responses[("api", "--paginate", "--slurp")] = existing
-    cli.cmd_apply(7, write(tmp_path, report()))
+    gh.responses[("api", "--paginate", "--slurp", "repos/o/r/issues/7/comments")] = json.dumps(
+        [[{"body": cli.run_comment(r)}]])
+    cli.cmd_apply(7, write(tmp_path, r))
     assert not gh.argv("issue", "comment") and gh.argv("issue", "edit")
 
 
-def _pr(number, state, created, head="feature/7-a"):
-    return {"number": number, "state": state, "createdAt": f"{created}T00:00:00Z",
-            "headRefName": head}
-
-
-def test_item_pr_prefers_open_then_newest(gh):
-    """An item whose branch has had several PRs must resolve to the live one, then the most
-    recent closed one, never the oldest."""
-    gh.responses[("pr", "list")] = json.dumps([
-        _pr(1, "CLOSED", "2026-01-01"), _pr(3, "CLOSED", "2026-03-01"),
-        _pr(2, "OPEN", "2026-02-01")])
-    assert cli._item_pr(7)["number"] == 2
-    gh.responses[("pr", "list")] = json.dumps([
-        _pr(1, "CLOSED", "2026-01-01"), _pr(3, "MERGED", "2026-03-01")])
-    assert cli._item_pr(7)["number"] == 3
-
-
-def test_item_pr_ignores_other_items_the_search_matches(gh):
-    """GitHub's `head:` search matches by token, so #7's query can return #70's PR; only branches
-    literally named feature/7-* belong to the item."""
-    gh.responses[("pr", "list")] = json.dumps([
-        _pr(9, "OPEN", "2026-03-01", head="feature/70-x"), _pr(4, "MERGED", "2026-01-01")])
-    assert cli._item_pr(7)["number"] == 4
-
-
-def test_apply_review_resolves_threads_and_skips_the_post_on_a_retry(gh, tmp_path):
-    """The review's thread resolutions ride the report so the station never needs a write token,
-    and a retried apply must not post the review twice."""
-    gh.responses[("issue", "view")] = issue_json("review")
-    gh.responses[("pr", "list")] = pr_json()
-    gh.responses[("api", "--paginate", "--slurp")] = "[[]]"
-    r = report("review", "approve", body="ok", comments=[], resolve=["PRRT_1"])
+def test_apply_review_posts_the_review_before_the_label_and_resolves_threads(gh, tmp_path, capsys):
+    """The review must land on the PR first: if the label moved and the post failed, implement
+    would run with no worklist. Thread resolutions ride the report so the station needs no write
+    token."""
+    gh.responses[("issue", "view")] = issue_json("in-review")
+    gh.responses[("pr", "list")] = pr_json(oid="b" * 40)
+    r = report("review", "request_changes", body="## TL;DR\nx", head="b" * 40, resolve=["PRRT_1"],
+               comments=[{"path": "a.py", "line": 3, "side": "RIGHT", "body": "⚠️ [IMPORTANT] x"}])
     cli.cmd_apply(7, write(tmp_path, r))
-    assert len(gh.argv("api", "--method", "POST")) == 1
+    [(post, payload)] = gh.argv("api", "--method", "POST")
+    sent = json.loads(payload)
+    assert sent["event"] == "REQUEST_CHANGES" and sent["commit_id"] == "b" * 40
+    assert sent["body"].startswith("## TL;DR\nx\n\n<sub>factory review · [run](https://x/run/1)")
+    assert cli.parse_marks(sent["body"], cli.REVIEW_MARK)[0]["head"] == "b" * 40
+    assert sent["comments"][0]["path"] == "a.py"
+    assert cli.REVIEW_MARK not in sent["comments"][0]["body"]
     [(mut, _)] = gh.argv("api", "graphql")
     assert "resolveReviewThread" in mut[3] and mut[-1] == "id=PRRT_1"
-    gh.calls.clear()
-    gh.responses[("api", "--paginate", "--slurp")] = json.dumps([[{"body": cli.run_comment(r)}]])
-    cli.cmd_apply(7, write(tmp_path, r))
-    assert not gh.argv("api", "--method", "POST") and gh.argv("issue", "edit")
+    order = [a[:2] for a, _ in gh.calls]
+    assert order.index(("api", "--method")) < order.index(("issue", "edit"))
+    assert capsys.readouterr().out.rstrip().endswith("next: implement")
 
 
-def test_apply_files_followups_as_plain_issues(gh, tmp_path):
-    """An out-of-scope defect a station finds must land somewhere durable; a plain, unlabeled
-    issue leaves the decision to run the factory on it with a human."""
-    gh.responses[("issue", "view")] = issue_json("triage")
-    gh.responses[("pr", "list")] = "[]"
-    gh.responses[("api", "--paginate", "--slurp")] = "[[]]"
+def test_apply_review_of_a_stale_head_redispatches_review(gh, tmp_path, capsys):
+    """A human pushed while the review ran, and that push fires no run: the stale review is
+    neither posted nor applied, and review is dispatched again against the new head."""
+    gh.responses[("issue", "view")] = issue_json("in-review")
+    gh.responses[("pr", "list")] = pr_json(oid="c" * 40)
+    cli.cmd_apply(7, write(tmp_path, report("review", "approve", head="a" * 40)))
+    assert not gh.argv("api", "--method", "POST") and not gh.argv("issue", "edit")
+    assert capsys.readouterr().out.rstrip().endswith("next: review")
+
+
+def test_apply_refuses_implemented_on_a_draft_pr(gh, tmp_path):
+    """Review never runs on drafts, so accepting `implemented` for one would park the item."""
+    gh.responses[("issue", "view")] = issue_json("ready-to-implement")
+    gh.responses[("pr", "list")] = json.dumps([{"number": 12, "url": "u", "headRefName": "fix/7-a",
+                                                "headRefOid": "a" * 40, "isDraft": True}])
+    with pytest.raises(SystemExit, match="draft"):
+        cli.cmd_apply(7, write(tmp_path, report("implement", "implemented")))
+
+
+def test_apply_triage_needs_info_supersedes_a_stale_state(gh, tmp_path):
+    """A reopened issue can still carry an old state; needs-info replaces it so at most one
+    state label remains."""
+    gh.responses[("issue", "view")] = issue_json("in-review")
+    cli.cmd_apply(7, write(tmp_path, report(verdict="needs_info")))
+    [(edit, _)] = gh.argv("issue", "edit")
+    assert edit[3:] == ("--add-label", "factory:triaged", "--add-label", "factory:needs-info",
+                        "--remove-label", "factory:in-review")
+
+
+def test_apply_files_followups_as_plain_issues_and_names_them_for_triage(gh, tmp_path, capsys):
+    """An out-of-scope defect a station finds must land somewhere durable. The issue is opened
+    with the workflow's token, which fires no event, so apply names its number for the workflow
+    to dispatch triage."""
+    gh.responses[("issue", "view")] = issue_json()
+    gh.responses[("issue", "create")] = "https://github.com/o/r/issues/19\n"
     r = report(followups=[{"title": "README invocation fails", "body": "no [project.scripts]"}])
     cli.cmd_apply(7, write(tmp_path, r))
     [(create, _)] = gh.argv("issue", "create")
-    assert create[3] == "README invocation fails" and "triage run on #7" in create[5]
+    assert create[3] == "README invocation fails" and "working on #7" in create[5]
+    order = [a[:2] for a, _ in gh.calls]
+    assert order.index(("issue", "create")) < order.index(("issue", "comment"))
+    assert "followup: 19\n" in capsys.readouterr().out
 
 
 def test_post_review_skips_a_reviewed_head_and_survives_a_failed_resolve(gh, tmp_path):
     """A retry after a partial apply (review posted, comment not yet) must not post the review
     again, and a token that cannot resolve threads must not fail the whole apply."""
-    gh.responses[("issue", "view")] = issue_json("review")
+    gh.responses[("issue", "view")] = issue_json("in-review")
     gh.responses[("pr", "list")] = pr_json()
-    gh.responses[("api", "--paginate", "--slurp", "repos/o/r/pulls/12/reviews")] = json.dumps(
-        [[{"body": f"Reviewed at {'a' * 12}\n\nold\n\n{cli.REVIEW_MARK}"}]])
-    gh.responses[("api", "--paginate", "--slurp", "repos/o/r/issues/7/comments")] = "[[]]"
+    gh.responses[("api", "--paginate", "--slurp", "repos/o/r/pulls/12/reviews")] = json.dumps([[
+        {"user": {"type": "Bot"}, "submitted_at": "2026-01-01T00:00:00Z",
+         "body": f'{cli.REVIEW_MARK}{{"verdict":"approve","head":"{"a" * 40}"}} -->'}]])
     gh.responses[("api", "graphql")] = subprocess.CalledProcessError(1, ["gh"], "", "denied")
-    r = report("review", "approve", body="ok", comments=[], resolve=["PRRT_1"])
+    r = report("review", "approve", resolve=["PRRT_1"])
     cli.cmd_apply(7, write(tmp_path, r))
     assert not gh.argv("api", "--method", "POST")
     assert gh.argv("issue", "comment") and gh.argv("issue", "edit")
 
 
-def test_apply_review_posts_pr_review_before_moving_the_label(gh, tmp_path):
-    """The review must land on the PR first: if the label moved and the post failed, implement
-    would run with no worklist."""
-    gh.responses[("issue", "view")] = issue_json("review")
-    gh.responses[("pr", "list")] = pr_json()
-    gh.responses[("api", "--paginate", "--slurp")] = "[[]]"
-    r = report("review", "request_changes", body="Findings", comments=[
-        {"path": "a.py", "line": 3, "side": "RIGHT", "body": "⚠️ [IMPORTANT] x"}])
-    r["head"] = "b" * 40
-    cli.cmd_apply(7, write(tmp_path, r))
-    [(post, payload)] = gh.argv("api", "--method", "POST")
-    sent = json.loads(payload)
-    assert sent["event"] == "REQUEST_CHANGES" and sent["commit_id"] == "b" * 40
-    assert sent["body"].startswith("Reviewed at bbbbbbbbbbbb") and cli.REVIEW_MARK in sent["body"]
-    assert sent["comments"][0]["path"] == "a.py" and cli.REVIEW_MARK in sent["comments"][0]["body"]
-    order = [a[:2] for a, _ in gh.calls]
-    assert order.index(("api", "--method")) < order.index(("issue", "edit"))
-
-
-def test_post_review_does_not_duplicate_the_sha_line_or_marker(gh):
-    """A station that copies the Reviewed-at line and marker into its body (the skill documents
-    them) must not produce a review with two of each."""
-    posted = []
-    gh.responses[("api", "--method", "POST")] = lambda a, i: posted.append(json.loads(i)) or ""
-    pr = json.loads(pr_json())[0]
-    body = "Reviewed at abcdef123456\n\nFindings\n\n" + cli.REVIEW_MARK
-    cli._post_review(pr, report("review", "approve", body=body, comments=[
-        {"path": "a.py", "line": 1, "side": "RIGHT", "body": "x\n" + cli.REVIEW_MARK}]))
-    assert posted[0]["body"] == f"Reviewed at {'a' * 12}\n\nFindings\n\n{cli.REVIEW_MARK}"
-    assert posted[0]["comments"][0]["body"] == f"x\n\n{cli.REVIEW_MARK}"
-
-
 def test_post_review_degrades_anchor_then_event_but_never_drops_findings(gh):
-    """GitHub rejects bad inline anchors (422) and self-approval; both fall back and keep the
-    findings in the body."""
+    """GitHub rejects bad inline anchors (422) and reviews of the poster's own PR; both fall back
+    and keep the findings in the body."""
     attempts = []
 
     def post(args, payload):
@@ -313,74 +388,47 @@ def test_post_review_degrades_anchor_then_event_but_never_drops_findings(gh):
     assert attempts[2]["event"] == "COMMENT"
 
 
-# --------------------------------------------------------------------------- gate
+# --------------------------------------------------------------------------- labels, metrics
 
 
-def test_gate_approve_moves_spec_review_to_implement_with_a_gate_comment(gh):
-    """A human decision is recorded as a comment (the steer text retro reads) and a label move."""
-    gh.responses[("issue", "view")] = issue_json("spec-review")
-    cli.cmd_gate(7, "approve", "looks right")
-    [(c, _)] = gh.argv("issue", "comment")
-    assert "looks right" in c[-1] and cli.parse_marks(c[-1], cli.GATE_MARK)[0]["to"] == "implement"
-    assert gh.argv("issue", "edit")[0][0][3:5] == ("--add-label", "factory:implement")
-
-
-def test_gate_refuses_approve_at_ship_review_and_moves_from_non_gate_states(gh):
-    """Merging is the ship approval, so `approve` at ship-review is a mistake to name; `done`,
-    `park`, and `retriage` are moves a human can make from any active state."""
-    gh.responses[("issue", "view")] = issue_json("ship-review")
-    with pytest.raises(SystemExit, match="merge the PR"):
-        cli.cmd_gate(7, "approve", None)
-    gh.responses[("issue", "view")] = issue_json("implement")
-    with pytest.raises(SystemExit, match="not a decision"):
-        cli.cmd_gate(7, "approve", None)
-    cli.cmd_gate(7, "done", None)
-    gh.responses[("issue", "view")] = issue_json("needs-info")
-    cli.cmd_gate(7, "retriage", None)
-    gh.responses[("issue", "view")] = issue_json("implement")
-    cli.cmd_gate(7, "retriage", "this needs a spec: the JSON shape is a contract")
-    assert [a[0][4] for a in gh.argv("issue", "edit")] == [
-        "factory:done", "factory:triage", "factory:triage"]
-
-
-def test_gate_refuses_an_issue_with_two_factory_labels(gh):
-    """Two states means the record is ambiguous; a human fixes the labels before deciding."""
-    gh.responses[("issue", "view")] = issue_json("spec-review", "implement")
-    with pytest.raises(SystemExit, match="carries"):
-        cli.cmd_gate(7, "approve", None)
-
-
-# --------------------------------------------------------------------------- diff, metrics
-
-
-def test_annotate_marks_old_new_and_context_lines():
-    """Inline review comments need exact side/line pairs; the markers are what a reviewer cites."""
-    patch = "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,2 +1,2 @@\n ctx\n-old\n+new\n"
-    assert cli.annotate(patch).splitlines()[3:] == [
-        "@@ -1,2 +1,2 @@", "[OLD:1,NEW:1] ctx", "[OLD:2] old", "[NEW:2] new"]
+def test_labels_creates_the_set_and_removes_stale_factory_labels(gh):
+    """`factory labels` is the whole label migration: the eight current labels with their colors,
+    and any other factory:* label gone."""
+    gh.responses[("label", "list")] = json.dumps(
+        [{"name": "factory:triage"}, {"name": "factory:triaged"}, {"name": "bug"}])
+    cli.cmd_labels()
+    created = [a[2] for a, _ in gh.argv("label", "create")]
+    assert created == [f"factory:{name}" for name in cli.LABELS]
+    assert gh.argv("label", "create")[0][0][4] == "5319E7"
+    assert [a[2] for a, _ in gh.argv("label", "delete")] == ["factory:triage"]
 
 
 def test_item_metrics_and_aggregate_from_a_fixture_record():
     """Cost per shipped item, cycle time, autonomy, and steers are all derived from the record;
     pin the arithmetic."""
+    issue = {"number": 7, "state": "CLOSED", "stateReason": "COMPLETED",
+             "createdAt": "2026-01-01T00:00:00Z", "labels": [{"name": "factory:triaged"}]}
     comments = [
         {"body": cli.run_comment(report(cost_usd=0.5))},
         {"body": cli.run_comment(report("implement", "implemented", cost_usd=2.0,
                                         session_id="s2"))},
-        {"body": f"{cli.GATE_MARK}" + json.dumps({"decision": "request_changes"}) + " -->"},
-        {"body": f"{cli.GATE_MARK}" + json.dumps({"decision": "retriage"}) + " -->"},
-        {"body": f"{cli.GATE_MARK}" + json.dumps({"decision": "approve"}) + " -->"},
     ]
-    timeline = [{"event": "labeled", "label": {"name": "factory:triage"},
-                 "created_at": "2026-01-01T00:00:00Z"}]
-    pr = {"mergedAt": "2026-01-01T12:00:00Z"}
-    commits = [{"commit": {"author": {"email": cli.BOT_EMAIL}}},
-               {"commit": {"author": {"email": "human@x"}}}]
-    shipped = cli.item_metrics(7, comments, timeline, pr, commits)
-    assert shipped == {"issue": 7, "pr": None, "runs": 2, "cost_usd": 2.5, "shipped": True,
-                       "cycle_hours": 12.0, "steers": 3, "autonomous": False}
-    stuck = cli.item_metrics(8, [{"body": cli.run_comment(report(cost_usd=1.0))}], [], None, [])
+    prs = [{"number": 3, "headRefName": "spec/7-x", "mergedAt": "2026-01-01T06:00:00Z"},
+           {"number": 4, "headRefName": "feat/7-x", "mergedAt": "2026-01-01T12:00:00Z"}]
+    reviews = [review("CHANGES_REQUESTED", False, "2026-01-01T07:00:00Z"),
+               review("COMMENTED", True, "2026-01-01T08:00:00Z", "request_changes"),
+               review("APPROVED", False, "2026-01-01T11:00:00Z")]
+    commits = [commit(cli.BOT_EMAIL, "2026-01-01T09:00:00Z"),
+               commit("human@x", "2026-01-01T10:00:00Z")]
+    shipped = cli.item_metrics(issue, comments, prs, reviews, commits)
+    assert shipped == {"issue": 7, "prs": [3, 4], "runs": 2, "cost_usd": 2.5, "shipped": True,
+                       "parked": False, "cycle_hours": 12.0, "steers": 2, "autonomous": False,
+                       "needs_human": False}
+    stuck = cli.item_metrics(
+        {"number": 8, "state": "OPEN", "stateReason": None, "createdAt": "2026-01-01T00:00:00Z"},
+        [{"body": cli.run_comment(report("implement", "blocked", cost_usd=1.0))}], [], [], [])
+    assert stuck["needs_human"] and not stuck["shipped"]
     agg = cli.aggregate([shipped, stuck])
     assert agg["cost_per_shipped_usd"] == 3.5 and agg["total_cost_usd"] == 3.5
     assert agg["median_cycle_hours"] == 12.0 and agg["autonomy_pct"] == 0
-    assert agg["steers_per_shipped"] == 3.0 and agg["runs"] == 3
+    assert agg["steers_per_shipped"] == 2.0 and agg["runs"] == 3 and agg["needs_human"] == 1
