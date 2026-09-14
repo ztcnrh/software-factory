@@ -17,7 +17,7 @@ The spec content comes from two skills in this repo; read the file before writin
 ## 1. Read the packet
 
 - `issue.md`: the issue with every comment and who wrote each.
-- `review.md`, present on a revision: the human's review of your spec PR, every thread on it with its replies and the comment id to reply to, and the PR's conversation comments. Each open thread and each human comment is a point to address in the files; do not rewrite wholesale.
+- `pr.md`, present on a revision: your spec PR with the human's review, every thread on it with its replies and the comment id to reply to, and the conversation comments. Each open thread and each human comment is a point to address in the files; do not rewrite wholesale.
 
 Then inspect the code the change will touch: existing patterns, neighboring features, conventions, validation commands. Never guess about a system you can read. When a survey would flood your context, delegate it per `.claude/skills/research/SKILL.md`.
 
@@ -40,7 +40,7 @@ Decide what is decidable. A product call you can frame but not settle goes in th
 Commit the spec files with a clear message and push: `git push -u origin HEAD`.
 
 - **No PR yet:** `gh pr create --base <default branch> --title "spec(<area>): <title> (#<n>)" --body-file <file>`. The body: first line `Spec for #<n>` (never `Resolves`; the code that resolves the issue is not here). Then `## TL;DR`, what the plan decides, at most three sentences. Then `## You decide`, the questions the reviewer must answer, at most three, one sentence each, or "Nothing open." Then a `<details>` block with the spec paths and anything else worth saying.
-- **PR exists:** push to it, then update the body the same way (`gh pr edit <pr> --body-file <file>`). Reply in each thread you addressed with what changed (`gh api -X POST repos/<owner/repo>/pulls/<pr>/comments/<comment id>/replies -f body='<text>'`; `review.md` names the id), and answer a human's conversation comment with one conversation reply (`gh pr comment <pr> --body "<text>"`). Resolving threads is the human's.
+- **PR exists:** push to it, then update the body the same way (`gh pr edit <pr> --body-file <file>`). Reply in each thread you addressed with what changed (`gh api -X POST repos/<owner/repo>/pulls/<pr>/comments/<comment id>/replies -f body='<text>'`; `pr.md` names the id), and answer a human's conversation comment with one conversation reply (`gh pr comment <pr> --body "<text>"`). Resolving threads is the human's.
 
 Verify `gh pr view <pr> --json url` returns a real URL before reporting.
 

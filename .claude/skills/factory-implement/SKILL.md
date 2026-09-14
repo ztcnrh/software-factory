@@ -13,7 +13,7 @@ Implement the issue named in the prompt and leave a pull request ready for revie
 
 - `issue.md`: the issue with every comment and who wrote each. Newer maintainer comments can supersede older text.
 - `specs/<n>-*/PRODUCT.md` and `TECH.md` in the checkout, when they exist. Read them completely before touching code; the numbered Behavior rules are the acceptance criteria. An absent `TECH.md` is normal. When there is no spec folder, the issue thread is the contract.
-- `review.md`, present once the PR exists: every review on it, every thread with its replies and whether it is resolved, and the PR's conversation. The open threads and the human comments are your worklist. Every `🚨 [CRITICAL]`, `⚠️ [IMPORTANT]`, and `💡 [SUGGESTION]` needs an answer; `🧹 [NIT]` items are yours to take or leave. A human's conversation comment (a style call, a scope worry, a "while you're in there") has the same standing as a review.
+- `pr.md`, present once the PR exists: every review on it, every thread with its replies and whether it is resolved, and the PR's conversation. The open threads and the human comments are your worklist. Every `🚨 [CRITICAL]`, `⚠️ [IMPORTANT]`, and `💡 [SUGGESTION]` needs an answer; `🧹 [NIT]` items are yours to take or leave. A human's conversation comment (a style call, a scope worry, a "while you're in there") has the same standing as a review.
 
 If the sources conflict, or the change turns out much larger or more ambiguous than the spec assumes, report `blocked` with the specific conflict instead of guessing which source wins.
 
@@ -43,7 +43,7 @@ When a send-back names a specific spec line or rule, re-run its counterexample a
 Commit with a conventional message (`<type>(<scope>): <summary>`) and `git push -u origin HEAD`. Unpushed work does not exist to the reviewer.
 
 - **No PR yet:** `gh pr create --base <default branch> --title "<type>(<scope>): <summary> (#<n>)" --body-file <file>`.
-- **Loop-back:** push, then reply in every open thread you answered (`gh api -X POST repos/<owner/repo>/pulls/<pr>/comments/<comment id>/replies -f body='<text>'`; `review.md` names the id) with what you changed (name the commit) or why you declined. A human's conversation comment gets one reply in the conversation (`gh pr comment <pr> --body "<text>"`). Declining is legitimate but explicit; a silent skip earns another send-back. Never resolve a thread: whoever raised it closes it. Refresh the body when the change moved (`gh pr edit <pr> --body-file <file>`).
+- **Loop-back:** push, then reply in every open thread you answered (`gh api -X POST repos/<owner/repo>/pulls/<pr>/comments/<comment id>/replies -f body='<text>'`; `pr.md` names the id) with what you changed (name the commit) or why you declined. A human's conversation comment gets one reply in the conversation (`gh pr comment <pr> --body "<text>"`). Declining is legitimate but explicit; a silent skip earns another send-back. Never resolve a thread: whoever raised it closes it. Refresh the body when the change moved (`gh pr edit <pr> --body-file <file>`).
 
 The PR body: first line `Resolves #<n>`. `## TL;DR`, at most three sentences. `## What changed`, at most six bullets. `## How to check`, the commands you ran and their results, one line each. A `<details>` block for the rest: spec paths, latitude calls, known limits. Verify `gh pr view <pr> --json url` returns a real URL before reporting.
 

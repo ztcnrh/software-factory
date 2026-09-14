@@ -12,9 +12,9 @@ Review the pull request named in the prompt. The checkout is the PR branch at he
 ## Inputs
 
 - `issue.md`: what was asked, with the thread.
-- `pr.md`: title, description, the human reviews and the conversation comments. A bar a human states there binds like the spec; an unanswered human comment is `⚠️ [IMPORTANT]` in `body`.
+- `pr.md`: title, description, every review, every thread with its replies and resolved state, and the conversation comments. A bar a human states there binds like the spec; an unanswered human comment is `⚠️ [IMPORTANT]` in `body`.
 - `diff.md`: the annotated diff, and the only source of inline comment locations.
-- `followup.md`: either "first review", or the last factory review, every thread on the PR with its replies and resolved state, and the changes since that review.
+- `followup.md`: either "first review", or the last factory review and the changes since it.
 - `specs/<n>-*/PRODUCT.md` (and `TECH.md`) in the checkout, when they exist: the numbered Behavior rules are the acceptance criteria. Cite them by number.
 
 ## Scope
@@ -72,7 +72,7 @@ The first three tags earn `request_changes`; only nits ride along. If every find
 
 `body` has exactly this shape. `## TL;DR`: one line, the decision and the biggest reason. `## Concerns`: the actionable findings by severity, at most five bullets, each starting with its tag and naming a `file:line`, at most two sentences, or one line saying there are none. `## Verdict`: `Found: X critical, Y important, Z suggestions · Request changes` or `· Approve`. When a spec exists, then `<details><summary>Rules</summary>` with one line per numbered rule: holds and shown, holds but not exercised, or missing. Nothing else: no change summaries, no praise, no restating the diff, no narration of what you ran.
 
-`summary` is the one or two sentence headline the human reads on the issue. `resolve` lists the thread ids from `followup.md` you verified as fixed.
+`summary` is the one or two sentence headline the human reads on the issue. `resolve` lists the thread ids from `pr.md` you verified as fixed.
 
 ## Guardrails
 
