@@ -91,8 +91,8 @@ NEXT_STEP = {
     ("review", "request_changes"): "The factory is addressing the review.",
 }
 CAPPED_STEP = (
-    f"{MAX_SENDBACKS} review rounds without a human. Take a look at the PR: a push or a review "
-    "from you resumes the loop."
+    f"{MAX_SENDBACKS} review rounds without a human. Take a look at the PR: merge it if it is "
+    "good, or request changes and the factory picks it up again."
 )
 
 BOT_NAME, BOT_EMAIL = "factory", "factory@users.noreply.github.com"

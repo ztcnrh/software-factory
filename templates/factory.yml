@@ -10,8 +10,10 @@ name: factory
 on:
   issues:
     types: [opened, reopened, labeled, unlabeled]
+  # Not opened or synchronize: a PR the factory opens or pushes to with GITHUB_TOKEN would leave
+  # a run GitHub holds for approval and never executes. Review starts from the apply job instead.
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, closed]
+    types: [reopened, ready_for_review, closed]
   pull_request_review:
     types: [submitted]
   workflow_dispatch:

@@ -46,7 +46,7 @@ stateDiagram-v2
   in_review --> ship_review: review approves
   ship_review --> in_review: human requests changes → implement
   ship_review --> [*]: human merges; Resolves #n closes the issue
-  needs_human --> in_review: human pushes or reviews the PR
+  needs_human --> in_review: human requests changes on the PR
 ```
 
 `TRANSITIONS` in `factory/cli.py` is this diagram as data: which state label each station verdict sets. `DISPATCH` says which verdicts start another station. `RUNS_AT` says at which states a station's report is accepted; a report from anywhere else is stale or misrouted and is refused.
@@ -60,13 +60,13 @@ The adopter's caller workflow (`templates/factory.yml`) forwards these to the re
 | `issues` opened, reopened | always | triage |
 | `issues` labeled | `factory:ready-to-spec` / `factory:ready-to-implement`, by a human | spec / implement |
 | `issues` unlabeled | `factory:needs-info`, by a human | triage |
-| `pull_request` opened, synchronize, reopened, ready_for_review | head `<type>/<n>-*`, not `spec/`, not draft | review |
+| `pull_request` reopened, ready_for_review | head `<type>/<n>-*`, not `spec/`, not draft | review |
 | `pull_request` closed | merged, head `spec/<n>-*` | labels `ready-to-implement`, then implement |
 | `pull_request_review` submitted | changes requested, by an owner, member, or collaborator | spec or implement, by the head branch |
 | `workflow_dispatch` | `station`, `issue` | that station |
 | `schedule` weekly, or `workflow_dispatch` `retro` | | retro |
 
-Everything the factory writes uses `GITHUB_TOKEN`, which fires no events. So `factory apply` ends with `next: <station>` or `next: none`, and the workflow dispatches itself for the next station. Human actions fire events on their own.
+Everything the factory writes uses `GITHUB_TOKEN`, which fires no events that run (a PR it opens or pushes to leaves a `pull_request` run GitHub holds for approval, which is why the caller does not subscribe to `opened` or `synchronize`). So `factory apply` ends with `next: <station>` or `next: none`, and the workflow dispatches itself for the next station. Human actions fire events on their own.
 
 ## The four jobs
 
@@ -120,7 +120,7 @@ The headline and the next-step line come from tables in `cli.py`; the two lines 
 
 ## The attempt cap
 
-`factory apply` counts the factory's consecutive send-backs on a PR since the last human review or human commit. On the fourth, the review is still posted, the issue moves to `needs-human`, the comment says so, and nothing is dispatched. A human's push or review on the PR fires a review run, which resets the count.
+`factory apply` counts the factory's consecutive send-backs on a PR since the last human review or human commit. On the fourth, the review is still posted, the issue moves to `needs-human`, the comment says so, and nothing is dispatched. A human's Request-changes review sends the PR back to implement and resets the count; a merge ships it.
 
 ## Metrics
 
