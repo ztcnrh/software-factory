@@ -46,4 +46,6 @@ jobs:
       ref: main # the same ref as the line above
       station: ${{ inputs.station }}
       issue: ${{ inputs.issue }}
-    secrets: inherit
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

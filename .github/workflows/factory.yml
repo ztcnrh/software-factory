@@ -28,6 +28,11 @@ on:
         description: the toolkit ref to check out; the same one the caller's `uses:` line names
         type: string
         default: main
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
 
 env:
   GH_TOKEN: ${{ github.token }}
