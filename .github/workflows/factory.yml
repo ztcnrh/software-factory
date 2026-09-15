@@ -1,7 +1,11 @@
-# The software factory, as one reusable workflow. An adopter's caller (templates/factory.yml)
-# forwards its events here. Four jobs: route decides which station runs and on what; context
-# packages what the station reads; run-read / run-write execute the station with the least
-# write access it needs; apply records the report and dispatches the next station.
+# The software factory, as one reusable workflow. A product repository's caller
+# (templates/factory.yml) forwards its events here. Four jobs: route decides which station runs
+# and on what; context packages what the station reads; run-read / run-write execute the station
+# with the least write access it needs; apply records the report and dispatches the next station.
+#
+# The stations' skills come from the factory definition: the skills/ directory of the repository
+# named by `definition`, or of this one when it is unset. Nothing in the product repository's
+# .claude/ is read for them.
 #
 # Every label, comment, review, and push the factory makes uses GITHUB_TOKEN, which fires no
 # events, so the line advances through `gh workflow run` from apply. Human actions fire events
@@ -28,15 +32,33 @@ on:
         description: the toolkit ref to check out; the same one the caller's `uses:` line names
         type: string
         default: main
+      definition:
+        description: >-
+          the factory definition, owner/name: the repository whose skills/ the stations run.
+          Empty runs the toolkit's own skills.
+        type: string
+        default: ""
+      definition_ref:
+        description: the definition ref to check out; ignored when `definition` is empty
+        type: string
+        default: main
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         required: false
       ANTHROPIC_API_KEY:
         required: false
+      FACTORY_TOKEN:
+        description: >-
+          a token with contents and pull-requests write on the definition repository, for retro to
+          propose skill edits there; also what reads a private definition. Not needed when the
+          definition is this repository or the public toolkit.
+        required: false
 
 env:
   GH_TOKEN: ${{ github.token }}
   GH_REPO: ${{ github.repository }}
+  DEFINITION: ${{ inputs.definition || inputs.toolkit }}
+  DEFINITION_REF: ${{ inputs.definition && inputs.definition_ref || inputs.ref }}
 
 jobs:
   route:
@@ -228,20 +250,32 @@ jobs:
         with:
           ref: ${{ needs.route.outputs.ref }}
           fetch-depth: 0
-      # The station's instructions come from the default branch, never from the branch it is
-      # working on: a PR that edited .claude/ must not be able to steer its own review or build.
-      - name: Trust only the default branch's skills
+      # The product repository's own .claude/ (settings, hooks, its skills) comes from the default
+      # branch, never from the branch under review; the factory's skills come from the definition
+      # and are not read from this checkout at all.
+      - name: Trust only the default branch's .claude/
         env:
           BASE: ${{ needs.route.outputs.base }}
         run: |
           if [ "$(git rev-parse --abbrev-ref HEAD)" != "$BASE" ]; then
-            rm -rf .claude && git checkout -q "origin/$BASE" -- .claude
+            rm -rf .claude
+            if git cat-file -e "origin/$BASE:.claude" 2>/dev/null; then
+              git checkout -q "origin/$BASE" -- .claude
+            fi
           fi
       - uses: actions/checkout@v7
         with:
           repository: ${{ inputs.toolkit }}
           ref: ${{ inputs.ref }}
           path: .factory-toolkit
+      # A read-only station gets the definition's files and none of the token that fetched them.
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ env.DEFINITION }}
+          ref: ${{ env.DEFINITION_REF }}
+          path: .factory-definition
+          token: ${{ secrets.FACTORY_TOKEN || github.token }}
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
@@ -262,9 +296,11 @@ jobs:
           API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           mv .factory-toolkit "$RUNNER_TEMP/toolkit"
+          mv .factory-definition "$RUNNER_TEMP/definition"
           curl -fsSL https://claude.ai/install.sh | bash
           export PATH="$HOME/.local/bin:$PATH"
-          TOOLKIT=$RUNNER_TEMP/toolkit PACKET=$RUNNER_TEMP/context OUT=$RUNNER_TEMP/run \
+          TOOLKIT=$RUNNER_TEMP/toolkit DEFINITION=$RUNNER_TEMP/definition DEFINITION_REPO=$DEFINITION \
+            PACKET=$RUNNER_TEMP/context OUT=$RUNNER_TEMP/run \
             bash "$RUNNER_TEMP/toolkit/.github/scripts/run-station.sh"
       - uses: actions/upload-artifact@v5
         if: always()
@@ -289,20 +325,32 @@ jobs:
         with:
           ref: ${{ needs.route.outputs.ref }}
           fetch-depth: 0
-      # The station's instructions come from the default branch, never from the branch it is
-      # working on: a PR that edited .claude/ must not be able to steer its own review or build.
-      - name: Trust only the default branch's skills
+      # The product repository's own .claude/ (settings, hooks, its skills) comes from the default
+      # branch, never from the branch under review; the factory's skills come from the definition
+      # and are not read from this checkout at all.
+      - name: Trust only the default branch's .claude/
         env:
           BASE: ${{ needs.route.outputs.base }}
         run: |
           if [ "$(git rev-parse --abbrev-ref HEAD)" != "$BASE" ]; then
-            rm -rf .claude && git checkout -q "origin/$BASE" -- .claude
+            rm -rf .claude
+            if git cat-file -e "origin/$BASE:.claude" 2>/dev/null; then
+              git checkout -q "origin/$BASE" -- .claude
+            fi
           fi
       - uses: actions/checkout@v7
         with:
           repository: ${{ inputs.toolkit }}
           ref: ${{ inputs.ref }}
           path: .factory-toolkit
+      # Only retro writes to the definition, so only retro keeps the token that can push there.
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ env.DEFINITION }}
+          ref: ${{ env.DEFINITION_REF }}
+          path: .factory-definition
+          token: ${{ secrets.FACTORY_TOKEN || github.token }}
+          persist-credentials: ${{ needs.route.outputs.station == 'retro' }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
@@ -321,11 +369,14 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          FACTORY_TOKEN: ${{ needs.route.outputs.station == 'retro' && secrets.FACTORY_TOKEN || '' }}
         run: |
           mv .factory-toolkit "$RUNNER_TEMP/toolkit"
+          mv .factory-definition "$RUNNER_TEMP/definition"
           curl -fsSL https://claude.ai/install.sh | bash
           export PATH="$HOME/.local/bin:$PATH"
-          TOOLKIT=$RUNNER_TEMP/toolkit PACKET=$RUNNER_TEMP/context OUT=$RUNNER_TEMP/run \
+          TOOLKIT=$RUNNER_TEMP/toolkit DEFINITION=$RUNNER_TEMP/definition DEFINITION_REPO=$DEFINITION \
+            PACKET=$RUNNER_TEMP/context OUT=$RUNNER_TEMP/run \
             bash "$RUNNER_TEMP/toolkit/.github/scripts/run-station.sh"
       - uses: actions/upload-artifact@v5
         if: always()

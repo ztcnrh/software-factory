@@ -391,6 +391,16 @@ def test_post_review_degrades_anchor_then_event_but_never_drops_findings(gh):
 # --------------------------------------------------------------------------- labels, metrics
 
 
+def test_apply_ensures_the_labels_before_it_edits_them(gh, tmp_path):
+    """Adopting the factory is one committed workflow file: the labels are created by the first
+    apply, before the edit that needs them, so nothing runs outside Actions."""
+    gh.responses[("issue", "view")] = issue_json()
+    cli.cmd_apply(7, write(tmp_path, report()))
+    order = [a[:2] for a, _ in gh.calls]
+    assert ("label", "create") in order
+    assert order.index(("label", "create")) < order.index(("issue", "edit"))
+
+
 def test_labels_creates_the_set_and_removes_stale_factory_labels(gh):
     """`factory labels` is the whole label migration: the eight current labels with their colors,
     and any other factory:* label gone."""

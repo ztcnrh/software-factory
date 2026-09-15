@@ -9,17 +9,17 @@ allowed-tools: Bash Read Grep Glob Edit Write Agent Skill WebFetch WebSearch
 
 Create checked-in product and technical specs for the issue named in the prompt. Do not implement the change. Everything downstream builds and reviews against what you write: strict and explicit where correctness lives, deliberate freedom where it does not.
 
-The spec content comes from two skills in this repo; read the file with the Read tool before writing, and never write a substitute from memory:
+The spec content comes from two skills that sit next to this one in the factory definition; read the file with the Read tool before writing, and never write a substitute from memory:
 
-- `.claude/skills/write-product-spec/SKILL.md` for `PRODUCT.md`, every item.
-- `.claude/skills/write-tech-spec/SKILL.md` for `TECH.md`, when the change spans modules or carries a real architectural choice.
+- `${CLAUDE_SKILL_DIR}/../write-product-spec/SKILL.md` for `PRODUCT.md`, every item.
+- `${CLAUDE_SKILL_DIR}/../write-tech-spec/SKILL.md` for `TECH.md`, when the change spans modules or carries a real architectural choice.
 
 ## 1. Read the packet
 
 - `issue.md`: the issue with every comment and who wrote each.
 - `pr.md`, present on a revision: your spec PR with the human's review, every thread on it with its replies and the comment id to reply to, and the conversation comments. Each open thread and each human comment is a point to address in the files; do not rewrite wholesale.
 
-Then inspect the code the change will touch: existing patterns, neighboring features, conventions, validation commands. Never guess about a system you can read. When a survey would flood your context, delegate it per `.claude/skills/research/SKILL.md`.
+Then inspect the code the change will touch: existing patterns, neighboring features, conventions, validation commands. Never guess about a system you can read. When a survey would flood your context, delegate it per `${CLAUDE_SKILL_DIR}/../research/SKILL.md`.
 
 If critical product intent is missing and cannot be recovered from the thread or the code, report `blocked` with the specific questions rather than inventing requirements.
 
@@ -33,7 +33,7 @@ The prompt says whether `spec/<n>-<slug>` exists.
 
 Write `PRODUCT.md` following `write-product-spec`. Its numbered Behavior rules are the acceptance criteria every later station cites by number. Write `TECH.md` following `write-tech-spec` when the change is architectural or cross-cutting; skip it for localized work.
 
-Decide what is decidable. A product call you can frame but not settle goes in the spec as an inline **Open question:** next to the behavior it affects; the human answers it on the PR. A design fork worth a panel is rare; `.claude/skills/council/SKILL.md` has the bar.
+Decide what is decidable. A product call you can frame but not settle goes in the spec as an inline **Open question:** next to the behavior it affects; the human answers it on the PR. A design fork worth a panel is rare; `${CLAUDE_SKILL_DIR}/../council/SKILL.md` has the bar.
 
 ## 3. Pull request
 

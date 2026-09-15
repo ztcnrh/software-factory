@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 # Run one station with `claude -p` and write its report. Called by .github/workflows/factory.yml
-# from the adopter's checkout, with the toolkit at $TOOLKIT and the packet at $PACKET.
+# from the product repository's checkout, with the toolkit at $TOOLKIT, the factory definition
+# at $DEFINITION, and the packet at $PACKET.
 #
 #   STATION  triage | spec | implement | review | retro
 #   ISSUE PR BRANCH HEAD   what route found; empty when there is none
 #   BASE     the default branch, where PRs go
 #   PACKET   directory of Markdown the context job built
 #   OUT      where report.json and the raw stream go
+#   DEFINITION       checkout of the factory definition; its skills/ are the stations
+#   DEFINITION_REPO  that repository, owner/name; retro opens its pull request there
+#   FACTORY_TOKEN    (retro) a token that can push and open PRs on DEFINITION_REPO; not needed
+#                    when the definition is this repository
 #   OAUTH_TOKEN / API_KEY   one of them; exported under the name Claude Code expects
 set -euo pipefail
-: "${STATION:?}" "${TOOLKIT:?}" "${PACKET:?}" "${OUT:?}"
+: "${STATION:?}" "${TOOLKIT:?}" "${DEFINITION:?}" "${DEFINITION_REPO:?}" "${PACKET:?}" "${OUT:?}"
 mkdir -p "$OUT"
 
 # Exactly one credential: an ANTHROPIC_API_KEY outranks the OAuth token even when empty.
@@ -18,11 +23,36 @@ elif [ -n "${API_KEY:-}" ]; then export ANTHROPIC_API_KEY="$API_KEY"
 else echo "::error::set the CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY secret"; exit 1; fi
 unset OAUTH_TOKEN API_KEY
 
-skill=.claude/skills/factory-$STATION/SKILL.md
+# The station's skills come from the definition, staged as this runner's personal skills, which
+# Claude Code prefers over a project's own on a name clash. The checkout's .claude/ is the product
+# repository's business; a factory-* skill in it is a copy of what the definition owns, and two
+# sources of one procedure is what this refuses.
+[ -d "$DEFINITION/skills" ] || {
+  echo "::error::$DEFINITION_REPO has no skills/ directory; a factory definition is a repository with one"
+  exit 1
+}
+skills=$HOME/.claude/skills
+mkdir -p "$skills"
+stale=()
+for dir in "$DEFINITION"/skills/*/; do
+  name=$(basename "$dir")
+  rm -rf "${skills:?}/$name"
+  cp -R "$dir" "$skills/$name"
+  [[ $name == factory-* ]] && [ -e ".claude/skills/$name" ] && stale+=("$name")
+done
+if [ ${#stale[@]} -gt 0 ]; then
+  echo "::error::this repository carries factory skills at .claude/skills/{${stale[*]}}; the" \
+       "factory definition $DEFINITION_REPO is their only source. Delete them and commit."
+  exit 1
+fi
+
+skill=$skills/factory-$STATION/SKILL.md
+[ -f "$skill" ] || { echo "::error::$DEFINITION_REPO has no factory-$STATION skill"; exit 1; }
 model=$(sed -n 's/^model: *//p' "$skill" | head -1)
 tools=$(sed -n 's/^allowed-tools: *//p' "$skill" | head -1)
-[ -n "$model" ] || { echo "::error::$skill has no model: in its frontmatter"; exit 1; }
+[ -n "$model" ] || { echo "::error::factory-$STATION/SKILL.md has no model: in its frontmatter"; exit 1; }
 
+dirs=()
 case $STATION in
   triage) prompt="/factory-triage Issue #$ISSUE. Packet: $PACKET/." ;;
   spec|implement)
@@ -31,7 +61,17 @@ case $STATION in
     else where="Branch: $BRANCH (no PR yet)."; fi
     prompt="/factory-$STATION Issue #$ISSUE. Packet: $PACKET/. Base: ${BASE:-main}. $where" ;;
   review) prompt="/factory-review PR #$PR for issue #$ISSUE. Packet: $PACKET/." ;;
-  retro) prompt="/factory-retro Packet: $PACKET/." ;;
+  retro)
+    # Retro edits the definition, so it needs write access to that checkout and a token that can
+    # open the pull request there. The run's own token serves when the definition is this repo.
+    if [ "$DEFINITION_REPO" != "${GH_REPO:-}" ] && [ -z "${FACTORY_TOKEN:-}" ]; then
+      echo "::error::retro proposes changes to the factory definition $DEFINITION_REPO, which" \
+           "needs the FACTORY_TOKEN secret: a token with contents and pull-requests write on it"
+      exit 1
+    fi
+    export FACTORY_TOKEN="${FACTORY_TOKEN:-${GH_TOKEN:-}}"
+    dirs=(--add-dir "$DEFINITION")
+    prompt="/factory-retro Packet: $PACKET/. Definition: $DEFINITION/ ($DEFINITION_REPO)." ;;
   *) echo "::error::unknown station $STATION"; exit 1 ;;
 esac
 
@@ -46,7 +86,7 @@ for attempt in 1 2; do
 # shellcheck disable=SC2086  # $tools is a space-separated list by design
 claude -p "$prompt" \
   --output-format stream-json --verbose \
-  --model "$model" ${tools:+--allowedTools $tools} \
+  --model "$model" ${tools:+--allowedTools $tools} ${dirs[@]+"${dirs[@]}"} \
   --permission-prompts none \
   --json-schema "$(PYTHONPATH=$TOOLKIT python3 -m factory.cli schema "$STATION")" \
   --append-system-prompt "$(cat "$TOOLKIT/factory/prompts/station.md")" \
