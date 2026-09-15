@@ -44,6 +44,9 @@ def pr_json(head="fix/7-slug", number=12, oid="a" * 40):
 def gh(monkeypatch):
     stub = GH(**{"repo view": "o/r\n", "api --paginate --slurp": "[[]]", "pr list": "[]"})
     monkeypatch.setattr(cli, "_gh", stub)
+    # Actions sets GITHUB_REPOSITORY, which _repo() prefers; the stub's endpoints are under o/r.
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    cli._repo.cache_clear()
     return stub
 
 
