@@ -28,7 +28,8 @@ unset OAUTH_TOKEN API_KEY
 # repository's business; a factory-* skill in it is a copy of what the definition owns, and two
 # sources of one procedure is what this refuses.
 [ -d "$DEFINITION/skills" ] || {
-  echo "::error::$DEFINITION_REPO has no skills/ directory; a factory definition is a repository with one"
+  echo "::error::$DEFINITION_REPO has no skills/ directory; a factory definition is a repository" \
+       "with one"
   exit 1
 }
 skills=$HOME/.claude/skills
@@ -50,7 +51,10 @@ skill=$skills/factory-$STATION/SKILL.md
 [ -f "$skill" ] || { echo "::error::$DEFINITION_REPO has no factory-$STATION skill"; exit 1; }
 model=$(sed -n 's/^model: *//p' "$skill" | head -1)
 tools=$(sed -n 's/^allowed-tools: *//p' "$skill" | head -1)
-[ -n "$model" ] || { echo "::error::factory-$STATION/SKILL.md has no model: in its frontmatter"; exit 1; }
+[ -n "$model" ] || {
+  echo "::error::factory-$STATION/SKILL.md has no model: in its frontmatter"
+  exit 1
+}
 
 dirs=()
 case $STATION in
