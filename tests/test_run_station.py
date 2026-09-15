@@ -102,13 +102,15 @@ def test_a_definition_missing_the_station_or_the_layout_is_refused(run, tmp_path
 
 
 def test_retro_edits_the_definition_and_needs_a_token_that_can_write_there(run, tmp_path):
-    """Retro's PR goes to the definition. Another repository's definition needs FACTORY_TOKEN
-    before anything runs; this repository as its own definition runs on the run's token."""
+    """Retro's PR goes to the definition. Without a token for another repository's definition
+    there is nothing it could propose, so the weekly run ends green with a notice and spends no
+    tokens; this repository as its own definition runs on the run's token."""
     (run.fake / "result.json").write_text(json.dumps(
         RESULT | {"structured_output": {"verdict": "nothing_to_learn", "summary": "quiet"}}))
     proc = run("retro")
-    assert proc.returncode == 1 and "FACTORY_TOKEN" in proc.stdout
-    assert not (run.fake / "args").exists()
+    assert proc.returncode == 0 and "::notice::retro skipped" in proc.stdout
+    assert "FACTORY_TOKEN" in proc.stdout
+    assert not (run.fake / "args").exists() and not (tmp_path / "out" / "report.json").exists()
 
     proc = run("retro", FACTORY_TOKEN="def-token")
     assert proc.returncode == 0, proc.stdout + proc.stderr

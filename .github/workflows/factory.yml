@@ -57,7 +57,7 @@ on:
 env:
   GH_TOKEN: ${{ github.token }}
   GH_REPO: ${{ github.repository }}
-  DEFINITION: ${{ inputs.definition || inputs.toolkit }}
+  DEFINITION_REPO: ${{ inputs.definition || inputs.toolkit }}
   DEFINITION_REF: ${{ inputs.definition && inputs.definition_ref || inputs.ref }}
 
 jobs:
@@ -271,7 +271,7 @@ jobs:
       # A read-only station gets the definition's files and none of the token that fetched them.
       - uses: actions/checkout@v7
         with:
-          repository: ${{ env.DEFINITION }}
+          repository: ${{ env.DEFINITION_REPO }}
           ref: ${{ env.DEFINITION_REF }}
           path: .factory-definition
           token: ${{ secrets.FACTORY_TOKEN || github.token }}
@@ -299,7 +299,7 @@ jobs:
           mv .factory-definition "$RUNNER_TEMP/definition"
           curl -fsSL https://claude.ai/install.sh | bash
           export PATH="$HOME/.local/bin:$PATH"
-          TOOLKIT=$RUNNER_TEMP/toolkit DEFINITION=$RUNNER_TEMP/definition DEFINITION_REPO=$DEFINITION \
+          TOOLKIT=$RUNNER_TEMP/toolkit DEFINITION=$RUNNER_TEMP/definition \
             PACKET=$RUNNER_TEMP/context OUT=$RUNNER_TEMP/run \
             bash "$RUNNER_TEMP/toolkit/.github/scripts/run-station.sh"
       - uses: actions/upload-artifact@v5
@@ -346,7 +346,7 @@ jobs:
       # Only retro writes to the definition, so only retro keeps the token that can push there.
       - uses: actions/checkout@v7
         with:
-          repository: ${{ env.DEFINITION }}
+          repository: ${{ env.DEFINITION_REPO }}
           ref: ${{ env.DEFINITION_REF }}
           path: .factory-definition
           token: ${{ secrets.FACTORY_TOKEN || github.token }}
@@ -375,7 +375,7 @@ jobs:
           mv .factory-definition "$RUNNER_TEMP/definition"
           curl -fsSL https://claude.ai/install.sh | bash
           export PATH="$HOME/.local/bin:$PATH"
-          TOOLKIT=$RUNNER_TEMP/toolkit DEFINITION=$RUNNER_TEMP/definition DEFINITION_REPO=$DEFINITION \
+          TOOLKIT=$RUNNER_TEMP/toolkit DEFINITION=$RUNNER_TEMP/definition \
             PACKET=$RUNNER_TEMP/context OUT=$RUNNER_TEMP/run \
             bash "$RUNNER_TEMP/toolkit/.github/scripts/run-station.sh"
       - uses: actions/upload-artifact@v5

@@ -11,7 +11,7 @@
 #   DEFINITION       checkout of the factory definition; its skills/ are the stations
 #   DEFINITION_REPO  that repository, owner/name; retro opens its pull request there
 #   FACTORY_TOKEN    (retro) a token that can push and open PRs on DEFINITION_REPO; not needed
-#                    when the definition is this repository
+#                    when the definition is this repository; without it retro is skipped
 #   OAUTH_TOKEN / API_KEY   one of them; exported under the name Claude Code expects
 set -euo pipefail
 : "${STATION:?}" "${TOOLKIT:?}" "${DEFINITION:?}" "${DEFINITION_REPO:?}" "${PACKET:?}" "${OUT:?}"
@@ -68,10 +68,12 @@ case $STATION in
   retro)
     # Retro edits the definition, so it needs write access to that checkout and a token that can
     # open the pull request there. The run's own token serves when the definition is this repo.
+    # Without either there is nothing retro could propose, and the weekly run says so and ends.
     if [ "$DEFINITION_REPO" != "${GH_REPO:-}" ] && [ -z "${FACTORY_TOKEN:-}" ]; then
-      echo "::error::retro proposes changes to the factory definition $DEFINITION_REPO, which" \
-           "needs the FACTORY_TOKEN secret: a token with contents and pull-requests write on it"
-      exit 1
+      echo "::notice::retro skipped: it would propose skill edits to the factory definition" \
+           "$DEFINITION_REPO, which needs the FACTORY_TOKEN secret (contents and pull-requests" \
+           "write on it). A definition of your own is what lets the factory learn."
+      exit 0
     fi
     export FACTORY_TOKEN="${FACTORY_TOKEN:-${GH_TOKEN:-}}"
     dirs=(--add-dir "$DEFINITION")
