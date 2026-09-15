@@ -1,9 +1,10 @@
-# The software factory. Every job runs in the toolkit's reusable workflow; this file forwards
-# the events and grants the permissions it needs.
+# The software factory. This is the only factory file in this repository: every job runs in the
+# toolkit's reusable workflow, on skills from the factory definition named below. This file
+# forwards the events and grants the permissions it needs.
 #
 # Setup, once: the secret CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`, bills your Claude
 # subscription) or ANTHROPIC_API_KEY, and the repository setting "Allow GitHub Actions to create
-# and approve pull requests". Then open an issue.
+# and approve pull requests". Then open an issue; the factory:* labels appear with the first run.
 
 name: factory
 
@@ -46,8 +47,16 @@ jobs:
     uses: ztcnrh/software-factory/.github/workflows/factory.yml@main
     with:
       ref: main # the same ref as the line above
+      # The factory definition: the repository whose skills/ the stations run, and where retro
+      # proposes changes. Empty runs the toolkit's own skills. Several repositories may name the
+      # same definition; that is one factory driving them all.
+      definition: ""
+      definition_ref: main
       station: ${{ inputs.station }}
       issue: ${{ inputs.issue }}
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # Only with a definition of your own: lets retro open pull requests on it, and reads it
+      # when it is private. Contents and pull-requests write on the definition repository.
+      FACTORY_TOKEN: ${{ secrets.FACTORY_TOKEN }}

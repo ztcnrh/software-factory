@@ -44,6 +44,9 @@ def pr_json(head="fix/7-slug", number=12, oid="a" * 40):
 def gh(monkeypatch):
     stub = GH(**{"repo view": "o/r\n", "api --paginate --slurp": "[[]]", "pr list": "[]"})
     monkeypatch.setattr(cli, "_gh", stub)
+    # Actions sets GITHUB_REPOSITORY, which _repo() prefers; the stub's endpoints are under o/r.
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    cli._repo.cache_clear()
     return stub
 
 
@@ -389,6 +392,16 @@ def test_post_review_degrades_anchor_then_event_but_never_drops_findings(gh):
 
 
 # --------------------------------------------------------------------------- labels, metrics
+
+
+def test_apply_ensures_the_labels_before_it_edits_them(gh, tmp_path):
+    """Adopting the factory is one committed workflow file: the labels are created by the first
+    apply, before the edit that needs them, so nothing runs outside Actions."""
+    gh.responses[("issue", "view")] = issue_json()
+    cli.cmd_apply(7, write(tmp_path, report()))
+    order = [a[:2] for a, _ in gh.calls]
+    assert ("label", "create") in order
+    assert order.index(("label", "create")) < order.index(("issue", "edit"))
 
 
 def test_labels_creates_the_set_and_removes_stale_factory_labels(gh):

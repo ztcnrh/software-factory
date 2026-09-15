@@ -9,6 +9,8 @@ allowed-tools: Bash Read Grep Glob Edit Write Agent
 
 Every other station produces software; you produce a better factory. Your input is the record of every time a human had to step in. Your output is a small set of durable changes to the station skills that make those steps less likely next time. You propose; the human disposes.
 
+The skills live in the factory definition, not in this repository. The prompt names its checkout and its repository: `Definition: <dir> (<owner/repo>)`. Every skill edit, every git command, and the pull request in this run happen there; the checkout you started in is the product repository whose record you are reading, and you change nothing in it.
+
 ## 1. Read the packet
 
 - `metrics.json`: cost per shipped item, steers, needs-human hits, and one row per item with its PR numbers.
@@ -34,9 +36,9 @@ Cluster by root cause, not surface symptom. Worth encoding: a convention a stati
 Exactly one outcome:
 
 - `nothing_to_learn`: report and stop. Do not open an empty PR.
-- `proposed`: edit the relevant skill files under `.claude/skills/` and open a PR.
+- `proposed`: edit the relevant skill files under `<dir>/skills/` and open a PR on the definition.
 
-For an observation the factory cannot fix by editing a skill (a stale direction, a missing environment, an engine limit), open a plain issue describing it (`gh issue create --title "<title>" --body-file <file>`); it is triaged like any other.
+For an observation the factory cannot fix by editing a skill (a stale direction, a missing environment, an engine limit), open a plain issue describing it in this repository (`gh issue create --title "<title>" --body-file <file>`); it is triaged like any other.
 
 ## 5. Apply edits carefully
 
@@ -44,7 +46,7 @@ Read the current skill file completely. Make the smallest cohesive edit that cap
 
 ## 6. Open the PR
 
-`git checkout -b factory/retro-<YYYY-MM-DD>`, commit only the skill edits, `git push -u origin HEAD`, `gh pr create --title "retro: <date>" --body-file <file>`. The body: `## TL;DR`, the learnings in one line each; then one section per edit with its evidence, learning, why it is durable, and the signal to watch. Do not merge.
+In the definition checkout: `cd <dir> && git checkout -b factory/retro-<YYYY-MM-DD>`, commit only the skill edits, `git push -u origin HEAD`, then `GH_TOKEN="$FACTORY_TOKEN" gh pr create -R <owner/repo> --title "retro: <date>" --body-file <file>`. `FACTORY_TOKEN` is the token that may write to the definition; every `gh` call that touches the definition uses it and names the repository with `-R`. The body: `## TL;DR`, the learnings in one line each; then one section per edit with its evidence, learning, why it is durable, and the signal to watch. Do not merge.
 
 ## 7. Report
 
@@ -52,6 +54,6 @@ Your final message is JSON matching the schema you were given. `summary`: the wi
 
 ## Guardrails
 
-- Do not edit product code, tests, or anything outside `.claude/skills/`.
+- Do not edit product code, tests, or anything outside the definition's `skills/`.
 - Do not invent feedback that is not in the record.
 - Keep the PR small enough for a human to review in a few minutes.

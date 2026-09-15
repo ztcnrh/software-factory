@@ -408,6 +408,9 @@ def cmd_apply(n: int, report_path: str) -> None:
             # from this line.
             print(f"followup: {url.rsplit('/', 1)[-1]}")
         _gh("issue", "comment", str(n), "--body", run_comment(report, capped))
+    # The labels are created here, on the first apply, so adopting the factory is one committed
+    # workflow file and nothing runs outside Actions.
+    cmd_labels()
     if station == "triage" and not target:
         _edit_labels(n, ["triaged"], [])
     else:
