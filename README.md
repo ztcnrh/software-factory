@@ -16,7 +16,7 @@ Hexagons are yours. Everything else is a station: one headless `claude -p` run t
 ## Install
 
 ```bash
-git clone https://github.com/ztcnrh/software-factory && cd software-factory
+git clone https://github.com/fetch-rewards/software-factory && cd software-factory
 ./install.sh /path/to/your/repo
 ```
 
@@ -41,12 +41,10 @@ A merged code PR closes the issue (`Resolves #n`). Closing an issue as not plann
 
 ## Metrics
 
-`factory metrics` prints cost per shipped item, cycle time, autonomy (shipped with no human steer), and steers per item, all derived from the issues and PRs. It runs anywhere `gh` is logged in for the repo:
+`factory metrics` prints cost, factory time, runs, steers, and stuck items (needs-human) per shipped item, plus autonomy (shipped with no human steer), all derived from the issues and PRs. It runs anywhere `gh` is logged in for the repo:
 
 ```bash
-uv tool install /path/to/software-factory && factory metrics --since 30d
+uv tool install /path/to/software-factory && factory metrics --since 14d
 ```
 
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has the labels and events in full, the four jobs, the packets, and the trust boundaries.
-
-*Built on the skills and patterns in Warp's [cloud-factory-demo](https://github.com/warpdotdev/cloud-factory-demo).*

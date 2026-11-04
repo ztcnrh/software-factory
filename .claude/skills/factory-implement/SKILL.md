@@ -1,7 +1,7 @@
 ---
 name: factory-implement
 description: The factory's implementation station, run by the workflow when a human applies factory:ready-to-implement, when a spec PR merges, after the factory's review sends the PR back, and when a human requests changes on the PR. Build the change on a <type>/<n>-<slug> branch with tests and leave a pull request ready for review, or answer a send-back.
-model: sonnet
+model: claude-sonnet-5
 allowed-tools: Bash Read Grep Glob Edit Write Agent Skill WebFetch WebSearch
 ---
 

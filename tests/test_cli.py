@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -103,23 +104,6 @@ def test_validate_refuses_unknown_key_missing_field_and_bad_verdict():
         cli.validate(r, "triage")
     with pytest.raises(SystemExit, match="not one of"):
         cli.validate(report(verdict="implemented"), "triage")
-
-
-def test_validate_refuses_a_summary_carrying_tool_call_markup():
-    """A malformed structured-output call leaks `</summary><parameter name="notes">` into the
-    string; posting that as the run comment would put garbage in the record."""
-    bad = report(summary='why</summary>\n<parameter name="notes">area: x')
-    with pytest.raises(SystemExit, match="malformed"):
-        cli.validate(bad, "triage")
-
-
-def test_validate_accepts_a_folded_details_block_in_a_review_body():
-    """The style contract asks for `<details><summary>Rules</summary>` in review bodies; the
-    leaked-markup guard must not mistake that closing tag for a broken tool call."""
-    body = "## TL;DR\nok\n\n<details><summary>Rules</summary>\n\n- 1 holds\n\n</details>"
-    cli.validate(report("review", "approve", body=body), "review")
-    with pytest.raises(SystemExit, match="malformed"):
-        cli.validate(report("review", "approve", body="x</body>\n<parameter name=\"v\">"), "review")
 
 
 def test_validate_checks_review_comment_shape():
@@ -295,7 +279,7 @@ def test_apply_review_posts_the_review_before_the_label_and_resolves_threads(gh,
     cli.cmd_apply(7, write(tmp_path, r))
     [(post, payload)] = gh.argv("api", "--method", "POST")
     sent = json.loads(payload)
-    assert sent["event"] == "REQUEST_CHANGES" and sent["commit_id"] == "b" * 40
+    assert sent["event"] == "COMMENT" and sent["commit_id"] == "b" * 40
     assert sent["body"].startswith("## TL;DR\nx\n\n<sub>factory review · [run](https://x/run/1)")
     assert cli.parse_marks(sent["body"], cli.REVIEW_MARK)[0]["head"] == "b" * 40
     assert sent["comments"][0]["path"] == "a.py"
@@ -351,9 +335,10 @@ def test_apply_files_followups_as_plain_issues_and_names_them_for_triage(gh, tmp
     assert "followup: 19\n" in capsys.readouterr().out
 
 
-def test_post_review_skips_a_reviewed_head_and_survives_a_failed_resolve(gh, tmp_path):
+def test_post_review_skips_a_reviewed_head_and_survives_a_failed_resolve(gh, tmp_path, capsys):
     """A retry after a partial apply (review posted, comment not yet) must not post the review
-    again, and a token that cannot resolve threads must not fail the whole apply."""
+    again, and a token that cannot resolve threads must not fail the whole apply, while the log
+    keeps GitHub's reason so the failure can be diagnosed."""
     gh.responses[("issue", "view")] = issue_json("in-review")
     gh.responses[("pr", "list")] = pr_json()
     gh.responses[("api", "--paginate", "--slurp", "repos/o/r/pulls/12/reviews")] = json.dumps([[
@@ -364,28 +349,35 @@ def test_post_review_skips_a_reviewed_head_and_survives_a_failed_resolve(gh, tmp
     cli.cmd_apply(7, write(tmp_path, r))
     assert not gh.argv("api", "--method", "POST")
     assert gh.argv("issue", "comment") and gh.argv("issue", "edit")
+    assert "could not resolve thread PRRT_1; resolve it by hand: denied" in capsys.readouterr().err
 
 
-def test_post_review_degrades_anchor_then_event_but_never_drops_findings(gh):
-    """GitHub rejects bad inline anchors (422) and reviews of the poster's own PR; both fall back
-    and keep the findings in the body."""
+def test_apply_job_token_can_resolve_review_threads():
+    """GitHub refuses resolveReviewThread to a token without contents: write, even with
+    pull-requests: write; without it every resolve a review reports silently stays open."""
+    workflow = (Path(__file__).parents[1] / ".github/workflows/factory.yml").read_text()
+    apply_job = workflow.split("\n  apply:\n", 1)[1].split("\n    steps:\n", 1)[0]
+    assert "contents: write" in apply_job
+
+
+def test_post_review_folds_findings_into_the_body_when_an_anchor_is_rejected(gh):
+    """GitHub rejects an inline comment whose path or line is not in the diff (422); the review
+    is posted again with the findings listed in the body so none is dropped. The event is COMMENT
+    from the start, since the factory authors the PRs it reviews."""
     attempts = []
 
     def post(args, payload):
         attempts.append(json.loads(payload))
         if len(attempts) == 1:
             raise subprocess.CalledProcessError(1, args, "", "Unprocessable: line is invalid")
-        if len(attempts) == 2:
-            raise subprocess.CalledProcessError(
-                1, args, "", "Can not request changes on your own pull request")
         return ""
 
     gh.responses[("api", "--method", "POST")] = post
     pr = json.loads(pr_json())[0]
     cli._post_review(pr, report("review", "request_changes", body="B", comments=[
         {"path": "a.py", "line": 3, "side": "RIGHT", "body": "finding"}]))
+    assert [a["event"] for a in attempts] == ["COMMENT", "COMMENT"]
     assert attempts[1]["comments"] == [] and "`a.py:3` — finding" in attempts[1]["body"]
-    assert attempts[2]["event"] == "COMMENT"
 
 
 # --------------------------------------------------------------------------- labels, metrics
@@ -400,11 +392,12 @@ def test_labels_creates_the_set_and_removes_stale_factory_labels(gh):
     created = [a[2] for a, _ in gh.argv("label", "create")]
     assert created == [f"factory:{name}" for name in cli.LABELS]
     assert gh.argv("label", "create")[0][0][4] == "5319E7"
+    assert all(len(d) <= 100 for _, d in cli.LABELS.values()), "GitHub caps descriptions at 100"
     assert [a[2] for a, _ in gh.argv("label", "delete")] == ["factory:triage"]
 
 
 def test_item_metrics_and_aggregate_from_a_fixture_record():
-    """Cost per shipped item, cycle time, autonomy, and steers are all derived from the record;
+    """Cost, factory time, runs, steers, and autonomy are all derived from the record;
     pin the arithmetic."""
     issue = {"number": 7, "state": "CLOSED", "stateReason": "COMPLETED",
              "createdAt": "2026-01-01T00:00:00Z", "labels": [{"name": "factory:triaged"}]}
@@ -421,14 +414,16 @@ def test_item_metrics_and_aggregate_from_a_fixture_record():
     commits = [commit(cli.BOT_EMAIL, "2026-01-01T09:00:00Z"),
                commit("human@x", "2026-01-01T10:00:00Z")]
     shipped = cli.item_metrics(issue, comments, prs, reviews, commits)
-    assert shipped == {"issue": 7, "prs": [3, 4], "runs": 2, "cost_usd": 2.5, "shipped": True,
-                       "parked": False, "cycle_hours": 12.0, "steers": 2, "autonomous": False,
-                       "needs_human": False}
+    assert shipped == {"issue": 7, "prs": [3, 4], "runs": 2, "cost_usd": 2.5,
+                       "factory_minutes": 0.0, "shipped": True, "parked": False,
+                       "steers": 2, "autonomous": False, "needs_human": False}
     stuck = cli.item_metrics(
         {"number": 8, "state": "OPEN", "stateReason": None, "createdAt": "2026-01-01T00:00:00Z"},
         [{"body": cli.run_comment(report("implement", "blocked", cost_usd=1.0))}], [], [], [])
     assert stuck["needs_human"] and not stuck["shipped"]
     agg = cli.aggregate([shipped, stuck])
-    assert agg["cost_per_shipped_usd"] == 3.5 and agg["total_cost_usd"] == 3.5
-    assert agg["median_cycle_hours"] == 12.0 and agg["autonomy_pct"] == 0
-    assert agg["steers_per_shipped"] == 2.0 and agg["runs"] == 3 and agg["needs_human"] == 1
+    # Per-shipped figures average the shipped item alone; the stuck item's $1 shows only in total.
+    assert agg["cost_per_shipped_usd"] == 2.5 and agg["total_cost_usd"] == 3.5
+    assert agg["runs_per_shipped"] == 2.0 and agg["factory_minutes_per_shipped"] == 0.0
+    assert agg["steers_per_shipped"] == 2.0 and agg["needs_human_per_shipped"] == 0.0
+    assert agg["autonomy_pct"] == 0

@@ -1,7 +1,7 @@
 ---
 name: factory-retro
-description: The factory's learning station, run by the workflow weekly and on demand. Read the record of every human touch on recent items and propose the smallest skill edits that would stop a recurring class of rework, as a pull request for a human to review.
-model: opus
+description: The factory's learning station, run by the workflow every other week and on demand. Read the record of every human touch on recent items and propose the smallest skill edits that would stop a recurring class of rework, as a pull request for a human to review.
+model: claude-opus-5
 allowed-tools: Bash Read Grep Glob Edit Write Agent
 ---
 
@@ -11,8 +11,8 @@ Every other station produces software; you produce a better factory. Your input 
 
 ## 1. Read the packet
 
-- `metrics.json`: cost per shipped item, steers, needs-human hits, and one row per item with its PR numbers.
-- `items.md`: per item, one line per factory run and every human touch: comments on the issue, reviews and replies on the PRs, conversation comments, human commits. A human's conversation comment on a PR that then merged is the softest steer there is: something the human wanted said but not fixed, which is exactly what a skill edit can pre-empt. Read the finished items too, the ones with no steers included: an untouched approval says what to keep, and a retro that only reads failures eventually optimizes away something that worked.
+- `metrics.json`: per shipped item, the window's cost, factory minutes, runs, steers, and needs-human (the share that got stuck: a station blocked or the review cap hit, not the ordinary human gates), plus one row per item with its PR numbers. Cost per shipped item is the North Star; the others explain its movement.
+- `items.md`: per item, one line per factory run and every human touch: comments on the issue, reviews on the PRs, conversation comments, human commits, and one line per inline thread quoting the human comment that opened it with a count of the human comments in it. A human's conversation comment on a PR that then merged is the softest steer there is: something the human wanted said but not fixed, which is exactly what a skill edit can pre-empt. Read the finished items too, the ones with no steers included: an untouched approval says what to keep, and a retro that only reads failures eventually optimizes away something that worked.
 
 When a line needs its full text, fetch it: `gh issue view <n> --json body,comments`, `gh pr view <pr> --json body,reviews,comments`, `gh api repos/<owner/repo>/pulls/<pr>/comments`.
 

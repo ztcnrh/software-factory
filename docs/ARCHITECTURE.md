@@ -53,18 +53,18 @@ stateDiagram-v2
 
 ## Events
 
-The adopter's caller workflow (`templates/factory.yml`) forwards these to the reusable workflow, whose `route` job decides:
+The adopter's caller workflow (`templates/factory.yml`) forwards these to the reusable workflow, whose `route` job decides. The caller skips two events before any runner starts, so they appear as grey skipped rows in the Actions tab rather than green runs: a review whose state is not Request changes (a single line comment is one), and a label change outside `factory:*`.
 
 | Event | Condition | Runs |
 |---|---|---|
 | `issues` opened, reopened | always | triage |
 | `issues` labeled | `factory:ready-to-spec` / `factory:ready-to-implement`, by a human | spec / implement |
 | `issues` unlabeled | `factory:needs-info`, by a human | triage |
-| `pull_request` reopened, ready_for_review | head `<type>/<n>-*`, not `spec/`, not draft | review |
+| `pull_request` ready_for_review | head `<type>/<n>-*`, not `spec/`, not draft | review |
 | `pull_request` closed | merged, head `spec/<n>-*` | labels `ready-to-implement`, then implement |
 | `pull_request_review` submitted | changes requested, by an owner, member, or collaborator | spec or implement, by the head branch |
 | `workflow_dispatch` | `station`, `issue` | that station |
-| `schedule` weekly, or `workflow_dispatch` `retro` | | retro |
+| `schedule` every other Monday, or `workflow_dispatch` `retro` | | retro over the last 14 days |
 
 Everything the factory writes uses `GITHUB_TOKEN`, which fires no events that run (a PR it opens or pushes to leaves a `pull_request` run GitHub holds for approval, which is why the caller does not subscribe to `opened` or `synchronize`). So `factory apply` ends with `next: <station>` or `next: none`, and the workflow dispatches itself for the next station. Human actions fire events on their own, with one exception GitHub imposes: no `pull_request` or `pull_request_review` workflow runs for a PR that conflicts with its base. The review station therefore treats a conflict as a finding, and its send-back reaches implement through the dispatch path; a human can also start any station from the Actions tab.
 
@@ -82,10 +82,10 @@ Everything the factory writes uses `GITHUB_TOKEN`, which fires no events that ru
 | triage | `issue.md`, `related.md` | the issue and its comments; the other open issues and PRs, one line each |
 | spec | `issue.md`; `pr.md` on a revision | plus the spec PR: reviews, threads with replies and ids, conversation |
 | implement | `issue.md`; `pr.md` once the PR exists | plus the code PR the same way |
-| review | `issue.md`, `pr.md`, `diff.md`, `followup.md` | plus the annotated diff, and the last factory review with the delta since it |
+| review | `issue.md`, `pr.md`, `diff.txt`, `followup.md` | plus the annotated diff, and the last factory review with the delta since it |
 | retro | `metrics.json`, `items.md` | `factory metrics --json`; per item, every human touch on the issue and its PRs |
 
-Specs are read from the checkout (`specs/<n>-*/`), where the spec PR merged them. `diff.md` marks every line `[OLD:n]`, `[NEW:n]`, or `[OLD:n,NEW:m]`; an inline review comment copies its `path`, `side`, and `line` from there and nowhere else.
+Specs are read from the checkout (`specs/<n>-*/`), where the spec PR merged them. `diff.txt` marks every line `[OLD:n]`, `[NEW:n]`, or `[OLD:n,NEW:m]`; an inline review comment copies its `path`, `side`, and `line` from there and nowhere else.
 
 ## A station run
 
@@ -124,7 +124,7 @@ The headline and the next-step line come from tables in `cli.py`; the two lines 
 
 ## Metrics
 
-Per item: runs and cost from the run comments; shipped when the issue closed as completed with a merged code PR; cycle time from the issue's creation to that merge; steers as human Request-changes reviews on either PR plus human commits on the code PR; autonomous when shipped with no steer; needs-human when a run was capped or blocked. Headline: total cost divided by items shipped.
+Per item: runs, cost, and factory time (the sum of the station runs' durations) from the run comments; shipped when the issue closed as completed with a merged code PR; steers as human Request-changes reviews on either PR plus human commits on the code PR; autonomous when shipped with no steer; needs-human when the item got stuck, a station blocked or the review cap hit, which the ordinary human gates are not. Aggregates anchor on shipped items: cost, factory minutes, runs, steers, and needs-human are each averaged over the items that shipped, so they describe what one shipped item cost, took, and needed; spend on items that never shipped appears only in the window's total cost. Cost per shipped item is the North Star; the rest explain why it moved.
 
 ## Trust boundaries
 

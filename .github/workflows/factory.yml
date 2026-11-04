@@ -23,7 +23,7 @@ on:
       toolkit:
         description: the repository this workflow lives in, checked out for its CLI and prompt
         type: string
-        default: ztcnrh/software-factory
+        default: fetch-rewards/software-factory
       ref:
         description: the toolkit ref to check out; the same one the caller's `uses:` line names
         type: string
@@ -79,7 +79,7 @@ jobs:
               if [[ $branch =~ ^([a-z]+)/([0-9]+)- ]]; then
                 type=${BASH_REMATCH[1]}; issue=${BASH_REMATCH[2]}
                 case "$(q .action)" in
-                  opened|synchronize|reopened|ready_for_review)
+                  opened|synchronize|ready_for_review)
                     if [ "$type" != spec ] && [ "$(q .pull_request.draft)" != true ]; then
                       station=review; head=$(q .pull_request.head.sha)
                     fi ;;
@@ -100,11 +100,14 @@ jobs:
                 if [ "${BASH_REMATCH[1]}" = spec ]; then station=spec; else station=implement; fi
               fi ;;
             workflow_dispatch) station=$INPUT_STATION; issue=$INPUT_ISSUE ;;
-            schedule) station=retro ;;
+
+            # Cron cannot say "every other week": the caller schedules every Monday and retro runs
+            # on even ISO weeks, matching its 14-day window.
+            schedule) if [ $(( $(date -u +%V) % 2 )) -eq 0 ]; then station=retro; fi ;;
           esac
 
-          # Spec and implement need the item's branch and PR if they already exist; review,
-          # when dispatched by apply, needs the PR it is to review.
+          # Spec and implement need the item's branch and PR if they already exist. Review, when
+          # apply dispatched it rather than a PR event, has to find the PR itself.
           if [ -n "$station" ] && [ -n "$issue" ] && [ -z "$pr" ] && [ "$station" != triage ]; then
             spec=$([ "$station" = spec ] && echo true || echo false)
             found=$(gh pr list --state open --limit 100 --json number,headRefName,headRefOid \
@@ -165,7 +168,8 @@ jobs:
             gh api graphql -F owner="$owner" -F name="$name" -F pr="$1" -f query='
               query($owner:String!,$name:String!,$pr:Int!){ repository(owner:$owner,name:$name){
                 pullRequest(number:$pr){ reviewThreads(first:100){ nodes{ id isResolved path line
-                  comments(first:50){ nodes{ databaseId author{login} body createdAt } } } } } } }' \
+                  comments(first:50){ nodes{ databaseId author{login} body createdAt
+                  replyTo{databaseId} pullRequestReview{databaseId} } } } } } } }' \
               --jq '.data.repository.pullRequest.reviewThreads.nodes'
           }
           if [ -n "$ISSUE" ]; then
@@ -191,7 +195,7 @@ jobs:
             fi
           fi
           if [ "$STATION" = retro ]; then
-            python3 -m factory.cli metrics --since 30d --json > "$raw/metrics.json"
+            python3 -m factory.cli metrics --since 14d --json > "$raw/metrics.json"
             for n in $(jq -r '.items[].issue' "$raw/metrics.json"); do
               mkdir -p "$raw/items/$n"
               paged "repos/$GH_REPO/issues/$n/comments?per_page=100" > "$raw/items/$n/comments.json"
@@ -343,7 +347,7 @@ jobs:
       (needs.run-read.result == 'success' || needs.run-write.result == 'success')
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # resolveReviewThread is refused without it; apply pushes nothing
       issues: write
       pull-requests: write
       actions: write

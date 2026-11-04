@@ -1,7 +1,7 @@
 ---
 name: factory-spec
 description: The factory's spec station, run by the workflow when a human applies factory:ready-to-spec, and again when a human requests changes on the spec PR. Turn one issue into checked-in specs on a spec/<n>-<slug> branch with a pull request to the default branch; merging that PR is the approval and starts implementation.
-model: opus
+model: claude-opus-5
 allowed-tools: Bash Read Grep Glob Edit Write Agent Skill WebFetch WebSearch
 ---
 

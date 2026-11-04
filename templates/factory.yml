@@ -13,7 +13,7 @@ on:
   # Not opened or synchronize: a PR the factory opens or pushes to with GITHUB_TOKEN would leave
   # a run GitHub holds for approval and never executes. Review starts from the apply job instead.
   pull_request:
-    types: [reopened, ready_for_review, closed]
+    types: [ready_for_review, closed]
   pull_request_review:
     types: [submitted]
   workflow_dispatch:
@@ -28,7 +28,7 @@ on:
         required: false
         type: string
   schedule:
-    - cron: "0 13 * * 1" # retro, Mondays 13:00 UTC
+    - cron: "0 13 * * 1" # retro on even ISO weeks: every other Monday, 13:00 UTC
 
 # One run per item at a time; a newer run waits for the current one to finish.
 concurrency:
@@ -43,7 +43,13 @@ permissions:
 
 jobs:
   factory:
-    uses: ztcnrh/software-factory/.github/workflows/factory.yml@main
+    # Two events arrive far more often than they route: a review that is not Request changes (each
+    # single line comment is one) and a label change outside factory:*. Skipped here, they show
+    # as grey skipped rows in the Actions tab, so green and red rows are runs that did something.
+    if: >-
+      (github.event_name != 'pull_request_review' || github.event.review.state == 'changes_requested')
+      && (github.event.label == null || startsWith(github.event.label.name, 'factory:'))
+    uses: fetch-rewards/software-factory/.github/workflows/factory.yml@main
     with:
       ref: main # the same ref as the line above
       station: ${{ inputs.station }}

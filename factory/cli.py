@@ -22,24 +22,53 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 PREFIX = "factory:"
-# Yellow marks every label that waits on a human.
+# Three vocabularies, told apart by shape: a station is one word (`implement`), a label is a
+# kebab-case GitHub label name shown with the prefix (`factory:ready-to-implement`), a verdict is
+# a snake_case enum value in a station's JSON report (`ready_to_implement`).
+#
+# name -> (color, description). Yellow marks every label that waits on a human.
 LABELS = {
-    "triaged": "5319E7",
-    "needs-info": "FBCA04",
-    "ready-to-spec": "1D76DB",
-    "spec-review": "FBCA04",
-    "ready-to-implement": "0E8A16",
-    "in-review": "006B75",
-    "ship-review": "FBCA04",
-    "needs-human": "FBCA04",
+    "triaged": (
+        "5319E7",
+        "The factory has assessed this issue; stays for the life of the item",
+    ),
+    "needs-info": (
+        "FBCA04",
+        "Triage has questions; answer, then remove this label to triage again",
+    ),
+    "ready-to-spec": (
+        "1D76DB",
+        "Go-ahead from a human: the factory writes a spec PR",
+    ),
+    "spec-review": (
+        "FBCA04",
+        "A spec PR is waiting: merge it to start implementation, or request changes",
+    ),
+    "ready-to-implement": (
+        "0E8A16",
+        "Go-ahead from a human: the factory builds the change on a PR",
+    ),
+    "in-review": (
+        "006B75",
+        "The factory is implementing or reviewing the code PR",
+    ),
+    "ship-review": (
+        "FBCA04",
+        "The factory approved the code PR: merge it to ship, or request changes",
+    ),
+    "needs-human": (
+        "FBCA04",
+        "Stuck: a station was blocked or the review cap was hit; look at the PR",
+    ),
 }
 # `triaged` stays for the life of the issue; the rest are states, at most one at a time.
 STATES = tuple(name for name in LABELS if name != "triaged")
 STATIONS = ("triage", "spec", "implement", "review")
 MAX_SENDBACKS = 3
 
-# (station, verdict) -> the state label apply sets. None: the state is left alone, because the
-# verdict is a recommendation a human acts on by applying a label. The only routing that exists.
+# What a verdict does to the state: (station, verdict) -> the label apply sets, replacing whatever
+# state was there. None: the state is left alone, because that verdict is a recommendation a human
+# acts on by applying a label themselves. The only routing that exists.
 TRANSITIONS = {
     ("triage", "ready_to_implement"): None,
     ("triage", "ready_to_spec"): None,
@@ -55,7 +84,11 @@ TRANSITIONS = {
 # (station, verdict) -> the station the workflow runs next. Everything else waits on a human or
 # on an event GitHub fires by itself.
 DISPATCH = {("implement", "implemented"): "review", ("review", "request_changes"): "implement"}
-# The states a station's report may arrive at. A report from anywhere else is stale or misrouted.
+# The states an issue may be in when a station's report lands; from anywhere else the report is
+# stale or misrouted and refused. The station was picked from an event minutes earlier and labels
+# can move in between. Triage is absent: a new issue has no state, a reopened one may have any.
+# `needs-human` is in both sets because a human un-sticks a parked item from its PR (Request
+# changes, ready for review, dispatch), which starts the station before any label moves.
 RUNS_AT = {
     "spec": {"ready-to-spec", "spec-review"},
     "implement": {"ready-to-implement", "in-review", "ship-review", "needs-human"},
@@ -95,7 +128,7 @@ CAPPED_STEP = (
     "good, or request changes and the factory picks it up again."
 )
 
-BOT_NAME, BOT_EMAIL = "factory", "factory@users.noreply.github.com"
+BOT_EMAIL = "factory@users.noreply.github.com"
 RUN_MARK, REVIEW_MARK = "<!-- factory:run ", "<!-- factory:review "
 BRANCH = re.compile(r"^([a-z]+)/(\d+)-")
 
@@ -211,10 +244,11 @@ def schema(station: str) -> dict:
     if station == "review":
         props["body"] = {
             "type": "string",
-            "description": "The review body, in this shape: `## TL;DR` one line; `## Concerns` "
-            "up to five bullets, each starting with its severity tag and naming a file:line, "
-            "at most two sentences each, or one line saying there are none; `## Verdict` "
-            "`Found: X critical, Y important, Z suggestions · Approve` or `· Request changes`. "
+            "description": "The review body, in this shape: `## TL;DR` 1-2 sentences; "
+            "`## Concerns` up to five bullets, each starting with its severity tag and naming a "
+            "file:line, at most two sentences each, or one line saying there are none; "
+            "`## Verdict` `Found: X critical, Y important, Z suggestions · Approve` or "
+            "`· Request changes`. "
             "When a spec exists, a `<details>` block with one line per numbered rule and its "
             "status. Do not include change summaries, praise, or a restatement of the diff.",
         }
@@ -246,9 +280,6 @@ def schema(station: str) -> dict:
             "additionalProperties": False}
 
 
-# A structured-output call that went wrong leaks the tool-call envelope into a string field.
-# `</summary>` is not a signal: review bodies fold their rule table under <details><summary>.
-MALFORMED = re.compile(r"<parameter name=|</parameter>|</(notes|body|verdict)>")
 # What the workflow's run step adds to the station's structured output.
 RUNNER_KEYS = {"station", "model", "cost_usd", "session_id", "turns", "duration_ms", "run_url",
                "ts", "head", "pr"}
@@ -264,9 +295,6 @@ def validate(report: dict, station: str) -> None:
         fail(f"report is missing {missing}")
     if report["verdict"] not in sch["properties"]["verdict"]["enum"]:
         fail(f"verdict {report['verdict']!r} is not one of {sch['properties']['verdict']['enum']}")
-    for key in ("summary", "notes", "body"):
-        if MALFORMED.search(report.get(key) or ""):
-            fail(f"{key} carries tool-call markup; the structured output was malformed, rerun")
     for i, c in enumerate(report.get("comments", [])):
         item = sch["properties"]["comments"]["items"]
         if set(c) - set(item["properties"]) or [k for k in item["required"] if k not in c]:
@@ -394,9 +422,9 @@ def cmd_apply(n: int, report_path: str) -> None:
                 try:
                     _gh("api", "graphql", "-f", "query=mutation($id:ID!){resolveReviewThread("
                         "input:{threadId:$id}){thread{isResolved}}}", "-f", f"id={thread}")
-                except subprocess.CalledProcessError:
-                    print(f"factory: could not resolve thread {thread}; resolve it by hand",
-                          file=sys.stderr)
+                except subprocess.CalledProcessError as e:
+                    print(f"factory: could not resolve thread {thread}; resolve it by hand: "
+                          f"{(e.stderr or '').strip()}", file=sys.stderr)
         for f in report.get("followups") or []:
             body = f"{f['body'].strip()}\n\nFound by the factory while working on #{n}."
             try:
@@ -419,8 +447,11 @@ def cmd_apply(n: int, report_path: str) -> None:
 
 
 def _post_review(pr: dict, report: dict) -> None:
-    """Post the station's review; degrade the anchor or the event before ever dropping a finding."""
-    event = "APPROVE" if report["verdict"] == "approve" else "REQUEST_CHANGES"
+    """Post the station's review as one call: body, inline findings, and the hidden record.
+    The event is always COMMENT: GitHub refuses APPROVE and REQUEST_CHANGES from the account
+    that authored the PR, and the factory authors every PR it reviews, so the verdict lives in
+    the record and the label. A rejected inline anchor degrades to findings in the body rather
+    than a dropped finding."""
     head = report.get("head") or pr["headRefOid"]
     record = {"verdict": report["verdict"], "head": head, "session_id": report.get("session_id")}
     footer = f"<sub>factory review · [run]({report['run_url']})</sub>" if report.get(
@@ -431,38 +462,35 @@ def _post_review(pr: dict, report: dict) -> None:
     if any(rec.get("head") == head for _, rec in _factory_reviews(posted)):
         print(f"factory: review at {head[:12]} already on PR #{pr['number']}", file=sys.stderr)
         return
-    payload = {"event": event, "body": body, "comments": list(report["comments"]),
+    payload = {"event": "COMMENT", "body": body, "comments": list(report["comments"]),
                "commit_id": head}
     endpoint = f"repos/{_repo()}/pulls/{pr['number']}/reviews"
-    for _ in range(3):
-        try:
-            _gh("api", "--method", "POST", endpoint, "--input", "-", input=json.dumps(payload))
-            return
-        except subprocess.CalledProcessError as e:
-            err = (e.stdout + e.stderr).lower()
-            if payload["comments"] and ("line" in err or "path" in err or "position" in err):
-                folded = "\n".join(
-                    f"- `{c['path']}:{c['line']}` — {c['body'].strip()}"
-                    for c in payload["comments"]
-                )
-                payload["body"] = body.replace(footer, f"Findings:\n{folded}\n\n{footer}")
-                payload["comments"] = []
-            elif payload["event"] != "COMMENT" and ("approve" in err or "own pull" in err
-                                                   or "not permitted" in err):
-                payload["event"] = "COMMENT"
-            else:
-                sys.stderr.write(e.stdout + e.stderr)
-                fail("posting the PR review failed")
-    fail("posting the PR review failed after fallbacks")
+    try:
+        _gh("api", "--method", "POST", endpoint, "--input", "-", input=json.dumps(payload))
+        return
+    except subprocess.CalledProcessError as e:
+        err = (e.stdout + e.stderr).lower()
+        if not payload["comments"] or not ("line" in err or "path" in err or "position" in err):
+            sys.stderr.write(e.stdout + e.stderr)
+            fail("posting the PR review failed")
+    folded = "\n".join(f"- `{c['path']}:{c['line']}` — {c['body'].strip()}"
+                       for c in payload["comments"])
+    payload["body"] = body.replace(footer, f"Findings:\n{folded}\n\n{footer}")
+    payload["comments"] = []
+    try:
+        _gh("api", "--method", "POST", endpoint, "--input", "-", input=json.dumps(payload))
+    except subprocess.CalledProcessError as e:
+        sys.stderr.write(e.stdout + e.stderr)
+        fail("posting the PR review failed after folding the findings into the body")
 
 
 # ----------------------------------------------------------------------------- labels
 
 
 def cmd_labels() -> None:
-    for name, color in LABELS.items():
+    for name, (color, description) in LABELS.items():
         _gh("label", "create", PREFIX + name, "--color", color, "--force",
-            "--description", f"factory: {name}")
+            "--description", description)
     existing = _gh_json("label", "list", "--limit", "200", "--json", "name") or []
     stale = [lb["name"] for lb in existing
              if lb["name"].startswith(PREFIX) and lb["name"][len(PREFIX):] not in LABELS]
@@ -473,10 +501,6 @@ def cmd_labels() -> None:
 
 
 # ----------------------------------------------------------------------------- metrics
-
-
-def _parse_ts(s: str) -> datetime:
-    return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
 def item_metrics(issue: dict, comments: list[dict], prs: list[dict], reviews: list[dict],
@@ -495,12 +519,11 @@ def item_metrics(issue: dict, comments: list[dict], prs: list[dict], reviews: li
         "issue": issue["number"],
         "prs": [p["number"] for p in prs],
         "runs": len(runs),
-        "cost_usd": round(sum(r.get("cost_usd") or 0 for r in runs), 4),
+        "cost_usd": round(sum(r.get("cost_usd") or 0 for r in runs), 2),
+        # Station wall-clock only; the hours a human took to respond are not the factory's to move.
+        "factory_minutes": round(sum(r.get("duration_ms") or 0 for r in runs) / 60000, 1),
         "shipped": shipped,
         "parked": issue["state"] == "CLOSED" and issue.get("stateReason") == "NOT_PLANNED",
-        "cycle_hours": round(
-            (_parse_ts(merged) - _parse_ts(issue["createdAt"])).total_seconds() / 3600, 1)
-        if shipped else None,
         "steers": steers,
         "autonomous": shipped and steers == 0,
         "needs_human": any(r.get("verdict") == "blocked" or r.get("capped") for r in runs),
@@ -508,21 +531,24 @@ def item_metrics(issue: dict, comments: list[dict], prs: list[dict], reviews: li
 
 
 def aggregate(items: list[dict]) -> dict:
+    """Every per-shipped figure is an average over the items that shipped: what one shipped item
+    cost, took, and needed. Spend on items that never shipped appears only in the total."""
     shipped = [i for i in items if i["shipped"]]
-    total = round(sum(i["cost_usd"] for i in items), 2)
-    cycles = sorted(i["cycle_hours"] for i in shipped if i["cycle_hours"] is not None)
+    n = len(shipped)
+
+    def per_shipped(key: str, digits: int = 2):
+        return round(sum(i[key] for i in shipped) / n, digits) if n else None
+
     return {
         "items": len(items),
-        "shipped": len(shipped),
-        "total_cost_usd": total,
-        "cost_per_shipped_usd": round(total / len(shipped), 2) if shipped else None,
-        "median_cycle_hours": cycles[len(cycles) // 2] if cycles else None,
-        "autonomy_pct": round(100 * sum(i["autonomous"] for i in shipped) / len(shipped))
-        if shipped else None,
-        "steers_per_shipped": round(sum(i["steers"] for i in shipped) / len(shipped), 2)
-        if shipped else None,
-        "needs_human": sum(i["needs_human"] for i in items),
-        "runs": sum(i["runs"] for i in items),
+        "shipped": n,
+        "total_cost_usd": round(sum(i["cost_usd"] for i in items), 2),
+        "cost_per_shipped_usd": per_shipped("cost_usd"),
+        "factory_minutes_per_shipped": per_shipped("factory_minutes", 1),
+        "runs_per_shipped": per_shipped("runs", 1),
+        "steers_per_shipped": per_shipped("steers"),
+        "needs_human_per_shipped": per_shipped("needs_human"),
+        "autonomy_pct": round(100 * sum(i["autonomous"] for i in shipped) / n) if n else None,
     }
 
 
@@ -557,19 +583,32 @@ def cmd_metrics(since: str, as_json: bool) -> None:
         print(json.dumps({"since_days": days, "summary": summary, "items": items}, indent=2))
         return
     s = summary
-    print(f"factory metrics · last {days}d · {s['items']} items · {s['shipped']} shipped · "
-          f"{s['runs']} runs")
-    print(f"  cost per shipped item  ${s['cost_per_shipped_usd']}" if s["shipped"]
-          else "  cost per shipped item  — (nothing shipped yet)")
-    print(f"  total cost             ${s['total_cost_usd']}  (Claude Code list-price estimate)")
-    print(f"  median cycle           {s['median_cycle_hours']} h")
-    print(f"  autonomy               {s['autonomy_pct']}% of shipped items had no human steer")
-    print(f"  steers per shipped     {s['steers_per_shipped']}")
-    print(f"  needs-human            {s['needs_human']} items")
+    print(f"Factory metrics · last {days} days")
+    print(f"  Items: {s['items']} · Shipped: {s['shipped']} · Total cost: ${s['total_cost_usd']} "
+          "(Claude Code list-price estimate)")
+    print()
+    print("Per shipped item: averages over the items that shipped")
+    if s["shipped"]:
+        row = "  {:<15} {:<10} {}".format
+        print(row("Cost:", f"${s['cost_per_shipped_usd']}", "The North Star metric."))
+        print(row("Factory time:", f"{s['factory_minutes_per_shipped']} min",
+                  "Minutes the stations ran on the item, across all its runs."))
+        print(row("Runs:", s["runs_per_shipped"], "Station runs on the item. Three is the floor "
+                  "(triage, implement, review); spec and send-backs add."))
+        print(row("Steers:", s["steers_per_shipped"], "Human Request-changes reviews and commits."))
+        print(row("Needs-human:", s["needs_human_per_shipped"],
+                  "Share that got stuck: a station was blocked or the review cap was hit."))
+        print()
+        print("Across shipped items:")
+        print(row("Autonomy:", f"{s['autonomy_pct']}%", "Share shipped with no human steer."))
+    else:
+        print("  Nothing shipped yet, so no per-shipped figures.")
+    print()
+    print("Items (✓ shipped · × parked · blank open)")
     for i in items:
         flag = "✓" if i["shipped"] else ("×" if i["parked"] else " ")
         print(f"  {flag} #{i['issue']:<5} ${i['cost_usd']:<7.2f} {i['runs']} runs  "
-              f"{i['steers']} steers")
+              f"{i['factory_minutes']}m factory  {i['steers']} steers")
 
 
 # ----------------------------------------------------------------------------- entry point
@@ -584,8 +623,9 @@ def main(argv: list[str] | None = None) -> None:
     s = sub.add_parser("apply", help="record a station report: review, run comment, labels, next")
     s.add_argument("issue", type=int)
     s.add_argument("report", help="path to the report JSON the run step wrote")
-    s = sub.add_parser("metrics", help="cost per shipped item, cycle time, autonomy, steers")
-    s.add_argument("--since", default="30d", help="window, e.g. 30d")
+    s = sub.add_parser("metrics", help="cost, factory time, runs, steers, and stuck items "
+                       "per shipped item; autonomy")
+    s.add_argument("--since", default="14d", help="window, e.g. 14d")
     s.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
     try:

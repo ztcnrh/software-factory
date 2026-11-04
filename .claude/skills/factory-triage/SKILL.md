@@ -1,7 +1,7 @@
 ---
 name: factory-triage
 description: The factory's triage station, run by the workflow on every opened or reopened issue, and again when a human removes factory:needs-info. Assess one issue against the codebase and the other open work, reproduce a bug when that is cheap, and recommend exactly one route. The recommendation is a comment; a human applies the label.
-model: sonnet
+model: claude-sonnet-5
 allowed-tools: Bash Read Grep Glob Agent WebFetch WebSearch
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: factory-review
 description: The factory's review station, run by the workflow on every push to a non-draft <type>/<n>-* pull request and after implement answers a send-back. Review the PR against its spec and the repo's bar from the packet, run the tests and the behavior where the diff cannot prove a criterion, and report a verdict with a review body and inline findings.
-model: opus
+model: claude-opus-5
 allowed-tools: Bash Read Grep Glob Agent Skill WebFetch
 ---
 
@@ -13,7 +13,7 @@ Review the pull request named in the prompt. The checkout is the PR branch at he
 
 - `issue.md`: what was asked, with the thread.
 - `pr.md`: title, description, every review, every thread with its replies and resolved state, and the conversation comments. A bar a human states there binds like the spec; an unanswered human comment is `⚠️ [IMPORTANT]` in `body`.
-- `diff.md`: the annotated diff, and the only source of inline comment locations.
+- `diff.txt`: the annotated diff, and the only source of inline comment locations.
 - `followup.md`: either "first review", or the last factory review and the changes since it.
 - `specs/<n>-*/PRODUCT.md` (and `TECH.md`) in the checkout, when they exist: the numbered Behavior rules are the acceptance criteria. Cite them by number.
 
