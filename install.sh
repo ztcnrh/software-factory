@@ -23,7 +23,7 @@ for arg in "$@"; do
     *) target=$arg ;;
   esac
 done
-[ -n "$target" ] && [ -d "$target/.git" ] || { usage; exit 2; }
+[ -n "$target" ] && [ -e "$target/.git" ] || { usage; exit 2; }
 target=$(cd "$target" && pwd)
 
 skills=(factory-triage factory-spec factory-implement factory-review factory-retro
