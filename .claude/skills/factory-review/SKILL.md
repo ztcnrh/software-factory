@@ -1,6 +1,6 @@
 ---
 name: factory-review
-description: The factory's review station, run by the workflow on every push to a non-draft <type>/<n>-* pull request and after implement answers a send-back. Review the PR against its spec and the repo's bar from the packet, run the tests and the behavior where the diff cannot prove a criterion, and report a verdict with a review body and inline findings.
+description: The factory's review station, run by the workflow whenever implement leaves a non-draft <type>/<n>-* pull request ready for review, including after it answers a send-back, and when a PR moved while it was being reviewed. Review the PR against its spec and the repo's bar from the packet, run the tests and the behavior where the diff cannot prove a criterion, and report a verdict with a review body and inline findings.
 model: claude-opus-5
 allowed-tools: Bash Read Grep Glob Agent Skill WebFetch
 ---

@@ -61,6 +61,13 @@ jobs:
           INPUT_ISSUE: ${{ inputs.issue }}
         run: |
           q() { jq -r "$1 // \"\"" "$GITHUB_EVENT_PATH"; }
+          # A private org member's association reads CONTRIBUTOR, so fall back to the reviewer's
+          # repository permission.
+          trusted() {
+            [[ "$(q .review.author_association)" =~ ^(OWNER|MEMBER|COLLABORATOR)$ ]] && return
+            [[ "$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$(q .review.user.login)/permission" \
+                  -q .permission 2>/dev/null)" =~ ^(admin|maintain|write)$ ]]
+          }
           station= issue= pr= branch= head=
           case "$GITHUB_EVENT_NAME" in
             issues)
@@ -94,8 +101,7 @@ jobs:
             pull_request_review)
               branch=$(q .pull_request.head.ref); pr=$(q .pull_request.number)
               if [ "$(q .review.state)" = changes_requested ] && [ "$(q .review.user.type)" != Bot ] \
-                 && [[ "$(q .review.author_association)" =~ ^(OWNER|MEMBER|COLLABORATOR)$ ]] \
-                 && [[ $branch =~ ^([a-z]+)/([0-9]+)- ]]; then
+                 && trusted && [[ $branch =~ ^([a-z]+)/([0-9]+)- ]]; then
                 issue=${BASH_REMATCH[2]}
                 if [ "${BASH_REMATCH[1]}" = spec ]; then station=spec; else station=implement; fi
               fi ;;
@@ -177,8 +183,8 @@ jobs:
             paged "repos/$GH_REPO/issues/$ISSUE/comments?per_page=100" > "$raw/comments.json"
           fi
           if [ "$STATION" = triage ]; then
-            gh issue list --state open --limit 50 --json number,title,labels > "$raw/open_issues.json"
-            gh pr list --state open --limit 30 --json number,title,headRefName > "$raw/open_prs.json"
+            gh issue list --state open --limit 500 --json number,title,labels > "$raw/open_issues.json"
+            gh pr list --state open --limit 500 --json number,title,headRefName > "$raw/open_prs.json"
           fi
           if [ -n "$PR" ]; then
             gh api "repos/$GH_REPO/pulls/$PR" > "$raw/pr.json"

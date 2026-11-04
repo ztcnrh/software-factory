@@ -45,6 +45,9 @@ def pr_json(head="fix/7-slug", number=12, oid="a" * 40):
 def gh(monkeypatch):
     stub = GH(**{"repo view": "o/r\n", "api --paginate --slurp": "[[]]", "pr list": "[]"})
     monkeypatch.setattr(cli, "_gh", stub)
+    # Actions sets GITHUB_REPOSITORY, which _repo() prefers; the stub's endpoints are under o/r.
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    cli._repo.cache_clear()
     return stub
 
 
@@ -183,6 +186,22 @@ def test_sendbacks_trusts_only_maintainers_and_uses_committer_dates():
     assert cli.sendbacks(reviews + [review("PENDING", False, None)], []) == 3
     rebased = commit("human@x", "2025-12-01T00:00:00Z", committed="2026-01-01T04:00:00Z")
     assert cli.sendbacks(reviews, [rebased]) == 0
+
+
+def test_a_private_org_member_counts_as_a_maintainer_by_repo_permission(gh):
+    """GitHub labels a private org member CONTRIBUTOR to the workflow's token; without the
+    permission check their review would not reset the send-back count."""
+    gh.responses[("api", "repos/o/r/collaborators/dev/permission")] = "write\n"
+    gh.responses[("api", "repos/o/r/collaborators/stranger/permission")] = "read\n"
+    sent = [review("COMMENTED", True, f"2026-01-01T0{i}:00:00Z", "request_changes", f"s{i}")
+            for i in range(1, 4)]
+    member = review("CHANGES_REQUESTED", False, "2026-01-01T04:00:00Z", association="CONTRIBUTOR")
+    member["user"]["login"] = "dev"
+    stranger = review("CHANGES_REQUESTED", False, "2026-01-01T05:00:00Z", association="NONE")
+    stranger["user"]["login"] = "stranger"
+    assert cli.writers(sent + [member, stranger]) == {"dev"}
+    assert cli.sendbacks(sent + [member], [], writers=cli.writers([member])) == 0
+    assert cli.sendbacks(sent + [stranger], [], writers=cli.writers([stranger])) == 3
 
 
 def test_apply_caps_the_fourth_send_back_and_stops_dispatching(gh, tmp_path):

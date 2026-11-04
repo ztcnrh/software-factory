@@ -17,11 +17,12 @@ a human can see exactly what the station saw.
 | retro     | metrics.json, items.md                       |
 
 A page is curated for the model that reads it, which sees only the page and not this code, so
-every page holds to the same few habits: it opens by saying what it is and that it is a snapshot
-of this run; it names a field unless the notation is self-evident, as `#70` is; a missing value
-is printed as a named null rather than dropped, so the shape never changes with the data; a list
-heading carries its count and its order; and every human-authored body is fenced, so its Markdown
-is data inside the page rather than structure of it. Judge a change here by reading the rendered
+every page holds to the same few habits: it opens by saying what it is, and a page that gathers
+other items says it is a snapshot of this run; it names a field unless the notation is
+self-evident, as `#70` is; a missing value is printed as a named null rather than dropped, so
+the shape never changes with the data; a list heading carries its count and its order; and every
+human-authored body is fenced, so its Markdown is data inside the page rather than structure of
+it. Judge a change here by reading the rendered
 page as the station will, not by reading the code. `diff.txt` is the one file that is not a page:
 the annotated diff alone, its tags defined once in the review skill.
 """
@@ -144,9 +145,9 @@ def factory_reviews(reviews: list[dict]) -> list[dict]:
 
 
 def verdict_of(review: dict) -> str:
-    """A review's verdict in plain words. The factory posts its reviews as comments when GitHub
-    refuses an approve or request-changes event on its own PR, so its real verdict lives in the
-    hidden record; a human's verdict is the review state."""
+    """A review's verdict in plain words. The factory posts every review as a comment, since
+    GitHub refuses approve or request-changes from a PR's author, so its real verdict lives in
+    the hidden record; a human's verdict is the review state."""
     m = re.search(re.escape(REVIEW_MARK) + r" (\{.*?\}) -->", review.get("body") or "")
     if m:
         try:

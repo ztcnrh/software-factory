@@ -343,13 +343,35 @@ def _factory_reviews(reviews: list[dict]) -> list[tuple[dict, dict]]:
 TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
 
 
-def sendbacks(reviews: list[dict], commits: list[dict], session_id: str | None = None) -> int:
+def writers(reviews: list[dict]) -> set[str]:
+    """Human reviewers whose association is not plainly trusted but who can write to the repo.
+    GitHub reports a private org member as CONTRIBUTOR to the workflow's token."""
+    out = set()
+    for r in reviews:
+        login = (r.get("user") or {}).get("login")
+        if (r.get("user") or {}).get("type") == "Bot" or not login or login in out \
+                or r.get("author_association") in TRUSTED:
+            continue
+        try:
+            perm = _gh("api", f"repos/{_repo()}/collaborators/{login}/permission",
+                       "-q", ".permission").strip()
+        except subprocess.CalledProcessError:
+            continue
+        if perm in ("admin", "maintain", "write"):
+            out.add(login)
+    return out
+
+
+def sendbacks(reviews: list[dict], commits: list[dict], session_id: str | None = None,
+              writers: set[str] = frozenset()) -> int:
     """Consecutive factory send-backs on a PR since the last review by a maintainer or commit by a
     human. The review from `session_id` is left out so a retried apply counts the same as the
     first. Commits count by committer date: a rebase keeps the author date of the original."""
     events: list[tuple[str, str]] = []
     for r in reviews:
-        if (r.get("user") or {}).get("type") != "Bot" and r.get("author_association") in TRUSTED:
+        user = r.get("user") or {}
+        if user.get("type") != "Bot" and (r.get("author_association") in TRUSTED
+                                          or user.get("login") in writers):
             events.append((r.get("submitted_at") or "", "human"))
     for r, rec in _factory_reviews(reviews):
         if rec.get("verdict") == "request_changes" and rec.get("session_id") != session_id:
@@ -405,7 +427,8 @@ def cmd_apply(n: int, report_path: str) -> None:
         repo = _repo()
         reviews = _paginated(f"repos/{repo}/pulls/{pr['number']}/reviews")
         commits = _paginated(f"repos/{repo}/pulls/{pr['number']}/commits")
-        capped = sendbacks(reviews, commits, report.get("session_id")) >= MAX_SENDBACKS
+        capped = sendbacks(reviews, commits, report.get("session_id"),
+                           writers(reviews)) >= MAX_SENDBACKS
         if capped:
             target = "needs-human"
     already = any(
